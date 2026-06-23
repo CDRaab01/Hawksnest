@@ -70,4 +70,17 @@ describe("groupByArea", () => {
     const frontDoor = groups.find((g) => g.area === "Front Door")!;
     expect(frontDoor.entities.length).toBe(5);
   });
+
+  it("excludes hidden entities from counts and grouping", () => {
+    createFixtureSource().start();
+    const { entities, areas } = useEntityStore.getState();
+    const groups = groupByArea(Object.values(entities), areas, undefined, [
+      "lock.front_door_lock",
+    ]);
+    const frontDoor = groups.find((g) => g.area === "Front Door")!;
+    expect(frontDoor.entities.length).toBe(4);
+    expect(
+      frontDoor.entities.some((e) => e.entity_id === "lock.front_door_lock"),
+    ).toBe(false);
+  });
 });

@@ -1,7 +1,9 @@
 /**
- * Pinned "Home" favorites — the entities surfaced at the top of the Home screen.
- * Static config for now; an in-app editor (drag/pin) is Phase 3. Order here is
- * the display order; entities not present in the store are skipped.
+ * Default "Home" favorites — the entities surfaced at the top of the Home screen
+ * out of the box. This is the *seed*: the Phase 3 personalization editor
+ * (`store/prefsStore.ts` + the Customize screen) lets the user pin/unpin and
+ * reorder, persisting their list to localStorage and overriding this default.
+ * Order here is the display order; entities not present in the store are skipped.
  */
 export const favorites: string[] = [
   "lock.front_door_lock",

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
 import { SectionHeader } from "../components/SectionHeader";
@@ -44,6 +46,21 @@ export function SettingsScreen() {
 
   return (
     <div className="space-y-xl">
+      <section className="space-y-md">
+        <SectionHeader label="Personalization" channel="strength" />
+        <Link to="/customize">
+          <PanelCard className="flex items-center gap-md p-lg" tint="strength">
+            <div className="min-w-0">
+              <div className="font-body text-body-lg text-ink">Customize Home</div>
+              <div className="font-body text-body text-ink-dim">
+                Pin, reorder, and hide devices.
+              </div>
+            </div>
+            <ChevronRight className="ml-auto shrink-0 text-ink-faint" size={20} />
+          </PanelCard>
+        </Link>
+      </section>
+
       <section className="space-y-md">
         <SectionHeader label="Connection" channel="effort" />
         <PanelCard className="p-lg">

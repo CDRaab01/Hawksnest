@@ -5,10 +5,11 @@ with a polished, app-like experience modeled on the **Spotter** design language 
 system). Home Assistant stays the backend/brain; Hawksnest is a presentation layer over HA's
 WebSocket + REST APIs.
 
-> **Status: Phase 1 — live Home Assistant connection.** The chosen design (an area-first hub with
-> comfortable Spotter-style cards and compact read-only tiles) runs on a real HA WebSocket
-> connection: enter your HA URL + a long-lived token in **Settings** and it streams live entity
-> states and resolves areas from the registries. With no token saved it falls back to demo
+> **Status: Phase 3 — personalization editor.** On top of the live HA connection (Phase 1) and
+> the blended area-hub layout (Phase 2), the dashboard is now user-customizable: a **Customize**
+> screen (Settings → Personalization) lets you **pin/unpin** entities to Home, **reorder** your
+> favorites, and **hide** devices from the area views. Preferences persist per-device to
+> localStorage and override the built-in defaults. With no token saved it falls back to demo
 > fixtures. See `CLAUDE.md` for the full spec.
 
 ## Connecting to Home Assistant
@@ -35,8 +36,10 @@ labels** (HA's raw "Lock Current status …" → "Front Door"):
 - **Home** (`/`) — pinned favorites (large cards) above an **area hub** (`src/config/favorites.ts`).
 - **Area detail** (`/area/:area`) — **mixed density**: camera spans full width, controls render
   comfortable, read-only sensors render compact (`src/lib/density.ts`).
-- **Settings** (`/settings`) — connection status + a stub "Connect to Home Assistant" form (the
-  Phase 1 seam).
+- **Settings** (`/settings`) — connection status + the "Connect to Home Assistant" form, plus a
+  **Personalization** link into the Customize editor.
+- **Customize** (`/customize`) — reorder/unpin the Home favorites and pin/hide any device. Edits
+  write through to localStorage immediately (no explicit save); "Reset to defaults" forgets them.
 
 Data flows through `src/store/` (Zustand): a `Source` populates the store
 (`fixtureSource` now, `haSource` later) and screens read it via selector hooks. The
@@ -70,7 +73,9 @@ src/lib/cards.ts          domain → card mapping (unknown → GenericCard, neve
 src/lib/areas.ts          group entities by area registry
 src/lib/density.ts        comfortable (controls) vs compact (read-only) vs feature (camera)
 src/config/overrides.ts   per-entity label/icon overrides (seeded from the screenshot)
-src/config/favorites.ts   pinned Home entities (static; editor is Phase 3)
+src/config/favorites.ts   default pinned Home entities (seed; user edits live in prefsStore)
+src/store/preferences.ts  personalization persistence (localStorage; mirrors credentials.ts)
+src/store/prefsStore.ts   Zustand store for pins/hides/order + selector hooks (useFavorites…)
 src/fixtures/entities.ts  demo entities + area registry (behind fixtureSource)
 src/store/                Zustand store + Source seam (fixtureSource demo / haSource live WS)
 src/store/ha/registry.ts  resolve entity→area from HA's area/entity/device registries
@@ -89,6 +94,6 @@ until HA confirms.
 
 ## Next phases
 
-Personalization editor (favorites/hide/reorder), entity detail/history, more first-class domains
-(cover/climate/media_player/fan), PWA/service worker (must not cache the token), OAuth (replacing
-the long-lived token), light theme. See `CLAUDE.md`.
+Entity detail/history, more first-class domains (cover/climate/media_player/fan), drag-and-drop
+favorites reordering, PWA/service worker (must not cache the token), OAuth (replacing the
+long-lived token), light theme. See `CLAUDE.md`.
