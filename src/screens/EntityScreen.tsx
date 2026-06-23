@@ -65,8 +65,13 @@ export function EntityScreen() {
   const [loading, setLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
+  // History only depends on which entity + range, NOT the live state object:
+  // the live source rebuilds the entity map on every WS push, so depending on
+  // `entity`'s identity would refetch history many times per second. Gate on
+  // existence (a boolean) instead.
+  const exists = Boolean(entity);
   useEffect(() => {
-    if (!entity) return;
+    if (!exists) return;
     let active = true;
     setLoading(true);
     setHistoryError(null);
@@ -86,7 +91,7 @@ export function EntityScreen() {
     return () => {
       active = false;
     };
-  }, [decoded, hours, entity]);
+  }, [decoded, hours, exists]);
 
   const back = (
     <Link
