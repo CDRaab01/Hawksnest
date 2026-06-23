@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { AreaRegistry, HassEntity } from "../lib/ha";
 import { groupByArea, type AreaGroup } from "../lib/areas";
+import { useHidden } from "./prefsStore";
 
 export type ConnectionStatus = "demo" | "connecting" | "connected" | "error";
 
@@ -50,8 +51,9 @@ export const useConnection = () =>
 export function useEntitiesByArea(): AreaGroup[] {
   const entities = useEntityStore((s) => s.entities);
   const areas = useEntityStore((s) => s.areas);
+  const hidden = useHidden();
   return useMemo(
-    () => groupByArea(Object.values(entities), areas),
-    [entities, areas],
+    () => groupByArea(Object.values(entities), areas, undefined, hidden),
+    [entities, areas, hidden],
   );
 }

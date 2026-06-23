@@ -11,14 +11,20 @@ const DEFAULT_ORDER = ["Front Door", "Back Door", "Basement", "Security"];
  * Group entities by their assigned area (from the area registry). Entities with
  * no area land in "Unassigned". A preferred ordering floats known areas to the
  * top; the rest follow alphabetically.
+ *
+ * `hidden` (Phase 3 personalization) drops entities the user hid, so area
+ * counts, previews, and detail all agree.
  */
 export function groupByArea(
   entities: HassEntity[],
   areas: AreaRegistry,
   order: string[] = DEFAULT_ORDER,
+  hidden: string[] = [],
 ): AreaGroup[] {
+  const hiddenSet = new Set(hidden);
   const groups = new Map<string, HassEntity[]>();
   for (const entity of entities) {
+    if (hiddenSet.has(entity.entity_id)) continue;
     const area = areas[entity.entity_id] ?? "Unassigned";
     const list = groups.get(area) ?? [];
     list.push(entity);

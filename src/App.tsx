@@ -4,6 +4,7 @@ import { Shield, Settings as SettingsIcon } from "lucide-react";
 import { HomeScreen } from "./screens/HomeScreen";
 import { AreaScreen } from "./screens/AreaScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
+import { CustomizeScreen } from "./screens/CustomizeScreen";
 import { ConnectionPill } from "./components/ConnectionPill";
 import { startConnection, stopConnection } from "./store/connection";
 
@@ -49,6 +50,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HomeScreen />} />
           <Route path="/area/:area" element={<AreaScreen />} />
+          <Route path="/customize" element={<CustomizeScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
         </Routes>
       </main>
