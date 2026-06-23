@@ -13,10 +13,19 @@ WebSocket + REST APIs.
 
 ## Connecting to Home Assistant
 
+Hawksnest is built to run as a pod in the same k3s cluster as HA, where its nginx serves the SPA
+**and reverse-proxies `/api` to HA** — so the browser is same-origin (no CORS, no hardcoded IP).
+See [`deploy/README.md`](deploy/README.md) for the k3s deployment.
+
 1. In Home Assistant: profile → **Long-lived access tokens** → create one.
-2. In Hawksnest: **Settings** → enter your HA URL (e.g. `http://192.168.4.34:8123`) + the token →
-   **Connect**. The token is stored locally on the device; **Disconnect** clears it.
+2. In Hawksnest: **Settings** → the URL defaults to this site (the proxy); paste the token →
+   **Connect**. The token is stored locally on the device; **Disconnect** clears it. You can also
+   point the URL directly at HA (e.g. `http://192.168.4.34:8123`).
 3. The header pill shows `Connected` / `Reconnecting` / `Offline` / `Demo data`.
+
+### Dev
+`npm run dev` proxies `/api` to `HA_PROXY_TARGET` (default `http://192.168.4.34:8123`), so the app
+is same-origin locally too. See `deploy/README.md`.
 
 ## What's here
 

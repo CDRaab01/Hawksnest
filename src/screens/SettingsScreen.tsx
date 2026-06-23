@@ -9,6 +9,7 @@ import {
   clearCredentials,
 } from "../store/credentials";
 import { startConnection } from "../store/connection";
+import { defaultHaUrl } from "../lib/haUrl";
 
 const STATUS_TEXT: Record<string, string> = {
   demo: "Demo data (no Home Assistant connected)",
@@ -25,7 +26,7 @@ const STATUS_TEXT: Record<string, string> = {
 export function SettingsScreen() {
   const { status, error } = useConnection();
   const saved = loadCredentials();
-  const [url, setUrl] = useState(saved?.url ?? "http://192.168.4.34:8123");
+  const [url, setUrl] = useState(saved?.url ?? defaultHaUrl());
   const [token, setToken] = useState("");
 
   const canConnect = url.trim().length > 0 && token.trim().length > 0;
@@ -93,8 +94,10 @@ export function SettingsScreen() {
             )}
           </div>
           <p className="font-body text-caption text-ink-faint">
-            Create a token in Home Assistant under your profile → Long-lived access
-            tokens. It's stored locally on this device.
+            Leave the URL as this site to use the built-in proxy; or point it
+            directly at Home Assistant (e.g. http://192.168.4.34:8123). Create a
+            token in HA under your profile → Long-lived access tokens. It's stored
+            locally on this device.
           </p>
         </PanelCard>
       </section>

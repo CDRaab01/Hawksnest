@@ -1,0 +1,38 @@
+name: Deploy
+
+# Builds the Hawksnest image on the self-hosted runner inside the Dragonfly WSL2
+# distro, imports it into K3s containerd, and applies the manifests. No registry.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/code-review-m68fba]
+    paths:
+      - "src/**"
+      - "deploy/**"
+      - "Dockerfile"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy.yml"
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, dragonfly]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t hawksnest:local .
+
+      - name: Import image into K3s containerd
+        run: docker save hawksnest:local | sudo k3s ctr -n k8s.io images import -
+
+      - name: Apply manifests
+        run: kubectl apply -k deploy/k8s
+
+      # Image tag is fixed (hawksnest:local), so apply alone won't roll the pod —
+      # restart to pick up the freshly imported image.
+      - name: Roll to the new image
+        run: kubectl -n home-automation rollout restart deployment/hawksnest
+
+      - name: Wait for rollout
+        run: kubectl -n home-automation rollout status deployment/hawksnest --timeout=120s
