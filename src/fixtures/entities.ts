@@ -1,10 +1,10 @@
 import type { AreaRegistry, HassEntity } from "../lib/ha";
 
 /**
- * Invented Phase 0 fixtures — no live HA. Friendly names are intentionally left
- * as the ugly, attribute-derived strings stock HA actually shows (e.g. "Lock
- * Current status"), so the label-resolution layer + overrides have something
- * real to fix. Shapes match `home-assistant-js-websocket` HassEntity.
+ * Invented Phase 0/2 fixtures — no live HA. Friendly names are intentionally
+ * left as the ugly, attribute-derived strings stock HA actually shows (e.g.
+ * "Lock Current status"), so the label-resolution layer + overrides have
+ * something real to fix. Shapes match `home-assistant-js-websocket` HassEntity.
  */
 export const entities: HassEntity[] = [
   {
@@ -66,43 +66,3 @@ export const areaRegistry: AreaRegistry = {
   "light.basement": "Basement",
   "alarm_control_panel.home": "Security",
 };
-
-const byId = new Map(entities.map((e) => [e.entity_id, e]));
-
-export function getEntity(entityId: string): HassEntity {
-  const entity = byId.get(entityId);
-  if (!entity) throw new Error(`Unknown fixture entity: ${entityId}`);
-  return entity;
-}
-
-/**
- * The exact "Security" scene from the owner's stock-HA screenshot, in order:
- * camera, lock, door contact, intrusion. Every direction renders this.
- */
-export const securitySceneIds = [
-  "camera.front_door",
-  "lock.front_door_lock",
-  "binary_sensor.front_door_current_status",
-  "binary_sensor.front_door_intrusion",
-] as const;
-
-export const securityScene = securitySceneIds.map(getEntity);
-
-/** Group all fixtures by area in a stable order (for the Area-first hub). */
-export function entitiesByArea(): { area: string; entities: HassEntity[] }[] {
-  const order = ["Front Door", "Back Door", "Basement", "Security"];
-  const groups = new Map<string, HassEntity[]>();
-  for (const entity of entities) {
-    const area = areaRegistry[entity.entity_id] ?? "Unassigned";
-    const list = groups.get(area) ?? [];
-    list.push(entity);
-    groups.set(area, list);
-  }
-  return [...groups.keys()]
-    .sort((a, b) => {
-      const ai = order.indexOf(a);
-      const bi = order.indexOf(b);
-      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-    })
-    .map((area) => ({ area, entities: groups.get(area)! }));
-}

@@ -5,21 +5,26 @@ with a polished, app-like experience modeled on the **Spotter** design language 
 system). Home Assistant stays the backend/brain; Hawksnest is a presentation layer over HA's
 WebSocket + REST APIs.
 
-> **Status: Phase 0 — design exploration.** This repo currently contains three static, clickable
-> design directions built on ported PULSE tokens with **fixture data only** (no live HA). The goal
-> is to pick a direction before building the live connection. See `CLAUDE.md` for the full spec.
+> **Status: Phase 2 — blended layout on fixtures.** The chosen design (an area-first hub with
+> comfortable Spotter-style cards and compact read-only tiles) is now the real app, fed through an
+> entity-store seam. It runs on **fixture data only** — the live HA WebSocket connection is the
+> next phase (`src/store/haSource.ts` is a stub). See `CLAUDE.md` for the full spec.
 
-## Phase 0 — what's here
+## What's here
 
-Three directions, all dark-only, all rendering the exact "Security" scene from the owner's stock-HA
-screenshot so they can be compared against the "before":
+The real blended UI (dark-only), all rendering the owner's "Security" scene with **resolved
+labels** (HA's raw "Lock Current status …" → "Front Door"):
 
-- **A · Spotter-faithful list** (`/a`) — vertical sections, large comfortable cards.
-- **B · Dense grid** (`/b`) — compact tiles, control-panel density.
-- **C · Area-first hub** (`/c`) — area cards that drill into a detail view.
+- **Home** (`/`) — pinned favorites (large cards) above an **area hub** (`src/config/favorites.ts`).
+- **Area detail** (`/area/:area`) — **mixed density**: camera spans full width, controls render
+  comfortable, read-only sensors render compact (`src/lib/density.ts`).
+- **Settings** (`/settings`) — connection status + a stub "Connect to Home Assistant" form (the
+  Phase 1 seam).
 
-Everything routes off `/` (Overview). The **label-resolution layer** (`src/lib/resolve.ts` +
-`src/config/overrides.ts`) is real and turns HA's raw "Lock Current status …" into "Front Door".
+Data flows through `src/store/` (Zustand): a `Source` populates the store
+(`fixtureSource` now, `haSource` later) and screens read it via selector hooks. The
+**label/icon resolution layer** (`src/lib/resolve.ts` + `src/config/overrides.ts`) and the
+**domain→card mapping** (`src/lib/cards.ts`, never throws) are shared by every screen.
 
 ## Stack
 
@@ -45,14 +50,19 @@ tailwind.config.ts        tokens mapped to Tailwind utilities (no raw hex in com
 src/lib/ha.ts             HA entity types (HassEntity-compatible) + helpers
 src/lib/resolve.ts        label/icon resolution chain (override → friendly_name → prettified id)
 src/lib/cards.ts          domain → card mapping (unknown → GenericCard, never throws)
+src/lib/areas.ts          group entities by area registry
+src/lib/density.ts        comfortable (controls) vs compact (read-only) vs feature (camera)
 src/config/overrides.ts   per-entity label/icon overrides (seeded from the screenshot)
-src/fixtures/entities.ts  Phase 0 fixture entities + area registry
-src/components/           PULSE primitives (PanelCard, PulseButton, DataText, SectionHeader)
+src/config/favorites.ts   pinned Home entities (static; editor is Phase 3)
+src/fixtures/entities.ts  demo entities + area registry (behind fixtureSource)
+src/store/                Zustand store + Source seam (fixtureSource now, haSource = Phase 1)
+src/components/           PULSE primitives + EntityCard, AreaCard, ConnectionPill
 src/cards/                domain cards (Lock, Camera, BinarySensor, Light, Alarm, Generic)
-src/mockups/              the three directions + Overview
+src/screens/              Home, Area detail, Settings
 ```
 
-## Not in Phase 0 (next phases)
+## Next phases
 
-Live HA WebSocket connection + registries, optimistic-reconcile control wiring, personalization,
-entity detail/history, PWA/service worker, OAuth, light theme, remaining domains. See `CLAUDE.md`.
+Live HA WebSocket connection + registries (`haSource`), optimistic-reconcile control wiring,
+personalization editor, entity detail/history, PWA/service worker, OAuth, light theme. See
+`CLAUDE.md`.

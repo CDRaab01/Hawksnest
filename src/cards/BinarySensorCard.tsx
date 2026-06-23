@@ -1,7 +1,6 @@
 import { CheckCircle2, DoorOpen, DoorClosed, AlertTriangle } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { resolveName } from "../lib/resolve";
-import type { Channel } from "../components/PanelCard";
 import type { CardProps } from "./types";
 
 /**
@@ -9,7 +8,7 @@ import type { CardProps } from "./types";
  * reads "Open/Closed" and a safety/tamper sensor reads "Detected/Safe" — never
  * a raw "on"/"off". Open/unsafe = orange (attention); closed/safe = green.
  */
-export function BinarySensorCard({ entity, overrides }: CardProps) {
+export function BinarySensorCard({ entity, overrides, density = "comfortable" }: CardProps) {
   const name = resolveName(entity, overrides);
   const on = entity.state === "on";
   const deviceClass = (entity.attributes.device_class as string | undefined) ?? "";
@@ -19,33 +18,41 @@ export function BinarySensorCard({ entity, overrides }: CardProps) {
   );
 
   let text: string;
-  let channel: Channel | "neutral";
   let Icon = on ? AlertTriangle : CheckCircle2;
+  let color: string;
 
   if (safety) {
     text = on ? "Detected" : "Safe";
-    channel = on ? "streak" : "recovery";
+    color = on ? "text-streak" : "text-recovery";
   } else {
     // contact-style: door / window / opening / garage_door
     text = on ? "Open" : "Closed";
-    channel = on ? "streak" : "neutral";
+    color = on ? "text-streak" : "text-ink-dim";
     Icon = on ? DoorOpen : DoorClosed;
   }
 
-  const color =
-    channel === "streak"
-      ? "text-streak"
-      : channel === "recovery"
-        ? "text-recovery"
-        : "text-ink-dim";
+  const compact = density === "compact";
 
   return (
-    <PanelCard className="p-lg">
+    <PanelCard className={compact ? "p-md" : "p-lg"}>
       <div className="flex items-center gap-md">
-        <Icon className={color} size={26} />
+        <Icon className={color} size={compact ? 22 : 26} />
         <div className="min-w-0">
-          <div className="truncate font-body text-body-lg text-ink">{name}</div>
-          <div className={["font-body text-body", color].join(" ")}>{text}</div>
+          <div
+            className={[
+              "truncate font-body text-ink",
+              compact ? "text-body" : "text-body-lg",
+            ].join(" ")}
+          >
+            {name}
+          </div>
+          <div
+            className={[compact ? "text-caption" : "text-body", "font-body", color].join(
+              " ",
+            )}
+          >
+            {text}
+          </div>
         </div>
       </div>
     </PanelCard>
