@@ -1,31 +1,41 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Lock, LockOpen, Loader } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
 import { resolveName } from "../lib/resolve";
+import { callService } from "../store/connection";
 import type { CardProps } from "./types";
 
-type Pending = "locking" | "unlocking" | null;
+type Target = "locked" | "unlocked";
 
 /**
  * Lock card. Locks are a physical-security exception to optimistic UI: we never
- * optimistically show "Unlocked". The action shows a pending state; in Phase 0
- * (no HA) we just settle to the requested state after a beat to demonstrate the
- * affordance. Green = secure (locked), orange = attention (unlocked).
+ * optimistically show "Unlocked". State is read from the store (entity prop); a
+ * tap shows a pending spinner until HA reports the new state (or the action
+ * fails). Green = secure (locked), orange = attention (unlocked).
  */
 export function LockCard({ entity, overrides, density = "comfortable" }: CardProps) {
   const name = resolveName(entity, overrides);
-  const [state, setState] = useState(entity.state);
-  const [pending, setPending] = useState<Pending>(null);
-  const locked = state === "locked";
+  const locked = entity.state === "locked";
+  const [pending, setPending] = useState<Target | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  function request(target: "locked" | "unlocked") {
-    setPending(target === "locked" ? "locking" : "unlocking");
-    // Phase 0 stub for the reconcile-on-next-HA-event seam.
-    window.setTimeout(() => {
-      setState(target);
+  // Clear the pending state once HA reports the requested state.
+  useEffect(() => {
+    if (pending && entity.state === pending) setPending(null);
+  }, [entity.state, pending]);
+
+  async function request(target: Target) {
+    setError(null);
+    setPending(target);
+    try {
+      await callService("lock", target === "locked" ? "lock" : "unlock", {
+        entity_id: entity.entity_id,
+      });
+    } catch {
       setPending(null);
-    }, 500);
+      setError("Couldn't reach the lock.");
+    }
   }
 
   const StatusIcon = pending ? Loader : locked ? Lock : LockOpen;
@@ -36,7 +46,7 @@ export function LockCard({ entity, overrides, density = "comfortable" }: CardPro
       ? "text-recovery"
       : "text-streak";
   const statusText = pending
-    ? pending === "locking"
+    ? pending === "locked"
       ? "Locking…"
       : "Unlocking…"
     : locked
@@ -81,6 +91,9 @@ export function LockCard({ entity, overrides, density = "comfortable" }: CardPro
           <div className={["font-body text-body", statusColor].join(" ")}>
             {statusText}
           </div>
+          {error && (
+            <div className="font-body text-caption text-streak">{error}</div>
+          )}
         </div>
       </div>
       <div className="mt-lg grid grid-cols-2 gap-sm">

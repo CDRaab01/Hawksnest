@@ -1,7 +1,7 @@
 import { createFixtureSource } from "./fixtureSource";
 import { createHaSource } from "./haSource";
 import { loadCredentials } from "./credentials";
-import type { Source } from "./source";
+import type { ServiceData, Source } from "./source";
 
 let current: Source | null = null;
 
@@ -25,4 +25,20 @@ export function startConnection(): void {
 export function stopConnection(): void {
   current?.stop();
   current = null;
+}
+
+/**
+ * Perform an HA service call through the active source (fixture simulates it;
+ * live HA forwards it and reconciles via the state echo). Throws if the source
+ * can't perform writes (e.g. not connected).
+ */
+export function callService(
+  domain: string,
+  service: string,
+  data?: ServiceData,
+): Promise<void> {
+  if (!current?.callService) {
+    return Promise.reject(new Error("Not connected."));
+  }
+  return current.callService(domain, service, data);
 }

@@ -35,6 +35,27 @@ describe("upsertEntities", () => {
   });
 });
 
+describe("fixtureSource.callService", () => {
+  it("simulates control actions by mutating the store", async () => {
+    const source = createFixtureSource();
+    source.start();
+    await source.callService!("lock", "unlock", {
+      entity_id: "lock.front_door_lock",
+    });
+    expect(useEntityStore.getState().entities["lock.front_door_lock"].state).toBe(
+      "unlocked",
+    );
+
+    await source.callService!("light", "turn_on", {
+      entity_id: "light.basement",
+      brightness_pct: 50,
+    });
+    const light = useEntityStore.getState().entities["light.basement"];
+    expect(light.state).toBe("on");
+    expect(light.attributes.brightness).toBe(128);
+  });
+});
+
 describe("groupByArea", () => {
   it("groups by area with known areas ordered first", () => {
     createFixtureSource().start();

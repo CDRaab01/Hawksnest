@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import App from "../App";
 import { useEntityStore } from "../store/entityStore";
@@ -46,5 +47,16 @@ describe("Area detail", () => {
     expect(within(main).getByText("Safe")).toBeInTheDocument();
     expect(within(main).queryByText(/Lock Current status/)).toBeNull();
     expect(within(main).queryByText(/Lock Intrusion/)).toBeNull();
+  });
+
+  it("unlocking drives a service call that updates state (demo source)", async () => {
+    const user = userEvent.setup();
+    renderAt("/area/Front%20Door");
+    const main = screen.getByRole("main");
+    await within(main).findByText("Locked");
+
+    await user.click(within(main).getByRole("button", { name: "Unlock" }));
+
+    expect(await within(main).findByText("Unlocked")).toBeInTheDocument();
   });
 });

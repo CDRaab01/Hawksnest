@@ -1,8 +1,8 @@
-import { useState } from "react";
 import { ShieldCheck, ShieldAlert, Shield } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
 import { resolveName } from "../lib/resolve";
+import { callService } from "../store/connection";
 import type { CardProps } from "./types";
 
 const LABEL: Record<string, string> = {
@@ -17,11 +17,11 @@ const LABEL: Record<string, string> = {
  * Alarm panel card. Note: a *tamper/intrusion* binary_sensor (as in the
  * reference screenshot) is NOT an alarm panel — when HA exposes no
  * alarm_control_panel, the Security section shows a read-only notice instead of
- * rendering this card (see the mockups).
+ * rendering this card (see the screens). State is read from the store.
  */
 export function AlarmCard({ entity, overrides }: CardProps) {
   const name = resolveName(entity, overrides);
-  const [state, setState] = useState(entity.state);
+  const state = entity.state;
 
   const triggered = state === "triggered";
   const armed = state.startsWith("armed");
@@ -31,6 +31,12 @@ export function AlarmCard({ entity, overrides }: CardProps) {
     : armed
       ? "text-effort"
       : "text-recovery";
+
+  function call(service: string) {
+    void callService("alarm_control_panel", service, {
+      entity_id: entity.entity_id,
+    });
+  }
 
   return (
     <PanelCard tint={triggered ? "streak" : undefined} className="p-lg">
@@ -48,7 +54,7 @@ export function AlarmCard({ entity, overrides }: CardProps) {
           variant="ghost"
           compact
           active={state === "disarmed"}
-          onClick={() => setState("disarmed")}
+          onClick={() => call("alarm_disarm")}
         >
           Off
         </PulseButton>
@@ -56,7 +62,7 @@ export function AlarmCard({ entity, overrides }: CardProps) {
           variant="ghost"
           compact
           active={state === "armed_home"}
-          onClick={() => setState("armed_home")}
+          onClick={() => call("alarm_arm_home")}
         >
           Home
         </PulseButton>
@@ -64,7 +70,7 @@ export function AlarmCard({ entity, overrides }: CardProps) {
           variant="ghost"
           compact
           active={state === "armed_away"}
-          onClick={() => setState("armed_away")}
+          onClick={() => call("alarm_arm_away")}
         >
           Away
         </PulseButton>

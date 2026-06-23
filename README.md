@@ -79,8 +79,16 @@ src/cards/                domain cards (Lock, Camera, BinarySensor, Light, Alarm
 src/screens/              Home, Area detail, Settings
 ```
 
+## Controls
+
+Card actions call HA services through the active source (`src/store/connection.ts` → the source's
+`callService`): the live source forwards `call_service` over the WebSocket and HA's state echo
+reconciles the store; the demo source simulates it locally. Lock/unlock, light on/off + brightness,
+and alarm arm/disarm are wired. Locks are excluded from optimistic UI — they show a pending state
+until HA confirms.
+
 ## Next phases
 
-Service-call wiring so card controls drive HA (lock/unlock, light on/off + brightness) with
-optimistic-reconcile (locks excepted), personalization editor, entity detail/history,
-PWA/service worker, OAuth (replacing the long-lived token), light theme. See `CLAUDE.md`.
+Personalization editor (favorites/hide/reorder), entity detail/history, more first-class domains
+(cover/climate/media_player/fan), PWA/service worker (must not cache the token), OAuth (replacing
+the long-lived token), light theme. See `CLAUDE.md`.

@@ -1,25 +1,47 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Lightbulb, LightbulbOff } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { DataText } from "../components/DataText";
 import { resolveName } from "../lib/resolve";
+import { callService } from "../store/connection";
 import type { CardProps } from "./types";
 
 const toPercent = (brightness: number) => Math.round((brightness / 255) * 100);
 
 /**
  * Light/dimmer card. Toggle is the interactive action (effort/blue); brightness
- * is a magnitude, shown on the level channel (strength/violet). Optimistic local
- * state here stands in for the optimistic-then-reconcile flow wired in Phase 2.
+ * is a magnitude on the level channel (strength/violet). State is read from the
+ * store; HA's echo reconciles after each service call.
  */
 export function LightCard({ entity, overrides }: CardProps) {
   const name = resolveName(entity, overrides);
-  const initial =
+  const on = entity.state === "on";
+  const brightnessPct =
     typeof entity.attributes.brightness === "number"
       ? toPercent(entity.attributes.brightness)
       : 0;
-  const [on, setOn] = useState(entity.state === "on");
-  const [pct, setPct] = useState(initial || 60);
+
+  // Local slider value for snappy dragging; resync when HA reports a new level.
+  const [pct, setPct] = useState(brightnessPct || 60);
+  useEffect(() => {
+    if (typeof entity.attributes.brightness === "number") {
+      setPct(toPercent(entity.attributes.brightness));
+    }
+  }, [entity.attributes.brightness]);
+
+  function toggle() {
+    void callService("light", on ? "turn_off" : "turn_on", {
+      entity_id: entity.entity_id,
+    });
+  }
+
+  function setBrightness(value: number) {
+    setPct(value);
+    void callService("light", "turn_on", {
+      entity_id: entity.entity_id,
+      brightness_pct: value,
+    });
+  }
 
   return (
     <PanelCard tint={on ? "strength" : undefined} className="p-lg">
@@ -46,7 +68,7 @@ export function LightCard({ entity, overrides }: CardProps) {
           role="switch"
           aria-checked={on}
           aria-label={`Toggle ${name}`}
-          onClick={() => setOn((v) => !v)}
+          onClick={toggle}
           className={[
             "ml-auto h-7 w-12 rounded-full border border-hairline transition-colors duration-standard",
             on ? "bg-effort/80" : "bg-panel-high",
@@ -67,7 +89,7 @@ export function LightCard({ entity, overrides }: CardProps) {
         value={pct}
         disabled={!on}
         aria-label={`${name} brightness`}
-        onChange={(e) => setPct(Number(e.target.value))}
+        onChange={(e) => setBrightness(Number(e.target.value))}
         className="mt-lg w-full accent-strength disabled:opacity-40"
       />
     </PanelCard>

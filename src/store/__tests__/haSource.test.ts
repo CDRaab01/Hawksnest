@@ -23,15 +23,23 @@ const ENTITIES = {
 
 function makeFakeConn() {
   const listeners: Record<string, Array<() => void>> = {};
+  const sent: Array<Record<string, unknown>> = [];
   const conn = {
     addEventListener: (ev: string, cb: () => void) => {
       (listeners[ev] ||= []).push(cb);
     },
     removeEventListener: () => {},
-    sendMessagePromise: async (msg: { type: string }) => REGISTRIES[msg.type],
+    sendMessagePromise: async (msg: { type: string }) => {
+      sent.push(msg as Record<string, unknown>);
+      return REGISTRIES[msg.type];
+    },
     close: () => {},
   } as unknown as Connection;
-  return { conn, emit: (ev: string) => (listeners[ev] || []).forEach((f) => f()) };
+  return {
+    conn,
+    sent,
+    emit: (ev: string) => (listeners[ev] || []).forEach((f) => f()),
+  };
 }
 
 beforeEach(() => {
@@ -74,6 +82,27 @@ describe("createHaSource", () => {
     const s = useEntityStore.getState();
     expect(s.status).toBe("error");
     expect(s.error).toBe("Invalid access token.");
+  });
+
+  it("forwards control actions as call_service messages", async () => {
+    const { conn, sent } = makeFakeConn();
+    const deps: HaSourceDeps = {
+      connect: async () => conn,
+      subscribe: () => () => {},
+    };
+    const source = createHaSource({ url: "http://ha", token: "t" }, deps);
+    await source.start();
+    await source.callService!("lock", "unlock", {
+      entity_id: "lock.front_door_lock",
+    });
+
+    const call = sent.find((m) => m.type === "call_service");
+    expect(call).toMatchObject({
+      type: "call_service",
+      domain: "lock",
+      service: "unlock",
+      target: { entity_id: "lock.front_door_lock" },
+    });
   });
 
   it("flags reconnecting when the connection drops", async () => {

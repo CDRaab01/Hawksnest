@@ -2,6 +2,7 @@ import {
   createConnection,
   createLongLivedTokenAuth,
   subscribeEntities,
+  callService as haCallService,
   ERR_INVALID_AUTH,
   ERR_CANNOT_CONNECT,
   type Connection,
@@ -121,6 +122,19 @@ export function createHaSource(
       unsub = null;
       conn?.close();
       conn = null;
+    },
+    async callService(domain, service, data = {}) {
+      if (!conn) throw new Error("Not connected to Home Assistant.");
+      const { entity_id, ...serviceData } = data;
+      // HA echoes the resulting state change back over the entity subscription,
+      // which reconciles the store — no optimistic write needed here.
+      await haCallService(
+        conn,
+        domain,
+        service,
+        serviceData,
+        entity_id ? { entity_id } : undefined,
+      );
     },
   };
 }
