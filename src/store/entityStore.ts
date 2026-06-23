@@ -13,6 +13,10 @@ interface EntityState {
   error?: string;
   /** Replace the whole snapshot (initial load / full re-sync). */
   setSnapshot: (entities: Record<string, HassEntity>, areas: AreaRegistry) => void;
+  /** Replace just the entity map (a live state push); leaves areas intact. */
+  setEntities: (entities: Record<string, HassEntity>) => void;
+  /** Replace just the area registry. */
+  setAreas: (areas: AreaRegistry) => void;
   /** Merge a batch of entity updates (live state changes). */
   upsertEntities: (entities: HassEntity[]) => void;
   setStatus: (status: ConnectionStatus, error?: string) => void;
@@ -23,6 +27,8 @@ export const useEntityStore = create<EntityState>((set) => ({
   areas: {},
   status: "connecting",
   setSnapshot: (entities, areas) => set({ entities, areas }),
+  setEntities: (entities) => set({ entities }),
+  setAreas: (areas) => set({ areas }),
   upsertEntities: (list) =>
     set((s) => {
       const entities = { ...s.entities };

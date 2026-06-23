@@ -3,6 +3,12 @@ import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
 import { SectionHeader } from "../components/SectionHeader";
 import { useConnection } from "../store/entityStore";
+import {
+  loadCredentials,
+  saveCredentials,
+  clearCredentials,
+} from "../store/credentials";
+import { startConnection } from "../store/connection";
 
 const STATUS_TEXT: Record<string, string> = {
   demo: "Demo data (no Home Assistant connected)",
@@ -12,14 +18,28 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 /**
- * Settings — Phase 2 shows the connection state and a stub "Connect to Home
- * Assistant" form. The form is the seam for Phase 1 (URL + long-lived token);
- * it does not connect yet.
+ * Settings — connect Hawksnest to a Home Assistant instance with a long-lived
+ * access token. Saving (re)starts the live source; "Disconnect" clears the
+ * token and returns to demo data.
  */
 export function SettingsScreen() {
   const { status, error } = useConnection();
-  const [url, setUrl] = useState("http://192.168.4.34:8123");
+  const saved = loadCredentials();
+  const [url, setUrl] = useState(saved?.url ?? "http://192.168.4.34:8123");
   const [token, setToken] = useState("");
+
+  const canConnect = url.trim().length > 0 && token.trim().length > 0;
+
+  function connect() {
+    saveCredentials({ url: url.trim(), token: token.trim() });
+    setToken("");
+    startConnection();
+  }
+
+  function disconnect() {
+    clearCredentials();
+    startConnection();
+  }
 
   return (
     <div className="space-y-xl">
@@ -32,6 +52,11 @@ export function SettingsScreen() {
           {error && (
             <div className="mt-sm font-body text-body text-streak">{error}</div>
           )}
+          {saved && (
+            <div className="mt-sm font-body text-caption text-ink-faint">
+              Saved: {saved.url}
+            </div>
+          )}
         </PanelCard>
       </section>
 
@@ -43,6 +68,7 @@ export function SettingsScreen() {
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
+              placeholder="http://homeassistant.local:8123"
               className="mt-xs w-full rounded-sm border border-hairline bg-bg px-md py-sm font-body text-body text-ink outline-none focus:border-hairline-strong"
             />
           </label>
@@ -52,16 +78,24 @@ export function SettingsScreen() {
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="Pasted once, stored locally"
+              placeholder={saved ? "Stored — paste a new one to replace" : "Paste your token"}
               className="mt-xs w-full rounded-sm border border-hairline bg-bg px-md py-sm font-body text-body text-ink outline-none focus:border-hairline-strong"
             />
           </label>
-          <div className="flex items-center gap-md">
-            <PulseButton disabled>Connect</PulseButton>
-            <span className="font-body text-caption text-ink-faint">
-              Live connection lands in Phase 1.
-            </span>
+          <div className="flex flex-wrap items-center gap-md">
+            <PulseButton disabled={!canConnect} onClick={connect}>
+              Connect
+            </PulseButton>
+            {saved && (
+              <PulseButton variant="ghost" onClick={disconnect}>
+                Disconnect
+              </PulseButton>
+            )}
           </div>
+          <p className="font-body text-caption text-ink-faint">
+            Create a token in Home Assistant under your profile → Long-lived access
+            tokens. It's stored locally on this device.
+          </p>
         </PanelCard>
       </section>
     </div>

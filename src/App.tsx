@@ -5,7 +5,7 @@ import { HomeScreen } from "./screens/HomeScreen";
 import { AreaScreen } from "./screens/AreaScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { ConnectionPill } from "./components/ConnectionPill";
-import { selectSource } from "./store/bootstrap";
+import { startConnection, stopConnection } from "./store/connection";
 
 function Header() {
   return (
@@ -38,9 +38,8 @@ function Header() {
 export default function App() {
   // Start the data source once on mount (demo fixtures, or live HA if saved).
   useEffect(() => {
-    const source = selectSource();
-    void source.start();
-    return () => source.stop();
+    startConnection();
+    return () => stopConnection();
   }, []);
 
   return (

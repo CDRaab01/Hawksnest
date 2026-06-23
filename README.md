@@ -5,10 +5,18 @@ with a polished, app-like experience modeled on the **Spotter** design language 
 system). Home Assistant stays the backend/brain; Hawksnest is a presentation layer over HA's
 WebSocket + REST APIs.
 
-> **Status: Phase 2 — blended layout on fixtures.** The chosen design (an area-first hub with
-> comfortable Spotter-style cards and compact read-only tiles) is now the real app, fed through an
-> entity-store seam. It runs on **fixture data only** — the live HA WebSocket connection is the
-> next phase (`src/store/haSource.ts` is a stub). See `CLAUDE.md` for the full spec.
+> **Status: Phase 1 — live Home Assistant connection.** The chosen design (an area-first hub with
+> comfortable Spotter-style cards and compact read-only tiles) runs on a real HA WebSocket
+> connection: enter your HA URL + a long-lived token in **Settings** and it streams live entity
+> states and resolves areas from the registries. With no token saved it falls back to demo
+> fixtures. See `CLAUDE.md` for the full spec.
+
+## Connecting to Home Assistant
+
+1. In Home Assistant: profile → **Long-lived access tokens** → create one.
+2. In Hawksnest: **Settings** → enter your HA URL (e.g. `http://192.168.4.34:8123`) + the token →
+   **Connect**. The token is stored locally on the device; **Disconnect** clears it.
+3. The header pill shows `Connected` / `Reconnecting` / `Offline` / `Demo data`.
 
 ## What's here
 
@@ -55,7 +63,8 @@ src/lib/density.ts        comfortable (controls) vs compact (read-only) vs featu
 src/config/overrides.ts   per-entity label/icon overrides (seeded from the screenshot)
 src/config/favorites.ts   pinned Home entities (static; editor is Phase 3)
 src/fixtures/entities.ts  demo entities + area registry (behind fixtureSource)
-src/store/                Zustand store + Source seam (fixtureSource now, haSource = Phase 1)
+src/store/                Zustand store + Source seam (fixtureSource demo / haSource live WS)
+src/store/ha/registry.ts  resolve entity→area from HA's area/entity/device registries
 src/components/           PULSE primitives + EntityCard, AreaCard, ConnectionPill
 src/cards/                domain cards (Lock, Camera, BinarySensor, Light, Alarm, Generic)
 src/screens/              Home, Area detail, Settings
@@ -63,6 +72,6 @@ src/screens/              Home, Area detail, Settings
 
 ## Next phases
 
-Live HA WebSocket connection + registries (`haSource`), optimistic-reconcile control wiring,
-personalization editor, entity detail/history, PWA/service worker, OAuth, light theme. See
-`CLAUDE.md`.
+Service-call wiring so card controls drive HA (lock/unlock, light on/off + brightness) with
+optimistic-reconcile (locks excepted), personalization editor, entity detail/history,
+PWA/service worker, OAuth (replacing the long-lived token), light theme. See `CLAUDE.md`.
