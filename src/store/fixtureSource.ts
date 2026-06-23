@@ -36,6 +36,33 @@ function simulate(
           : service === "alarm_arm_away"
             ? "armed_away"
             : entity.state;
+  } else if (domain === "cover") {
+    if (service === "open_cover") {
+      next.state = "open";
+      next.attributes.current_position = 100;
+    } else if (service === "close_cover") {
+      next.state = "closed";
+      next.attributes.current_position = 0;
+    }
+    // stop_cover leaves the resting state as-is (demo has no transit phase).
+  } else if (domain === "climate") {
+    if (service === "set_temperature" && typeof data.temperature === "number") {
+      next.attributes.temperature = data.temperature;
+    }
+  } else if (domain === "media_player") {
+    if (service === "media_play_pause") {
+      next.state = entity.state === "playing" ? "paused" : "playing";
+    }
+    // next/previous track: title is static in demo, state unchanged.
+  } else if (domain === "fan") {
+    if (service === "turn_off") {
+      next.state = "off";
+    } else if (service === "turn_on") {
+      next.state = "on";
+    } else if (service === "set_percentage" && typeof data.percentage === "number") {
+      next.state = data.percentage > 0 ? "on" : "off";
+      next.attributes.percentage = data.percentage;
+    }
   }
   return next;
 }
