@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Full-bleed OLED background so this also works as a maskable icon
+       (the shield sits well within the inner 80% safe zone). -->
+  <rect width="512" height="512" fill="#0B0D10"/>
+  <!-- Lucide "shield" mark, scaled from its 24x24 box and centered, in the
+       PULSE effort (electric blue) channel. -->
+  <g transform="translate(124 116) scale(11)" fill="#4D7CFF">
+    <path d="M12 2 4 5v7c0 6 8 10 8 10s8-4 8-10V5z"/>
+  </g>
+</svg>

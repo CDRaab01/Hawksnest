@@ -5,12 +5,19 @@ with a polished, app-like experience modeled on the **Spotter** design language 
 system). Home Assistant stays the backend/brain; Hawksnest is a presentation layer over HA's
 WebSocket + REST APIs.
 
-> **Status: Phase 3 — personalization editor.** On top of the live HA connection (Phase 1) and
-> the blended area-hub layout (Phase 2), the dashboard is now user-customizable: a **Customize**
-> screen (Settings → Personalization) lets you **pin/unpin** entities to Home, **reorder** your
-> favorites, and **hide** devices from the area views. Preferences persist per-device to
-> localStorage and override the built-in defaults. With no token saved it falls back to demo
-> fixtures. See `CLAUDE.md` for the full spec.
+> **Status: Phase 4 — detail, history, more domains, drag-and-drop, PWA.** On top of the live HA
+> connection (Phase 1), the blended area-hub layout (Phase 2), and the personalization editor
+> (Phase 3 — pin/unpin, reorder, hide), Phase 4 adds: **entity detail** screens (tap any card) with
+> a **state-history chart** (6h/24h/7d); **first-class cards** for cover, climate, media_player, and
+> fan; **drag-and-drop** favorites reordering in Customize; and an installable **PWA** (offline app
+> shell). With no token saved it falls back to demo fixtures.
+
+### Install as an app (PWA)
+
+Hawksnest is an installable PWA — open it in a browser and choose **Install / Add to Home Screen**.
+The service worker precaches only the app shell; **it never caches anything under `/api`** (the live
+HA WebSocket/REST surface), and the HA token lives in `localStorage` and is never touched by the
+worker. Offline, the shell loads and the app shows its Offline/Demo state rather than stale data.
 
 ## Connecting to Home Assistant
 
@@ -94,6 +101,6 @@ until HA confirms.
 
 ## Next phases
 
-Entity detail/history, more first-class domains (cover/climate/media_player/fan), drag-and-drop
-favorites reordering, PWA/service worker (must not cache the token), OAuth (replacing the
-long-lived token), light theme. See `CLAUDE.md`.
+OAuth (replacing the long-lived token), light theme, live camera streams, and more first-class
+domains. (Phase 4 delivered entity detail + history, cover/climate/media_player/fan cards,
+drag-and-drop favorites reordering, and the installable PWA.)
