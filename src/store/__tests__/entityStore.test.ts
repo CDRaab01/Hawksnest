@@ -92,6 +92,27 @@ describe("fixtureSource.callService", () => {
   });
 });
 
+describe("fixtureSource.fetchHistory", () => {
+  it("synthesizes a series ending at the entity's current state", async () => {
+    const source = createFixtureSource();
+    source.start();
+
+    const numeric = await source.fetchHistory!("sensor.front_door_battery", 24);
+    expect(numeric.length).toBeGreaterThanOrEqual(2);
+    expect(numeric[numeric.length - 1].state).toBe("100"); // latest = current
+    expect(numeric[0].t).toBeLessThan(numeric[numeric.length - 1].t); // oldest-first
+
+    const discrete = await source.fetchHistory!("lock.front_door_lock", 6);
+    expect(discrete[discrete.length - 1].state).toBe("locked");
+  });
+
+  it("returns an empty series for an unknown entity", async () => {
+    const source = createFixtureSource();
+    source.start();
+    expect(await source.fetchHistory!("sensor.nope", 24)).toEqual([]);
+  });
+});
+
 describe("groupByArea", () => {
   it("groups by area with known areas ordered first", () => {
     createFixtureSource().start();

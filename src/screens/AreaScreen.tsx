@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { EntityCard } from "../components/EntityCard";
+import { CardLink } from "../components/CardLink";
 import { PanelCard } from "../components/PanelCard";
 import { SectionHeader } from "../components/SectionHeader";
 import { overrides } from "../config/overrides";
@@ -28,8 +29,9 @@ export function AreaScreen() {
       {group ? (
         <div className="grid grid-cols-1 gap-md sm:grid-cols-2">
           {group.entities.map((entity) => (
-            <div
+            <CardLink
               key={entity.entity_id}
+              to={`/entity/${encodeURIComponent(entity.entity_id)}`}
               className={isFeature(entity.entity_id) ? "sm:col-span-2" : ""}
             >
               <EntityCard
@@ -37,7 +39,7 @@ export function AreaScreen() {
                 overrides={overrides}
                 density={cardDensityFor(entity.entity_id)}
               />
-            </div>
+            </CardLink>
           ))}
         </div>
       ) : (

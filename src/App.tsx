@@ -5,6 +5,7 @@ import { HomeScreen } from "./screens/HomeScreen";
 import { AreaScreen } from "./screens/AreaScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { CustomizeScreen } from "./screens/CustomizeScreen";
+import { EntityScreen } from "./screens/EntityScreen";
 import { ConnectionPill } from "./components/ConnectionPill";
 import { startConnection, stopConnection } from "./store/connection";
 
@@ -50,6 +51,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HomeScreen />} />
           <Route path="/area/:area" element={<AreaScreen />} />
+          <Route path="/entity/:id" element={<EntityScreen />} />
           <Route path="/customize" element={<CustomizeScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
         </Routes>

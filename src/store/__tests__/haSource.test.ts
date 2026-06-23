@@ -21,6 +21,16 @@ const ENTITIES = {
   "sensor.x": { entity_id: "sensor.x", state: "42", attributes: {} },
 } as unknown as HassEntities;
 
+// Compressed history shape HA returns from history/history_during_period.
+const HISTORY: Record<string, unknown> = {
+  "history/history_during_period": {
+    "sensor.x": [
+      { s: "40", lu: 1_700_000_000 },
+      { s: "42", lu: 1_700_003_600 },
+    ],
+  },
+};
+
 function makeFakeConn() {
   const listeners: Record<string, Array<() => void>> = {};
   const sent: Array<Record<string, unknown>> = [];
@@ -31,7 +41,7 @@ function makeFakeConn() {
     removeEventListener: () => {},
     sendMessagePromise: async (msg: { type: string }) => {
       sent.push(msg as Record<string, unknown>);
-      return REGISTRIES[msg.type];
+      return REGISTRIES[msg.type] ?? HISTORY[msg.type];
     },
     close: () => {},
   } as unknown as Connection;
@@ -103,6 +113,24 @@ describe("createHaSource", () => {
       service: "unlock",
       target: { entity_id: "lock.front_door_lock" },
     });
+  });
+
+  it("fetches entity history over the WebSocket and maps it to points", async () => {
+    const { conn, sent } = makeFakeConn();
+    const deps: HaSourceDeps = {
+      connect: async () => conn,
+      subscribe: () => () => {},
+    };
+    const source = createHaSource({ url: "http://ha", token: "t" }, deps);
+    await source.start();
+    const points = await source.fetchHistory!("sensor.x", 24);
+
+    const req = sent.find((m) => m.type === "history/history_during_period");
+    expect(req).toMatchObject({ entity_ids: ["sensor.x"], minimal_response: true });
+    expect(points).toEqual([
+      { t: 1_700_000_000_000, state: "40" },
+      { t: 1_700_003_600_000, state: "42" },
+    ]);
   });
 
   it("flags reconnecting when the connection drops", async () => {

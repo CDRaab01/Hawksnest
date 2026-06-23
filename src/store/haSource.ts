@@ -9,7 +9,7 @@ import {
   type HassEntities,
 } from "home-assistant-js-websocket";
 import { useEntityStore } from "./entityStore";
-import type { Source } from "./source";
+import type { HistoryPoint, Source } from "./source";
 import {
   buildAreaRegistry,
   toEntityRecord,
@@ -57,6 +57,50 @@ function describeError(err: unknown): string {
   if (err === ERR_INVALID_AUTH) return "Invalid access token.";
   if (err === ERR_CANNOT_CONNECT) return "Can't reach Home Assistant at that URL.";
   return "Connection to Home Assistant failed.";
+}
+
+/** One raw sample from `history/history_during_period` (compressed or legacy). */
+interface RawHistoryState {
+  s?: string;
+  state?: string;
+  lu?: number;
+  lc?: number;
+  last_updated?: string | number;
+  last_changed?: string | number;
+}
+
+/** Epoch ms from a sample's last_updated/last_changed (HA sends seconds). */
+function sampleTime(p: RawHistoryState): number {
+  const secs = p.lu ?? p.lc;
+  if (typeof secs === "number") return secs * 1000;
+  const legacy = p.last_updated ?? p.last_changed;
+  if (typeof legacy === "number") return legacy * 1000;
+  if (typeof legacy === "string") return new Date(legacy).getTime();
+  return Date.now();
+}
+
+/**
+ * Ask HA for one entity's history over the WebSocket. `minimal_response` +
+ * `no_attributes` keep the payload small (we only chart state). HA keys the
+ * response by entity_id; missing entity ⇒ empty series.
+ */
+async function fetchEntityHistory(
+  conn: Connection,
+  entityId: string,
+  hours: number,
+): Promise<HistoryPoint[]> {
+  const start = new Date(Date.now() - hours * 3600_000).toISOString();
+  const result = await conn.sendMessagePromise<Record<string, RawHistoryState[]>>({
+    type: "history/history_during_period",
+    start_time: start,
+    entity_ids: [entityId],
+    minimal_response: true,
+    no_attributes: true,
+  });
+  const series = result?.[entityId] ?? [];
+  return series
+    .map((p) => ({ t: sampleTime(p), state: String(p.s ?? p.state ?? "") }))
+    .sort((a, b) => a.t - b.t);
 }
 
 /**
@@ -135,6 +179,10 @@ export function createHaSource(
         serviceData,
         entity_id ? { entity_id } : undefined,
       );
+    },
+    async fetchHistory(entityId, hours) {
+      if (!conn) throw new Error("Not connected to Home Assistant.");
+      return fetchEntityHistory(conn, entityId, hours);
     },
   };
 }

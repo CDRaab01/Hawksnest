@@ -1,4 +1,5 @@
 import { EntityCard } from "../components/EntityCard";
+import { CardLink } from "../components/CardLink";
 import { SectionHeader } from "../components/SectionHeader";
 import { AreaCard } from "../components/AreaCard";
 import { overrides } from "../config/overrides";
@@ -22,12 +23,16 @@ export function HomeScreen() {
           <SectionHeader label="Home" channel="effort" />
           <div className="grid grid-cols-1 gap-md sm:grid-cols-2">
             {pinned.map((entity) => (
-              <EntityCard
+              <CardLink
                 key={entity.entity_id}
-                entity={entity}
-                overrides={overrides}
-                density="comfortable"
-              />
+                to={`/entity/${encodeURIComponent(entity.entity_id)}`}
+              >
+                <EntityCard
+                  entity={entity}
+                  overrides={overrides}
+                  density="comfortable"
+                />
+              </CardLink>
             ))}
           </div>
         </section>
