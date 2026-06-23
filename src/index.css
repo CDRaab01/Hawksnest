@@ -1,0 +1,44 @@
+/* Fonts: self-hosted static per-weight instances (no variable axes — matches
+   Spotter's deliberate choice; bundled via Fontsource). */
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/600.css";
+@import "@fontsource/space-grotesk/700.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
+@import "@fontsource/jetbrains-mono/700.css";
+
+@import "./theme/tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Every numeral renders in JetBrains Mono with slashed zeros. */
+  .font-mono {
+    font-feature-settings: "zero" 1;
+  }
+}
+
+@layer components {
+  /* Uppercase, wide-tracked instrument captions (Inter label style). */
+  .caption-label {
+    @apply font-body uppercase tracking-[0.08em] text-ink-faint text-caption font-medium;
+  }
+}

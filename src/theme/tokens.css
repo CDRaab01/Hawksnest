@@ -1,0 +1,52 @@
+/*
+ * Hawksnest design tokens — ported from Spotter's PULSE system.
+ * Source of truth: Spotter/android/app/src/main/java/com/spotter/ui/theme/
+ *   Pulse.kt (channels, surfaces, hairline, gradients), Color.kt (hex),
+ *   Dimens.kt (spacing), Shape.kt (radii), Motion.kt (durations/easings).
+ *
+ * v1 is dark-only. A :root.light block is intentionally omitted (deferred).
+ * Channel meaning in Hawksnest (a home dashboard, not a fitness app):
+ *   effort/blue    -> primary & interactive (toggles, sliders, primary actions)
+ *   recovery/green -> secure / settled / done (locked, closed, "Safe")
+ *   strength/violet-> magnitude / level (dimmer brightness, setpoints, battery)
+ *   streak/orange  -> attention (unlocked, open contact, intrusion, unavailable)
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces (OLED-dark ink + hairline-stroked panels; depth = stroke + tone). */
+  --bg: #0b0d10;
+  --panel: #13161b;
+  --panel-high: #1a1e25;
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-strong: rgba(255, 255, 255, 0.16);
+
+  /* Text. */
+  --text: #f4f6f8;
+  --text-dim: #aab2bd;
+  --text-faint: #6b7480;
+
+  /* Channels: base / dim (pre-composited container fill) / on (content atop dim). */
+  --effort: #4d7cff;
+  --effort-dim: #151c33;
+  --effort-on: #ffffff;
+
+  --recovery: #34d399;
+  --recovery-dim: #11332a;
+  --recovery-on: #00301f;
+
+  --strength: #8b7cff;
+  --strength-dim: #231f3f;
+  --strength-on: #ffffff;
+
+  --streak: #ff8a5c;
+  --streak-dim: #3b2418;
+  --streak-on: #ffffff;
+
+  /* Reserved brand gradients (hero = primary CTA; energy = celebration). */
+  --hero-from: #2a5bff;
+  --hero-to: #5b2be0;
+  --energy-from: #ff8a5c;
+  --energy-to: #f5a623;
+}
