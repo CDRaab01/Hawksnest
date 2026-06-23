@@ -1,7 +1,7 @@
 import { createFixtureSource } from "./fixtureSource";
 import { createHaSource } from "./haSource";
 import { loadCredentials } from "./credentials";
-import type { ServiceData, Source } from "./source";
+import type { HistoryPoint, ServiceData, Source } from "./source";
 
 let current: Source | null = null;
 
@@ -41,4 +41,19 @@ export function callService(
     return Promise.reject(new Error("Not connected."));
   }
   return current.callService(domain, service, data);
+}
+
+/**
+ * Fetch recent state history for an entity through the active source (live HA
+ * over the WebSocket; fixtures synthesize it). Rejects if the source can't
+ * provide history (e.g. not connected).
+ */
+export function fetchHistory(
+  entityId: string,
+  hours: number,
+): Promise<HistoryPoint[]> {
+  if (!current?.fetchHistory) {
+    return Promise.reject(new Error("History unavailable."));
+  }
+  return current.fetchHistory(entityId, hours);
 }

@@ -54,6 +54,63 @@ describe("fixtureSource.callService", () => {
     expect(light.state).toBe("on");
     expect(light.attributes.brightness).toBe(128);
   });
+
+  it("simulates the Phase 4 domains (cover / climate / media_player / fan)", async () => {
+    const source = createFixtureSource();
+    source.start();
+
+    await source.callService!("cover", "open_cover", {
+      entity_id: "cover.living_room_blinds",
+    });
+    const cover = useEntityStore.getState().entities["cover.living_room_blinds"];
+    expect(cover.state).toBe("open");
+    expect(cover.attributes.current_position).toBe(100);
+
+    await source.callService!("climate", "set_temperature", {
+      entity_id: "climate.living_room",
+      temperature: 73,
+    });
+    expect(
+      useEntityStore.getState().entities["climate.living_room"].attributes
+        .temperature,
+    ).toBe(73);
+
+    await source.callService!("media_player", "media_play_pause", {
+      entity_id: "media_player.living_room",
+    });
+    expect(
+      useEntityStore.getState().entities["media_player.living_room"].state,
+    ).toBe("paused");
+
+    await source.callService!("fan", "set_percentage", {
+      entity_id: "fan.bedroom",
+      percentage: 25,
+    });
+    const fan = useEntityStore.getState().entities["fan.bedroom"];
+    expect(fan.state).toBe("on");
+    expect(fan.attributes.percentage).toBe(25);
+  });
+});
+
+describe("fixtureSource.fetchHistory", () => {
+  it("synthesizes a series ending at the entity's current state", async () => {
+    const source = createFixtureSource();
+    source.start();
+
+    const numeric = await source.fetchHistory!("sensor.front_door_battery", 24);
+    expect(numeric.length).toBeGreaterThanOrEqual(2);
+    expect(numeric[numeric.length - 1].state).toBe("100"); // latest = current
+    expect(numeric[0].t).toBeLessThan(numeric[numeric.length - 1].t); // oldest-first
+
+    const discrete = await source.fetchHistory!("lock.front_door_lock", 6);
+    expect(discrete[discrete.length - 1].state).toBe("locked");
+  });
+
+  it("returns an empty series for an unknown entity", async () => {
+    const source = createFixtureSource();
+    source.start();
+    expect(await source.fetchHistory!("sensor.nope", 24)).toEqual([]);
+  });
 });
 
 describe("groupByArea", () => {
@@ -62,10 +119,14 @@ describe("groupByArea", () => {
     const { entities, areas } = useEntityStore.getState();
     const groups = groupByArea(Object.values(entities), areas);
     expect(groups.map((g) => g.area)).toEqual([
+      // Known areas float to the top in DEFAULT_ORDER; the rest follow
+      // alphabetically (Bedroom, Living Room — added with the Phase 4 domains).
       "Front Door",
       "Back Door",
       "Basement",
       "Security",
+      "Bedroom",
+      "Living Room",
     ]);
     const frontDoor = groups.find((g) => g.area === "Front Door")!;
     expect(frontDoor.entities.length).toBe(5);

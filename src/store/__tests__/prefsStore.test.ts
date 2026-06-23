@@ -45,6 +45,25 @@ describe("moveFavorite", () => {
   });
 });
 
+describe("reorderFavorites", () => {
+  it("moves an item from one index to another and persists", () => {
+    usePrefsStore.getState().reorderFavorites(0, 2);
+    expect(usePrefsStore.getState().favorites).toEqual([
+      seed[1],
+      seed[2],
+      seed[0],
+    ]);
+    expect(loadPreferences()?.favorites).toEqual([seed[1], seed[2], seed[0]]);
+  });
+
+  it("is a no-op for an unchanged or out-of-range move", () => {
+    usePrefsStore.getState().reorderFavorites(1, 1);
+    expect(usePrefsStore.getState().favorites).toBeNull();
+    usePrefsStore.getState().reorderFavorites(0, 99);
+    expect(usePrefsStore.getState().favorites).toBeNull();
+  });
+});
+
 describe("toggleHidden", () => {
   it("round-trips an id in and out of the hidden set", () => {
     usePrefsStore.getState().toggleHidden("binary_sensor.front_door_intrusion");

@@ -25,6 +25,8 @@ interface PrefsState {
   toggleHidden: (id: string) => void;
   /** Move a pinned entity up (-1) or down (+1); clamps at the ends. */
   moveFavorite: (id: string, dir: -1 | 1) => void;
+  /** Reorder a pinned entity from one index to another (drag-and-drop). */
+  reorderFavorites: (from: number, to: number) => void;
   /** Forget all customizations and fall back to defaults. */
   resetAll: () => void;
 }
@@ -67,6 +69,23 @@ export const usePrefsStore = create<PrefsState>((set, get) => ({
     const j = i + dir;
     if (i === -1 || j < 0 || j >= list.length) return;
     [list[i], list[j]] = [list[j], list[i]];
+    persist(list, get().hidden);
+    set({ favorites: list });
+  },
+
+  reorderFavorites: (from, to) => {
+    const list = [...effectiveFavorites(get().favorites)];
+    if (
+      from === to ||
+      from < 0 ||
+      to < 0 ||
+      from >= list.length ||
+      to >= list.length
+    ) {
+      return;
+    }
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
     persist(list, get().hidden);
     set({ favorites: list });
   },

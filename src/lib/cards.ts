@@ -4,6 +4,10 @@ import { CameraTile } from "../cards/CameraTile";
 import { BinarySensorCard } from "../cards/BinarySensorCard";
 import { LightCard } from "../cards/LightCard";
 import { AlarmCard } from "../cards/AlarmCard";
+import { CoverCard } from "../cards/CoverCard";
+import { ClimateCard } from "../cards/ClimateCard";
+import { MediaPlayerCard } from "../cards/MediaPlayerCard";
+import { FanCard } from "../cards/FanCard";
 import { GenericCard } from "../cards/GenericCard";
 import type { CardComponent } from "../cards/types";
 
@@ -15,6 +19,10 @@ const CARD_BY_DOMAIN: Record<string, CardComponent> = {
   binary_sensor: BinarySensorCard,
   light: LightCard,
   alarm_control_panel: AlarmCard,
+  cover: CoverCard,
+  climate: ClimateCard,
+  media_player: MediaPlayerCard,
+  fan: FanCard,
 };
 
 /**
