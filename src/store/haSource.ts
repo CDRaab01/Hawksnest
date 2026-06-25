@@ -185,6 +185,9 @@ export function createHaSource(
   return {
     async start() {
       stopped = false;
+      // Camera <img> URLs resolve against this so they reach HA even when the
+      // app isn't served through HA's reverse proxy (Settings → direct HA URL).
+      store().setBaseUrl(creds.url);
       store().setStatus("connecting");
 
       try {

@@ -47,12 +47,18 @@ browser ──http──> Hawksnest pod (nginx :80)
 kubectl -n home-automation rollout undo deployment/hawksnest
 ```
 
-## Note: HA trusted_proxies (optional, in hawksnest-automation)
-nginx forwards `X-Forwarded-For`, but the Hawksnest pod's IP isn't in HA's `trusted_proxies`, so HA
-logs "X-Forwarded-For from untrusted proxy" and ignores it. **Functionally fine** (auth is by token
-over the WS). For correct client-IP logging, add the K3s flannel pod CIDR `10.42.0.0/16` to
-`trusted_proxies` in `hawksnest-automation/kustomize/home-assistant/configmap.yaml` and the
-`ha-config` PVC. Not required for Hawksnest to work.
+## Note: HA trusted_proxies and X-Forwarded-For
+`nginx.conf` deliberately does **not** forward `X-Forwarded-For` to HA. When HA has
+`use_x_forwarded_for` enabled and the request's proxy IP isn't in `trusted_proxies`, HA does **not**
+ignore the header — it **rejects the request with HTTP 400** ("Received X-Forwarded-For header from an
+untrusted proxy"). The WebSocket survives because its location never sent XFF, but the camera
+snapshot/stream GETs did, so HA 400'd every frame and **no video painted**. Dropping XFF costs nothing
+(auth is by token; HA just logs the pod IP as the client).
+
+If you want correct client-IP logging instead, add `X-Forwarded-For`/`X-Forwarded-Proto` back to the
+`/api/` and `/api/camera_proxy_stream/` locations **and** add the K3s flannel pod CIDR `10.42.0.0/16`
+to `trusted_proxies` in `hawksnest-automation/kustomize/home-assistant/configmap.yaml` (+ the
+`ha-config` PVC). Do one or the other — sending XFF without trusting the proxy breaks cameras.
 
 ## Dev (no cluster)
 `npm run dev` proxies `/api` to `HA_PROXY_TARGET` (default `http://192.168.4.34:8123`) so the app is

@@ -201,6 +201,7 @@ export function createFixtureSource(): Source {
       const map = Object.fromEntries(entities.map((e) => [e.entity_id, e]));
       const store = useEntityStore.getState();
       store.setSnapshot(map, areaRegistry);
+      store.setBaseUrl(""); // demo: entity_picture paths stay page-relative
       store.setStatus("demo");
     },
     stop() {},
