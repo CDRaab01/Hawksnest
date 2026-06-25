@@ -19,3 +19,25 @@ jobs:
       - run: npm run lint
       - run: npm run test
       - run: npm run build
+
+  manifests:
+    # Schema-validate the k8s deploy manifests so a bad edit fails CI rather than
+    # the rollout. (The vitest deploy.test.ts already asserts the nginx/Dockerfile
+    # contract; this adds real Kubernetes schema validation.)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kustomize + kubeconform
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+          sudo mv kustomize /usr/local/bin/
+          curl -sSfL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Build manifests
+        run: kustomize build deploy/k8s | tee /tmp/hawksnest.yaml
+
+      - name: Validate against Kubernetes schemas
+        run: kubeconform -strict -summary -ignore-missing-schemas /tmp/hawksnest.yaml

@@ -65,9 +65,15 @@ npm install
 npm run dev        # http://localhost:5173
 npm run typecheck  # tsc --noEmit (strict)
 npm run lint       # eslint
-npm run test       # vitest
+npm run test       # vitest (screens, stores, and deploy-artifact checks)
 npm run build      # tsc -b && vite build
 ```
+
+The test suite covers each screen functionally (Home, Area, Entity, Settings, Customize) plus
+the connection/personalization stores, and `src/__tests__/deploy.test.ts` asserts the deploy
+contract (nginx same-origin `/api` proxy + SPA fallback, Dockerfile, NodePort 30080). CI
+(`.github/workflows/ci.yml`) additionally schema-validates the k8s manifests with
+`kustomize build | kubeconform`.
 
 ## Layout
 
