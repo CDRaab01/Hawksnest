@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16221b"/>
+      <stop offset="1" stop-color="#0c130f"/>
+    </linearGradient>
+    <radialGradient id="vig" cx="0.5" cy="0.4" r="0.8">
+      <stop offset="0.55" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.55"/>
+    </radialGradient>
+  </defs>
+  <rect width="640" height="480" fill="url(#sky)"/>
+  <path d="M0 320 L640 280 L640 480 L0 480 Z" fill="#13251a"/>
+  <path d="M0 360 L640 330 L640 480 L0 480 Z" fill="#0e1c14"/>
+  <circle cx="120" cy="120" r="60" fill="#1c2b22" opacity="0.7"/>
+  <rect x="430" y="190" width="150" height="120" rx="6" fill="#101b15"/>
+  <rect x="450" y="215" width="40" height="40" fill="#34d399" opacity="0.18"/>
+  <g stroke="#34d399" stroke-opacity="0.12" stroke-width="1">
+    <line x1="0" y1="120" x2="640" y2="120"/>
+    <line x1="0" y1="240" x2="640" y2="240"/>
+    <line x1="0" y1="360" x2="640" y2="360"/>
+  </g>
+  <rect width="640" height="480" fill="url(#vig)"/>
+</svg>

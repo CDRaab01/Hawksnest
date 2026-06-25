@@ -120,12 +120,14 @@ describe("groupByArea", () => {
     const groups = groupByArea(Object.values(entities), areas);
     expect(groups.map((g) => g.area)).toEqual([
       // Known areas float to the top in DEFAULT_ORDER; the rest follow
-      // alphabetically (Bedroom, Living Room — added with the Phase 4 domains).
+      // alphabetically.
       "Front Door",
       "Back Door",
       "Basement",
       "Security",
+      "Backyard",
       "Bedroom",
+      "Garage",
       "Living Room",
     ]);
     const frontDoor = groups.find((g) => g.area === "Front Door")!;

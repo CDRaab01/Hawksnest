@@ -29,6 +29,14 @@ describe("nginx.conf — same-origin HA reverse proxy", () => {
     expect(nginx).toContain("X-Forwarded-For");
   });
 
+  it("streams MJPEG camera live view with buffering disabled", () => {
+    // The MJPEG (multipart/x-mixed-replace) live view needs its own location
+    // with proxy_buffering off, or nginx stalls the stream (it never ends).
+    expect(nginx).toMatch(/location\s+\/api\/camera_proxy_stream\//);
+    const block = nginx.slice(nginx.indexOf("/api/camera_proxy_stream/"));
+    expect(block).toMatch(/proxy_buffering\s+off/);
+  });
+
   it("falls back to the SPA index for client-side routes", () => {
     expect(nginx).toContain("try_files $uri $uri/ /index.html");
   });
