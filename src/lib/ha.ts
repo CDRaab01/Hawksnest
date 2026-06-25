@@ -14,6 +14,10 @@ export interface HassEntity {
   entity_id: string;
   state: string;
   attributes: HassEntityAttributes;
+  /** ISO timestamp of the last state change (when HA provides it). */
+  last_changed?: string;
+  /** ISO timestamp of the last update, incl. attribute-only changes. */
+  last_updated?: string;
 }
 
 /** The domain is the prefix before the dot, e.g. `lock.front_door` -> `lock`. */

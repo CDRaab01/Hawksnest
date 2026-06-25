@@ -2,7 +2,10 @@ import { entities, areaRegistry } from "../fixtures/entities";
 import { useEntityStore } from "./entityStore";
 import { domainOf } from "../lib/ha";
 import { slugify, type AutomationConfig } from "../lib/automations";
+import { resolveName } from "../lib/resolve";
+import { overrides } from "../config/overrides";
 import type { HistoryPoint, ServiceData, Source } from "./source";
+import type { LogEvent } from "../lib/logbook";
 import type { HassEntity } from "../lib/ha";
 
 // Discrete (on/off-ish) domains step between two states in the synthetic series;
@@ -129,6 +132,54 @@ function simulate(
   return next;
 }
 
+// A plausible message per domain for the synthesized demo logbook.
+function demoMessage(entity: HassEntity): string {
+  switch (domainOf(entity.entity_id)) {
+    case "lock":
+      return entity.state === "locked" ? "was locked" : "was unlocked";
+    case "binary_sensor":
+      return entity.attributes.device_class === "motion"
+        ? "detected motion"
+        : entity.state === "on"
+          ? "was opened"
+          : "was closed";
+    case "alarm_control_panel":
+      return entity.state === "disarmed" ? "was disarmed" : "was armed";
+    case "camera":
+      return "recorded a clip";
+    case "light":
+      return entity.state === "on" ? "turned on" : "turned off";
+    default:
+      return `changed to ${entity.state}`;
+  }
+}
+
+/**
+ * Synthesize a believable home logbook from the current fixtures so demo mode's
+ * History hub isn't empty. Events are spread back from `endMs` at a steady
+ * cadence and clipped to the requested window.
+ */
+function synthLogbook(startMs: number, endMs: number): LogEvent[] {
+  const store = useEntityStore.getState();
+  const all = Object.values(store.entities).filter((e) =>
+    ["lock", "binary_sensor", "alarm_control_panel", "camera", "light"].includes(
+      domainOf(e.entity_id),
+    ),
+  );
+  const stepMs = 23 * 60_000; // ~one event every 23 minutes
+  return all
+    .map((entity, i) => ({
+      when: endMs - i * stepMs,
+      name: resolveName(entity, overrides),
+      message: demoMessage(entity),
+      entityId: entity.entity_id,
+      domain: domainOf(entity.entity_id),
+      state: entity.state,
+    }))
+    .filter((e) => e.when >= startMs && e.when <= endMs)
+    .sort((a, b) => b.when - a.when);
+}
+
 /** Drop one synthetic entity from the store (filtered rebuild of the map). */
 function removeEntity(entityId: string): void {
   const store = useEntityStore.getState();
@@ -163,6 +214,14 @@ export function createFixtureSource(): Source {
       const entity = useEntityStore.getState().entities[entityId];
       if (!entity) return [];
       return synthHistory(entity, hours);
+    },
+    async fetchLogbook(startMs, endMs, opts) {
+      const events = synthLogbook(startMs, endMs);
+      if (opts?.entityIds && opts.entityIds.length > 0) {
+        const want = new Set(opts.entityIds);
+        return events.filter((e) => e.entityId && want.has(e.entityId));
+      }
+      return events;
     },
     async getAutomationConfig(id) {
       return configs.get(id) ?? null;

@@ -3,6 +3,7 @@ import { createHaSource } from "./haSource";
 import { loadCredentials } from "./credentials";
 import type { HistoryPoint, ServiceData, Source } from "./source";
 import type { AutomationConfig } from "../lib/automations";
+import type { LogEvent } from "../lib/logbook";
 
 let current: Source | null = null;
 
@@ -57,6 +58,21 @@ export function fetchHistory(
     return Promise.reject(new Error("History unavailable."));
   }
   return current.fetchHistory(entityId, hours);
+}
+
+/**
+ * Fetch the home logbook through the active source (live HA over the WebSocket;
+ * fixtures synthesize it). Rejects if the source can't provide a logbook.
+ */
+export function fetchLogbook(
+  startMs: number,
+  endMs: number,
+  opts?: { entityIds?: string[] },
+): Promise<LogEvent[]> {
+  if (!current?.fetchLogbook) {
+    return Promise.reject(new Error("History unavailable."));
+  }
+  return current.fetchLogbook(startMs, endMs, opts);
 }
 
 /**

@@ -8,9 +8,11 @@ import { useEntityStore } from "../store/entityStore";
 // and renders its key landmark without crashing. Deeper per-screen behavior is
 // covered in the dedicated screen tests.
 const routes: Array<{ name: string; path: string; landmark: RegExp | string }> = [
-  { name: "Home", path: "/", landmark: "Areas" },
+  { name: "Dashboard", path: "/", landmark: "Areas" },
   { name: "Area detail", path: "/area/Front%20Door", landmark: /Front Door/ },
   { name: "Entity detail", path: "/entity/lock.front_door_lock", landmark: /Front Door/ },
+  { name: "Devices", path: "/devices", landmark: "All devices" },
+  { name: "History", path: "/history", landmark: "History" },
   { name: "Customize", path: "/customize", landmark: "All devices" },
   { name: "Automations", path: "/automations", landmark: "Automations" },
   { name: "New automation", path: "/automations/new", landmark: "New automation" },

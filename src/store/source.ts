@@ -1,4 +1,5 @@
 import type { AutomationConfig } from "../lib/automations";
+import type { LogEvent } from "../lib/logbook";
 
 /** Optional service-call data. `entity_id` targets the entity; the rest is service data. */
 export type ServiceData = { entity_id?: string } & Record<string, unknown>;
@@ -37,6 +38,17 @@ export interface Source {
    * plausible series. Rejects if the source can't provide history.
    */
   fetchHistory?: (entityId: string, hours: number) => Promise<HistoryPoint[]>;
+  /**
+   * Fetch the home logbook over `[startMs, endMs]` (optionally narrowed to
+   * specific entities) for the History hub. The live source asks HA over the
+   * WebSocket (`logbook/get_events`); the fixture source synthesizes events.
+   * Rejects if the source can't provide a logbook.
+   */
+  fetchLogbook?: (
+    startMs: number,
+    endMs: number,
+    opts?: { entityIds?: string[] },
+  ) => Promise<LogEvent[]>;
   /**
    * Automation CRUD against HA's Config API (`/api/config/automation/config`).
    * The live source uses authenticated REST (same-origin with HA); the fixture

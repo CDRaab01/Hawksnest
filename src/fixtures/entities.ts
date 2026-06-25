@@ -1,16 +1,57 @@
 import type { AreaRegistry, HassEntity } from "../lib/ha";
 
+/** A recent ISO timestamp, computed at load so demo "last seen" reads fresh. */
+const ago = (mins: number) => new Date(Date.now() - mins * 60_000).toISOString();
+
 /**
  * Invented Phase 0/2 fixtures — no live HA. Friendly names are intentionally
  * left as the ugly, attribute-derived strings stock HA actually shows (e.g.
  * "Lock Current status"), so the label-resolution layer + overrides have
  * something real to fix. Shapes match `home-assistant-js-websocket` HassEntity.
+ *
+ * Demo cameras point `entity_picture` at bundled stylized SVG "feeds" so the
+ * camera wall renders real <img> tiles without a live HA backend.
  */
 export const entities: HassEntity[] = [
   {
     entity_id: "camera.front_door",
     state: "streaming",
-    attributes: { friendly_name: "Front Door Camera", icon: "mdi:cctv" },
+    attributes: {
+      friendly_name: "Front Door Camera",
+      icon: "mdi:cctv",
+      entity_picture: "/demo-cam-3.svg",
+    },
+    last_changed: ago(1),
+  },
+  {
+    entity_id: "camera.backyard",
+    state: "streaming",
+    attributes: {
+      friendly_name: "Backyard Camera",
+      icon: "mdi:cctv",
+      entity_picture: "/demo-cam-1.svg",
+    },
+    last_changed: ago(2),
+  },
+  {
+    entity_id: "camera.living_room",
+    state: "streaming",
+    attributes: {
+      friendly_name: "Living Room Camera",
+      icon: "mdi:cctv",
+      entity_picture: "/demo-cam-2.svg",
+    },
+    last_changed: ago(1),
+  },
+  {
+    entity_id: "camera.basement",
+    state: "idle",
+    attributes: {
+      friendly_name: "Basement Camera",
+      icon: "mdi:cctv",
+      entity_picture: "/demo-cam-2.svg",
+    },
+    last_changed: ago(4),
   },
   {
     // Stock HA shows this simply as "Lock" — override forces "Front Door".
@@ -87,6 +128,30 @@ export const entities: HassEntity[] = [
     state: "on",
     attributes: { friendly_name: "Bedroom Fan", percentage: 66 },
   },
+  {
+    entity_id: "binary_sensor.backyard_motion",
+    state: "off",
+    attributes: { friendly_name: "Backyard Motion", device_class: "motion" },
+    last_changed: ago(9),
+  },
+  {
+    // Low battery — surfaces in the Devices "Needs attention" rail.
+    entity_id: "sensor.garage_door_battery",
+    state: "14",
+    attributes: {
+      friendly_name: "Garage Door Battery",
+      device_class: "battery",
+      unit_of_measurement: "%",
+    },
+    last_changed: ago(40),
+  },
+  {
+    // Offline — also "Needs attention".
+    entity_id: "light.garage",
+    state: "unavailable",
+    attributes: { friendly_name: "Garage Light" },
+    last_changed: ago(180),
+  },
 ];
 
 /** Area assignment — a registry concern, kept separate from state (see ha.ts). */
@@ -97,10 +162,16 @@ export const areaRegistry: AreaRegistry = {
   "binary_sensor.front_door_intrusion": "Front Door",
   "sensor.front_door_battery": "Front Door",
   "lock.back_door_lock": "Back Door",
+  "camera.backyard": "Backyard",
+  "binary_sensor.backyard_motion": "Backyard",
+  "camera.basement": "Basement",
   "light.basement": "Basement",
   "alarm_control_panel.home": "Security",
+  "camera.living_room": "Living Room",
   "cover.living_room_blinds": "Living Room",
   "climate.living_room": "Living Room",
   "media_player.living_room": "Living Room",
   "fan.bedroom": "Bedroom",
+  "sensor.garage_door_battery": "Garage",
+  "light.garage": "Garage",
 };

@@ -11,10 +11,13 @@ import {
 import { useEntityStore } from "./entityStore";
 import type { HistoryPoint, Source } from "./source";
 import type { AutomationConfig } from "../lib/automations";
+import { normalizeLogbook, type LogEvent, type RawLogbookEntry } from "../lib/logbook";
 import {
   buildAreaRegistry,
+  buildDeviceIndex,
   toEntityRecord,
   type AreaRegistryEntry,
+  type DeviceIndex,
   type DeviceRegistryEntry,
   type EntityRegistryEntry,
 } from "./ha/registry";
@@ -38,8 +41,14 @@ const defaultDeps: HaSourceDeps = {
   subscribe: (conn, cb) => subscribeEntities(conn, cb),
 };
 
-/** Pull the three registries and resolve entity → area names. */
-async function fetchAreas(conn: Connection) {
+/**
+ * Pull the three registries once and resolve BOTH the entity → area-name map and
+ * the richer device index (manufacturer/model/firmware + entity ownership) the
+ * Devices hub needs.
+ */
+async function fetchRegistry(
+  conn: Connection,
+): Promise<{ areas: ReturnType<typeof buildAreaRegistry>; devices: DeviceIndex }> {
   const [areas, entities, devices] = await Promise.all([
     conn.sendMessagePromise<AreaRegistryEntry[]>({
       type: "config/area_registry/list",
@@ -51,7 +60,30 @@ async function fetchAreas(conn: Connection) {
       type: "config/device_registry/list",
     }),
   ]);
-  return buildAreaRegistry(areas, entities, devices);
+  return {
+    areas: buildAreaRegistry(areas, entities, devices),
+    devices: buildDeviceIndex(areas, entities, devices),
+  };
+}
+
+/**
+ * Ask HA for the logbook over `[startMs, endMs]`. Optionally narrowed to
+ * specific entities. Returns normalized, newest-first events.
+ */
+async function fetchLogbook(
+  conn: Connection,
+  startMs: number,
+  endMs: number,
+  entityIds?: string[],
+): Promise<LogEvent[]> {
+  const msg = {
+    type: "logbook/get_events",
+    start_time: new Date(startMs).toISOString(),
+    end_time: new Date(endMs).toISOString(),
+    ...(entityIds && entityIds.length > 0 ? { entity_ids: entityIds } : {}),
+  };
+  const raw = await conn.sendMessagePromise<RawLogbookEntry[]>(msg);
+  return normalizeLogbook(raw ?? []);
 }
 
 function describeError(err: unknown): string {
@@ -141,7 +173,9 @@ export function createHaSource(
   async function loadAreas() {
     if (!conn) return;
     try {
-      store().setAreas(await fetchAreas(conn));
+      const { areas, devices } = await fetchRegistry(conn);
+      store().setAreas(areas);
+      store().setDevices(devices);
     } catch {
       // Registry unavailable (older HA / limited token) — keep entities,
       // they group under "Unassigned" rather than failing the connection.
@@ -203,6 +237,10 @@ export function createHaSource(
     async fetchHistory(entityId, hours) {
       if (!conn) throw new Error("Not connected to Home Assistant.");
       return fetchEntityHistory(conn, entityId, hours);
+    },
+    async fetchLogbook(startMs, endMs, opts) {
+      if (!conn) throw new Error("Not connected to Home Assistant.");
+      return fetchLogbook(conn, startMs, endMs, opts?.entityIds);
     },
     async getAutomationConfig(id) {
       const res = await fetch(automationUrl(creds, id), {

@@ -14,6 +14,31 @@ export interface EntityRegistryEntry {
 export interface DeviceRegistryEntry {
   id: string;
   area_id: string | null;
+  name?: string | null;
+  name_by_user?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  sw_version?: string | null;
+}
+
+/** A device resolved from the registries, for the Devices hub registry view. */
+export interface DeviceRecord {
+  id: string;
+  /** User-given name wins over the integration's name. */
+  name: string;
+  area: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  swVersion: string | null;
+  /** Entity ids that belong to this device. */
+  entityIds: string[];
+}
+
+export interface DeviceIndex {
+  /** Device id → record. */
+  devices: Record<string, DeviceRecord>;
+  /** Entity id → owning device id. */
+  entityToDevice: Record<string, string>;
 }
 
 /**
@@ -26,7 +51,13 @@ export function toEntityRecord(
   const out: Record<string, HassEntity> = {};
   for (const id in entities) {
     const e = entities[id];
-    out[id] = { entity_id: e.entity_id, state: e.state, attributes: e.attributes };
+    out[id] = {
+      entity_id: e.entity_id,
+      state: e.state,
+      attributes: e.attributes,
+      last_changed: e.last_changed,
+      last_updated: e.last_updated,
+    };
   }
   return out;
 }
@@ -54,4 +85,43 @@ export function buildAreaRegistry(
     if (name) out[entity.entity_id] = name;
   }
   return out;
+}
+
+/**
+ * Build the device index the Devices hub uses: a record per device (resolved
+ * name, area name, manufacturer/model/firmware, and its entity ids) plus an
+ * entity→device lookup. The previous `buildAreaRegistry` discards all of this;
+ * we now retain it from the same three registry payloads.
+ */
+export function buildDeviceIndex(
+  areas: AreaRegistryEntry[],
+  entities: EntityRegistryEntry[],
+  devices: DeviceRegistryEntry[],
+): DeviceIndex {
+  const nameByArea = new Map(areas.map((a) => [a.area_id, a.name]));
+  const entityToDevice: Record<string, string> = {};
+  const entityIdsByDevice = new Map<string, string[]>();
+
+  for (const entity of entities) {
+    if (!entity.device_id) continue;
+    entityToDevice[entity.entity_id] = entity.device_id;
+    const list = entityIdsByDevice.get(entity.device_id) ?? [];
+    list.push(entity.entity_id);
+    entityIdsByDevice.set(entity.device_id, list);
+  }
+
+  const out: Record<string, DeviceRecord> = {};
+  for (const d of devices) {
+    const area = d.area_id ? (nameByArea.get(d.area_id) ?? null) : null;
+    out[d.id] = {
+      id: d.id,
+      name: d.name_by_user?.trim() || d.name?.trim() || "Device",
+      area,
+      manufacturer: d.manufacturer ?? null,
+      model: d.model ?? null,
+      swVersion: d.sw_version ?? null,
+      entityIds: entityIdsByDevice.get(d.id) ?? [],
+    };
+  }
+  return { devices: out, entityToDevice };
 }
