@@ -12,5 +12,5 @@ spec:
     - name: http
       port: 80
       targetPort: http
-      # Mirrors HA's 30123 convention; the Windows portproxy maps 8080 → 30080.
+      # Mirrors HA's 30123 convention; the Windows portproxy maps 8090 → 30080.
       nodePort: 30080

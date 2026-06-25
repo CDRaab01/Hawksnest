@@ -3,7 +3,8 @@
 # re-run at logon (add it to the host's boot task next to portproxy-ha.ps1).
 # Run as Administrator.
 param(
-    [int]$ListenPort = 8080,      # Clients reach Hawksnest here (LAN / Tailscale)
+    [int]$ListenPort = 8090,      # Clients reach Hawksnest here (LAN / Tailscale).
+                                  # Not 8080 — SABnzbd's default already owns that on this host.
     [int]$NodePort   = 30080,     # Must match deploy/k8s/service.yaml nodePort
     [string]$Distribution = "Dragonfly"
 )

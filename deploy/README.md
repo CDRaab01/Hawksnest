@@ -18,7 +18,8 @@ browser ──http──> Hawksnest pod (nginx :80)
 - `nginx.conf` — SPA fallback + `/api` + `/api/websocket` proxy to HA's Service.
 - `k8s/` — kustomize: `deployment.yaml`, `service.yaml` (NodePort **30080**), `kustomization.yaml`
   (namespace `home-automation`).
-- `windows/portproxy-hawksnest.ps1` — LAN/Tailscale exposure `0.0.0.0:8080 → wsl:30080`.
+- `windows/portproxy-hawksnest.ps1` — LAN/Tailscale exposure `0.0.0.0:8090 → wsl:30080`
+  (8090, not 8080 — SABnzbd's default owns 8080 on this host).
 - `../.github/workflows/deploy.yml` — self-hosted-runner build + import + apply.
 - `runner-wsl.md` — make the self-hosted runner durable inside the Dragonfly WSL2 distro
   (survive reboots / no interactive `run.cmd`).
@@ -40,7 +41,7 @@ browser ──http──> Hawksnest pod (nginx :80)
    .\deploy\windows\portproxy-hawksnest.ps1
    ```
    Add it to the host's logon/boot task next to `portproxy-ha.ps1` (WSL2's IP changes on reboot).
-3. **Open** `http://192.168.4.34:8080` (or the host's Tailscale IP). Go to **Settings** — the URL
+3. **Open** `http://192.168.4.34:8090` (or the host's Tailscale IP). Go to **Settings** — the URL
    already defaults to this site (the proxy) — paste a Home Assistant **long-lived access token**
    (HA → your profile → Long-lived access tokens) → **Connect**.
 4. **Verify:** the header pill shows **Connected**, entities appear grouped by your real HA areas,
