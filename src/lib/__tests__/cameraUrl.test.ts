@@ -44,6 +44,33 @@ describe("cameraUrl", () => {
     );
   });
 
+  it("resolves snapshot + stream against the connected HA origin", () => {
+    const base = "http://192.168.4.34:8123";
+    expect(snapshotUrl(cam(), base)).toBe(
+      "http://192.168.4.34:8123/api/camera_proxy/camera.front_door?token=abc123",
+    );
+    expect(snapshotUrlAt(cam(), 9, base)).toBe(
+      "http://192.168.4.34:8123/api/camera_proxy/camera.front_door?token=abc123&_=9",
+    );
+    expect(streamUrl(cam(), base)).toBe(
+      "http://192.168.4.34:8123/api/camera_proxy_stream/camera.front_door?token=abc123",
+    );
+  });
+
+  it("trims a trailing slash on the base and leaves absolute pictures alone", () => {
+    expect(snapshotUrl(cam(), "http://ha.local:8123/")).toBe(
+      "http://ha.local:8123/api/camera_proxy/camera.front_door?token=abc123",
+    );
+    const absolute = cam({
+      attributes: {
+        entity_picture: "https://nabu.example/api/camera_proxy/camera.x?token=z",
+      },
+    });
+    expect(snapshotUrl(absolute, "http://ha.local:8123")).toBe(
+      "https://nabu.example/api/camera_proxy/camera.x?token=z",
+    );
+  });
+
   it("gates availability on a signed URL and a live state", () => {
     expect(isCameraLive(cam())).toBe(true);
     expect(isCameraLive(cam({ state: "unavailable" }))).toBe(false);

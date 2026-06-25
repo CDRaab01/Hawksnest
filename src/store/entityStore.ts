@@ -17,6 +17,13 @@ interface EntityState {
   devices: DeviceIndex;
   status: ConnectionStatus;
   error?: string;
+  /**
+   * Connected Home Assistant origin (the saved creds URL), or "" in demo mode.
+   * Camera `<img>` URLs are resolved against this so they reach HA even when
+   * Hawksnest isn't served through HA's reverse proxy (Settings can point
+   * straight at HA). Same-origin deployments store the page origin → no-op.
+   */
+  baseUrl: string;
   /** Replace the whole snapshot (initial load / full re-sync). */
   setSnapshot: (entities: Record<string, HassEntity>, areas: AreaRegistry) => void;
   /** Replace just the entity map (a live state push); leaves areas intact. */
@@ -28,6 +35,8 @@ interface EntityState {
   /** Merge a batch of entity updates (live state changes). */
   upsertEntities: (entities: HassEntity[]) => void;
   setStatus: (status: ConnectionStatus, error?: string) => void;
+  /** Set the connected HA origin used to resolve camera image URLs. */
+  setBaseUrl: (baseUrl: string) => void;
 }
 
 export const useEntityStore = create<EntityState>((set) => ({
@@ -35,6 +44,7 @@ export const useEntityStore = create<EntityState>((set) => ({
   areas: {},
   devices: EMPTY_DEVICE_INDEX,
   status: "connecting",
+  baseUrl: "",
   setSnapshot: (entities, areas) => set({ entities, areas }),
   setEntities: (entities) => set({ entities }),
   setAreas: (areas) => set({ areas }),
@@ -46,6 +56,7 @@ export const useEntityStore = create<EntityState>((set) => ({
       return { entities };
     }),
   setStatus: (status, error) => set({ status, error }),
+  setBaseUrl: (baseUrl) => set({ baseUrl }),
 }));
 
 // --- selector hooks (subscribe to slices, not the whole store) ---
@@ -55,6 +66,9 @@ export const useEntity = (id: string): HassEntity | undefined =>
 
 export const useConnection = () =>
   useEntityStore(useShallow((s) => ({ status: s.status, error: s.error })));
+
+/** Connected HA origin for resolving camera image URLs ("" in demo mode). */
+export const useHaBaseUrl = (): string => useEntityStore((s) => s.baseUrl);
 
 /**
  * All `automation.*` entities (HA surfaces every automation as one). Carries

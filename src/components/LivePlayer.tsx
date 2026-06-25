@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { VideoOff } from "lucide-react";
 import type { HassEntity } from "../lib/ha";
+import { useHaBaseUrl } from "../store/entityStore";
 import { streamUrl, snapshotUrlAt, snapshotUrl } from "../lib/cameraUrl";
 
 /**
@@ -11,9 +12,10 @@ import { streamUrl, snapshotUrlAt, snapshotUrl } from "../lib/cameraUrl";
  * is only mounted while this component is, so nothing streams in the background.
  */
 export function LivePlayer({ entity }: { entity: HassEntity }) {
-  const mjpeg = streamUrl(entity);
+  const baseUrl = useHaBaseUrl();
+  const mjpeg = streamUrl(entity, baseUrl);
   const [mode, setMode] = useState<"stream" | "poll" | "dead">(
-    mjpeg ? "stream" : snapshotUrl(entity) ? "poll" : "dead",
+    mjpeg ? "stream" : snapshotUrl(entity, baseUrl) ? "poll" : "dead",
   );
   const [tick, setTick] = useState(0);
 
@@ -34,7 +36,7 @@ export function LivePlayer({ entity }: { entity: HassEntity }) {
   }
 
   const src =
-    mode === "stream" ? (mjpeg as string) : snapshotUrlAt(entity, tick);
+    mode === "stream" ? (mjpeg as string) : snapshotUrlAt(entity, tick, baseUrl);
 
   return (
     <img

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Camera, VideoOff } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { useSnapshotBucket } from "../components/snapshotBucket";
+import { useHaBaseUrl } from "../store/entityStore";
 import { resolveName } from "../lib/resolve";
 import { snapshotUrlAt, isCameraLive } from "../lib/cameraUrl";
 import { relativeTime } from "../lib/relativeTime";
@@ -23,10 +24,11 @@ export function CameraTile({ entity, overrides, density = "comfortable" }: CardP
   const name = resolveName(entity, overrides);
   const aspect = density === "compact" ? "aspect-video" : "aspect-[4/3]";
   const bucket = useSnapshotBucket();
+  const baseUrl = useHaBaseUrl();
   const [failed, setFailed] = useState(false);
 
   const live = isCameraLive(entity) && !failed;
-  const src = live ? snapshotUrlAt(entity, bucket) : null;
+  const src = live ? snapshotUrlAt(entity, bucket, baseUrl) : null;
   const changedMs = lastChangedMs(entity.last_changed);
 
   return (
