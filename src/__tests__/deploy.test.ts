@@ -24,9 +24,14 @@ describe("nginx.conf — same-origin HA reverse proxy", () => {
     expect(nginx).toMatch(/proxy_read_timeout\s+3600s/);
   });
 
-  it("proxies the REST API and forwards the client IP", () => {
+  it("proxies the REST API WITHOUT forwarding X-Forwarded-For", () => {
     expect(nginx).toMatch(/location\s+\/api\//);
-    expect(nginx).toContain("X-Forwarded-For");
+    // HA rejects an X-Forwarded-For header from an untrusted proxy with HTTP 400
+    // (this pod isn't in trusted_proxies), which 400'd every camera snapshot and
+    // stream GET while the WebSocket — which never sent XFF — kept working. The
+    // directive must NOT be present, or cameras break again. (The phrase appears
+    // in an explanatory comment; we match the actual proxy_set_header directive.)
+    expect(nginx).not.toMatch(/proxy_set_header\s+X-Forwarded-For/);
   });
 
   it("streams MJPEG camera live view with buffering disabled", () => {
