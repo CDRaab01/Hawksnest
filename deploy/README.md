@@ -20,9 +20,13 @@ browser ──http──> Hawksnest pod (nginx :80)
   (namespace `home-automation`).
 - `windows/portproxy-hawksnest.ps1` — LAN/Tailscale exposure `0.0.0.0:8080 → wsl:30080`.
 - `../.github/workflows/deploy.yml` — self-hosted-runner build + import + apply.
+- `runner-wsl.md` — make the self-hosted runner durable inside the Dragonfly WSL2 distro
+  (survive reboots / no interactive `run.cmd`).
 
 ## Bring-up (on the Dragonfly host)
-1. **Deploy.** Either run the **Deploy** GitHub Action (self-hosted runner), or by hand:
+1. **Deploy.** Either run the **Deploy** GitHub Action (self-hosted runner — it must be
+   **online**, or the run sits *Queued* forever; see [`runner-wsl.md`](./runner-wsl.md) to
+   make it durable), or by hand:
    ```bash
    docker build -t hawksnest:local .
    docker save hawksnest:local | sudo k3s ctr -n k8s.io images import -
