@@ -5,7 +5,7 @@ name: Deploy
 on:
   workflow_dispatch:
   push:
-    branches: [claude/code-review-m68fba]
+    branches: [main]
     paths:
       - "src/**"
       - "deploy/**"
