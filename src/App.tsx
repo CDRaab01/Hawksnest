@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
-import { Shield, Settings as SettingsIcon } from "lucide-react";
+import { Shield, Settings as SettingsIcon, Workflow } from "lucide-react";
 import { HomeScreen } from "./screens/HomeScreen";
 import { AreaScreen } from "./screens/AreaScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { CustomizeScreen } from "./screens/CustomizeScreen";
 import { EntityScreen } from "./screens/EntityScreen";
+import { AutomationsScreen } from "./screens/AutomationsScreen";
+import { AutomationEditScreen } from "./screens/AutomationEditScreen";
 import { ConnectionPill } from "./components/ConnectionPill";
 import { startConnection, stopConnection } from "./store/connection";
 
@@ -19,6 +21,18 @@ function Header() {
         </Link>
         <div className="ml-auto flex items-center gap-md">
           <ConnectionPill />
+          <NavLink
+            to="/automations"
+            aria-label="Automations"
+            className={({ isActive }) =>
+              [
+                "rounded-sm p-sm transition-colors duration-fast",
+                isActive ? "text-ink" : "text-ink-dim hover:text-ink",
+              ].join(" ")
+            }
+          >
+            <Workflow size={20} />
+          </NavLink>
           <NavLink
             to="/settings"
             aria-label="Settings"
@@ -53,6 +67,8 @@ export default function App() {
           <Route path="/area/:area" element={<AreaScreen />} />
           <Route path="/entity/:id" element={<EntityScreen />} />
           <Route path="/customize" element={<CustomizeScreen />} />
+          <Route path="/automations" element={<AutomationsScreen />} />
+          <Route path="/automations/:id" element={<AutomationEditScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
         </Routes>
       </main>

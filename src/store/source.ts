@@ -1,3 +1,5 @@
+import type { AutomationConfig } from "../lib/automations";
+
 /** Optional service-call data. `entity_id` targets the entity; the rest is service data. */
 export type ServiceData = { entity_id?: string } & Record<string, unknown>;
 
@@ -35,4 +37,13 @@ export interface Source {
    * plausible series. Rejects if the source can't provide history.
    */
   fetchHistory?: (entityId: string, hours: number) => Promise<HistoryPoint[]>;
+  /**
+   * Automation CRUD against HA's Config API (`/api/config/automation/config`).
+   * The live source uses authenticated REST (same-origin with HA); the fixture
+   * source simulates it in memory. Hawksnest only *edits* automations here — HA
+   * itself runs them. Reject/throw if the source can't manage automations.
+   */
+  getAutomationConfig?: (id: string) => Promise<AutomationConfig | null>;
+  saveAutomationConfig?: (config: AutomationConfig) => Promise<void>;
+  deleteAutomationConfig?: (id: string) => Promise<void>;
 }

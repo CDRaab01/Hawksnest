@@ -10,6 +10,7 @@ import {
 } from "home-assistant-js-websocket";
 import { useEntityStore } from "./entityStore";
 import type { HistoryPoint, Source } from "./source";
+import type { AutomationConfig } from "../lib/automations";
 import {
   buildAreaRegistry,
   toEntityRecord,
@@ -57,6 +58,25 @@ function describeError(err: unknown): string {
   if (err === ERR_INVALID_AUTH) return "Invalid access token.";
   if (err === ERR_CANNOT_CONNECT) return "Can't reach Home Assistant at that URL.";
   return "Connection to Home Assistant failed.";
+}
+
+/** Human message for a failed Config API call (writing automations needs admin). */
+function describeConfigError(status: number): string {
+  if (status === 401 || status === 403) {
+    return "Your Home Assistant token can't edit automations (it needs an admin user).";
+  }
+  return `Home Assistant rejected the automation (${status}).`;
+}
+
+/**
+ * Home Assistant's automation Config API. Hawksnest is served same-origin with
+ * HA (the nginx pod reverse-proxies `/api`), so these authenticated REST calls
+ * reuse the long-lived token with no CORS. HA reloads automations after each
+ * write, and the changed `automation.*` entity flows back over the live entity
+ * subscription — no manual refresh.
+ */
+function automationUrl(creds: HaCredentials, id: string): string {
+  return `${creds.url}/api/config/automation/config/${encodeURIComponent(id)}`;
 }
 
 /** One raw sample from `history/history_during_period` (compressed or legacy). */
@@ -183,6 +203,32 @@ export function createHaSource(
     async fetchHistory(entityId, hours) {
       if (!conn) throw new Error("Not connected to Home Assistant.");
       return fetchEntityHistory(conn, entityId, hours);
+    },
+    async getAutomationConfig(id) {
+      const res = await fetch(automationUrl(creds, id), {
+        headers: { Authorization: `Bearer ${creds.token}` },
+      });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(describeConfigError(res.status));
+      return (await res.json()) as AutomationConfig;
+    },
+    async saveAutomationConfig(config) {
+      const res = await fetch(automationUrl(creds, config.id), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${creds.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(config),
+      });
+      if (!res.ok) throw new Error(describeConfigError(res.status));
+    },
+    async deleteAutomationConfig(id) {
+      const res = await fetch(automationUrl(creds, id), {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${creds.token}` },
+      });
+      if (!res.ok) throw new Error(describeConfigError(res.status));
     },
   };
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Workflow } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
 import { SectionHeader } from "../components/SectionHeader";
@@ -54,6 +54,18 @@ export function SettingsScreen() {
               <div className="font-body text-body-lg text-ink">Customize Home</div>
               <div className="font-body text-body text-ink-dim">
                 Pin, reorder, and hide devices.
+              </div>
+            </div>
+            <ChevronRight className="ml-auto shrink-0 text-ink-faint" size={20} />
+          </PanelCard>
+        </Link>
+        <Link to="/automations">
+          <PanelCard className="flex items-center gap-md p-lg" tint="effort">
+            <Workflow className="shrink-0 text-effort" size={22} />
+            <div className="min-w-0">
+              <div className="font-body text-body-lg text-ink">Automations</div>
+              <div className="font-body text-body text-ink-dim">
+                Link devices — lock the doors when armed, lights on with motion.
               </div>
             </div>
             <ChevronRight className="ml-auto shrink-0 text-ink-faint" size={20} />
