@@ -26,13 +26,18 @@ jobs:
       - name: Import image into K3s containerd
         run: docker save hawksnest:local | sudo k3s ctr -n k8s.io images import -
 
+      # Use k3s's bundled kubectl via sudo so it reads the root-owned kubeconfig
+      # at /etc/rancher/k3s/k3s.yaml. A plain `kubectl` relies on that file being
+      # world-readable, which it isn't after k3s (re)starts — it recreates the
+      # file as mode 600, so a host reboot breaks the deploy with "k3s.yaml:
+      # permission denied". sudo is already used (passwordless) for `k3s ctr`.
       - name: Apply manifests
-        run: kubectl apply -k deploy/k8s
+        run: sudo k3s kubectl apply -k deploy/k8s
 
       # Image tag is fixed (hawksnest:local), so apply alone won't roll the pod —
       # restart to pick up the freshly imported image.
       - name: Roll to the new image
-        run: kubectl -n home-automation rollout restart deployment/hawksnest
+        run: sudo k3s kubectl -n home-automation rollout restart deployment/hawksnest
 
       - name: Wait for rollout
-        run: kubectl -n home-automation rollout status deployment/hawksnest --timeout=120s
+        run: sudo k3s kubectl -n home-automation rollout status deployment/hawksnest --timeout=120s
