@@ -29,12 +29,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install kustomize + kubeconform
+        # Pinned, direct release-asset downloads (no upstream install_kustomize.sh
+        # / "latest" lookups — those hit GitHub's unauthenticated API rate limit
+        # and flake the job, e.g. "kustomize_v*_linux_amd64.tar.gz: Cannot open").
+        # curl --retry adds resilience to transient download hiccups.
+        env:
+          KUSTOMIZE_VERSION: v5.4.3
+          KUBECONFORM_VERSION: v0.6.7
         run: |
-          curl -sSfL https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+          set -euo pipefail
+          curl --retry 3 --retry-delay 2 --retry-all-errors -fsSL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+            | tar xz kustomize
           sudo mv kustomize /usr/local/bin/
-          curl -sSfL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+          curl --retry 3 --retry-delay 2 --retry-all-errors -fsSL \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
             | tar xz kubeconform
           sudo mv kubeconform /usr/local/bin/
+          kustomize version
+          kubeconform -v
 
       - name: Build manifests
         run: kustomize build deploy/k8s | tee /tmp/hawksnest.yaml
