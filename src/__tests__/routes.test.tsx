@@ -12,6 +12,8 @@ const routes: Array<{ name: string; path: string; landmark: RegExp | string }> =
   { name: "Area detail", path: "/area/Front%20Door", landmark: /Front Door/ },
   { name: "Entity detail", path: "/entity/lock.front_door_lock", landmark: /Front Door/ },
   { name: "Customize", path: "/customize", landmark: "All devices" },
+  { name: "Automations", path: "/automations", landmark: "Automations" },
+  { name: "New automation", path: "/automations/new", landmark: "New automation" },
   { name: "Settings", path: "/settings", landmark: "Connect to Home Assistant" },
 ];
 

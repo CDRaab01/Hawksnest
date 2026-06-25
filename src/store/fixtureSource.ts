@@ -1,6 +1,7 @@
 import { entities, areaRegistry } from "../fixtures/entities";
 import { useEntityStore } from "./entityStore";
 import { domainOf } from "../lib/ha";
+import { slugify, type AutomationConfig } from "../lib/automations";
 import type { HistoryPoint, ServiceData, Source } from "./source";
 import type { HassEntity } from "../lib/ha";
 
@@ -128,8 +129,22 @@ function simulate(
   return next;
 }
 
+/** Drop one synthetic entity from the store (filtered rebuild of the map). */
+function removeEntity(entityId: string): void {
+  const store = useEntityStore.getState();
+  const next = { ...store.entities };
+  delete next[entityId];
+  store.setEntities(next);
+}
+
 /** Loads the invented fixtures into the store and flags the app as demo data. */
 export function createFixtureSource(): Source {
+  // In-memory automation store for demo mode: configs by id, plus the synthetic
+  // `automation.*` entity id we surfaced for each (so the list, toggle, and
+  // "run now" behave like live HA without a real backend).
+  const configs = new Map<string, AutomationConfig>();
+  const entityIdFor = new Map<string, string>();
+
   return {
     start() {
       const map = Object.fromEntries(entities.map((e) => [e.entity_id, e]));
@@ -148,6 +163,33 @@ export function createFixtureSource(): Source {
       const entity = useEntityStore.getState().entities[entityId];
       if (!entity) return [];
       return synthHistory(entity, hours);
+    },
+    async getAutomationConfig(id) {
+      return configs.get(id) ?? null;
+    },
+    async saveAutomationConfig(config) {
+      configs.set(config.id, config);
+      // Re-surface the synthetic entity (alias may have changed → new id).
+      const prev = entityIdFor.get(config.id);
+      if (prev) removeEntity(prev);
+      const friendlyName = String(config.alias ?? config.id);
+      const entityId = `automation.${slugify(friendlyName)}`;
+      entityIdFor.set(config.id, entityId);
+      useEntityStore.getState().upsertEntities([
+        {
+          entity_id: entityId,
+          state: "on",
+          attributes: { friendly_name: friendlyName, id: config.id },
+        },
+      ]);
+    },
+    async deleteAutomationConfig(id) {
+      configs.delete(id);
+      const entityId = entityIdFor.get(id);
+      if (entityId) {
+        removeEntity(entityId);
+        entityIdFor.delete(id);
+      }
     },
   };
 }

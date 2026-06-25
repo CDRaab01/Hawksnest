@@ -47,6 +47,21 @@ export const useEntity = (id: string): HassEntity | undefined =>
 export const useConnection = () =>
   useEntityStore(useShallow((s) => ({ status: s.status, error: s.error })));
 
+/**
+ * All `automation.*` entities (HA surfaces every automation as one). Carries
+ * `attributes.id` (the Config API id), `friendly_name`, on/off `state`, and
+ * `attributes.last_triggered`. Powers the Automations list, enable/disable, and
+ * "run now" without any extra fetch.
+ */
+export const useAutomationEntities = (): HassEntity[] =>
+  useEntityStore(
+    useShallow((s) =>
+      Object.values(s.entities).filter((e) =>
+        e.entity_id.startsWith("automation."),
+      ),
+    ),
+  );
+
 /** All entities grouped by area, memoized on the underlying refs. */
 export function useEntitiesByArea(): AreaGroup[] {
   const entities = useEntityStore((s) => s.entities);
