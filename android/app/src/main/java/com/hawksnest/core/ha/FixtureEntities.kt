@@ -64,6 +64,13 @@ val fixtureEntities: List<HassEntity> = listOf(
         put("unit_of_measurement", "%")
     },
     ent("light.garage", "unavailable") { put("friendly_name", "Garage Light") },
+    ent("automation.arm_away_lock_doors", "on") {
+        put("friendly_name", "When armed away, lock all doors"); put("id", "1700000001")
+        put("last_triggered", "2026-06-25T22:14:00+00:00")
+    },
+    ent("automation.motion_porch_light", "off") {
+        put("friendly_name", "Porch light on motion after sunset"); put("id", "1700000002")
+    },
 )
 
 /** Area assignment — a registry concern, kept separate from state. */

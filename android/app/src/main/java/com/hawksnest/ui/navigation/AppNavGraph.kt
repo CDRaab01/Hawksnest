@@ -14,6 +14,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.hawksnest.ui.area.AreaDetailScreen
+import com.hawksnest.ui.automations.AutomationsScreen
 import com.hawksnest.ui.devices.DevicesScreen
 import com.hawksnest.ui.entity.EntityDetailScreen
 import com.hawksnest.ui.history.HistoryScreen
@@ -79,7 +80,12 @@ fun AppNavGraph(startDestination: String = Screen.Home.route) {
             composable(Screen.History.route) {
                 HistoryScreen(onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) })
             }
-            composable(Screen.Settings.route) { SettingsScreen() }
+            composable(Screen.Settings.route) {
+                SettingsScreen(onOpenAutomations = { navController.navigate(Screen.Automations.route) })
+            }
+            composable(Screen.Automations.route) {
+                AutomationsScreen(onBack = { navController.popBackStack() })
+            }
             composable(
                 route = Screen.Area.route,
                 arguments = listOf(navArgument("area") { type = NavType.StringType }),

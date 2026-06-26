@@ -13,6 +13,7 @@ sealed class Screen(val route: String) {
     data object Rooms : Screen("rooms")
     data object History : Screen("history")
     data object Settings : Screen("settings")
+    data object Automations : Screen("automations")
 
     data object Area : Screen("area/{area}") {
         // Area names contain spaces ("Front Door") — encode for the path segment.
