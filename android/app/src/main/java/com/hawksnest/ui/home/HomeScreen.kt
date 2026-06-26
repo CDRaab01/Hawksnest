@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.alarmView
+import com.hawksnest.security.LocalBiometricGate
 import com.hawksnest.ui.components.ConnectionPill
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.SectionHeader
@@ -134,6 +135,7 @@ fun HomeScreen(
 @Composable
 private fun SecurityHero(ui: HomeUi, onArm: (String) -> Unit) {
     val pulse = HawksnestTheme.pulse
+    val gate = LocalBiometricGate.current
     PanelCard(channel = ui.alarm?.let { pulse.color(it.channel) }, raised = true) {
         if (ui.alarm != null) {
             Row(
@@ -146,7 +148,10 @@ private fun SecurityHero(ui: HomeUi, onArm: (String) -> Unit) {
                         icon = ARM_ICON[b.service] ?: Icons.Filled.LockOpen,
                         active = ui.alarmRawState == b.state,
                         channel = pulse.color(alarmView(b.state).channel),
-                        onClick = { onArm(b.service) },
+                        onClick = {
+                            // Disarm is the only "less secure" arm action — gate it.
+                            if (b.service == "alarm_disarm") gate("Disarm alarm") { onArm(b.service) } else onArm(b.service)
+                        },
                     )
                 }
             }

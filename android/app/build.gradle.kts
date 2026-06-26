@@ -103,6 +103,12 @@ dependencies {
     // DataStore (HA URL + long-lived token)
     implementation(libs.datastore.preferences)
 
+    // Biometric gate (Class-3 strong biometric on unlock/disarm)
+    implementation(libs.androidx.biometric)
+
+    // Coil — camera snapshot images (live MJPEG is hand-rolled on OkHttp)
+    implementation(libs.coil.compose)
+
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
