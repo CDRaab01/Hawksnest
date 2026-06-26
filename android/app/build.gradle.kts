@@ -16,6 +16,13 @@ val localProperties = Properties().apply {
 
 val keystorePath: String? = System.getenv("KEYSTORE_PATH")
 
+// Is the Sift design-slop auditor available as a composite build (sibling checkout, or -PsiftDir in
+// CI)? Mirrors the guard in settings.gradle.kts. When false (a standalone Hawksnest checkout), the
+// test-only Sift audit source set + deps below are skipped so `:app:testDebugUnitTest` stays green.
+val siftDir: String = (project.findProperty("siftDir") as String?) ?: "../../Sift"
+val siftAvailable: Boolean =
+    rootProject.projectDir.resolve(siftDir).resolve("settings.gradle.kts").exists()
+
 android {
     namespace = "com.hawksnest"
     compileSdk = 35
@@ -74,6 +81,12 @@ android {
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true
     }
+
+    // The Sift design-slop suite (Robolectric render of our Compose UI) lives in its own source dir
+    // so it is compiled into the unit-test source set only when the Sift composite build is wired.
+    if (siftAvailable) {
+        sourceSets.getByName("test").java.srcDirs("src/siftAudit/kotlin")
+    }
 }
 
 dependencies {
@@ -121,4 +134,18 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     debugImplementation(libs.androidx.ui.tooling)
+
+    // ── Sift design-slop audit (test-only) ──────────────────────────────────────────────────────
+    // Wired only when the Sift composite build is present. `sift-compose` exposes Robolectric +
+    // Compose UI test as `api`, so they arrive transitively; the BOM platform + ui-test-manifest
+    // (host activity for the Robolectric render) are added explicitly. See the `/sift` skill and
+    // app/src/siftAudit/.
+    if (siftAvailable) {
+        testImplementation(platform(libs.androidx.compose.bom))
+        testImplementation("style.sift:sift-compose:0.1.0")
+        testImplementation(libs.androidx.compose.ui.test.junit4)
+        testImplementation(libs.robolectric)
+        debugImplementation(platform(libs.androidx.compose.bom))
+        debugImplementation(libs.androidx.compose.ui.test.manifest)
+    }
 }

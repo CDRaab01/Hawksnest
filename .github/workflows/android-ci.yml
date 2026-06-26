@@ -47,3 +47,40 @@ jobs:
           name: hawksnest-debug-${{ github.sha }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
+
+  # ── Sift design-slop audit (advisory, non-gating) ──────────────────────────
+  # Renders Hawksnest's Compose UI through the Sift auditor (a sibling repo) and uploads the
+  # findings report (app/build/sift/report.json). `continue-on-error` keeps it non-gating — the gate
+  # is the baseline in android/app/.sift/, so this only ever surfaces *new* slop. Both repos are
+  # public, so the default GITHUB_TOKEN can check Sift out; `SIFT_REPO_TOKEN` is an optional fallback
+  # if the Sift repo is ever made private.
+  sift-audit:
+    name: "Android — Sift design audit (advisory)"
+    runs-on: ubuntu-latest
+    needs: android-test
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out Sift (sibling design auditor)
+        uses: actions/checkout@v4
+        with:
+          repository: CDRaab01/Sift
+          path: android/sift-src
+          token: ${{ secrets.SIFT_REPO_TOKEN || github.token }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Configure SDK
+        working-directory: android
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Run Sift audit
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest --tests "*HawksnestDesignSlopTest" -PsiftDir=sift-src --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hawksnest-sift-report-${{ github.sha }}
+          path: android/app/build/sift/**
+          retention-days: 30
