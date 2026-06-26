@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Hawksnest is dark-first OLED; Compose applies the real PULSE theme. This just covers the
+         pre-Compose launch frame so there's no white flash. -->
+    <style name="Theme.Hawksnest" parent="android:Theme.Material.NoActionBar">
+        <!-- Matches DarkBackground (#0B0D10). -->
+        <item name="android:windowBackground">#FF0B0D10</item>
+    </style>
+</resources>
