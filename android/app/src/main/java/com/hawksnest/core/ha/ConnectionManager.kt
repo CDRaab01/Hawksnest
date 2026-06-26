@@ -1,31 +1,55 @@
 package com.hawksnest.core.ha
 
+import com.hawksnest.di.ApplicationScope
+import com.hawksnest.util.CredentialStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Selects and drives the active data [Source] and exposes control actions — the Kotlin analogue of
- * `src/store/connection.ts`. Phase 1 always uses the demo [FixtureSource]; the live HA WebSocket
- * source lands behind the same seam (selected when credentials are saved) in a later step.
+ * Selects and drives the active data [Source] — the Kotlin analogue of `src/store/connection.ts`.
+ * Uses the live [HaSource] when a URL + token are saved, else the demo [FixtureSource]. Runs in an
+ * app-scoped coroutine so the socket outlives any screen. Idempotent [start]; [reconnect] re-selects
+ * after the credentials change (Settings save/disconnect).
  */
 @Singleton
 class ConnectionManager @Inject constructor(
     val state: HaState,
     private val fixtureSource: FixtureSource,
+    private val credentialStore: CredentialStore,
+    private val okHttpClient: OkHttpClient,
+    private val json: Json,
+    @ApplicationScope private val scope: CoroutineScope,
 ) {
     private var current: Source? = null
+    private var started = false
 
-    /** (Re)start the active source — call on app/screen mount. */
-    suspend fun start() {
-        current?.stop()
-        // TODO(phase1-live): select the live HA source when a URL + token are saved.
-        current = fixtureSource
-        current?.start()
+    /** Start the active source once (called from the app onCreate). */
+    fun start() {
+        if (started) return
+        started = true
+        scope.launch { select() }
     }
 
-    fun stop() {
+    /** Re-select + restart the source after the saved credentials change. */
+    fun reconnect() {
+        scope.launch { select() }
+    }
+
+    private suspend fun select() {
+        val url = credentialStore.haUrl.firstOrNull()
+        val token = credentialStore.haToken.firstOrNull()
         current?.stop()
-        current = null
+        current = if (!url.isNullOrBlank() && !token.isNullOrBlank()) {
+            HaSource(okHttpClient, json, state, scope, url, token)
+        } else {
+            fixtureSource
+        }
+        current?.start()
     }
 
     /** Perform a service call through the active source (non-optimistic — the echo reconciles). */
