@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Hawksnest reaches Home Assistant through its own reverse proxy over Tailscale, typically as
+  cleartext HTTP to a private tailnet host (e.g. http://hawksnest.<tailnet>.ts.net:8080 or a
+  100.x.y.z CGNAT address). Android blocks cleartext by default (API 28+), so it must be allowed.
+
+  The host is user-configurable, so Phase 0 permits cleartext broadly. RECOMMENDED TIGHTENING once
+  your host is fixed: set base cleartextTrafficPermitted="false" and add a scoped <domain-config>
+  for just your tailnet host below. Prefer fronting the proxy with TLS (https/wss) — then cleartext
+  can be turned off entirely.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+
+    <!-- Example scoped form (keep cleartext only for the tailnet); enable instead of the broad
+         base-config above once the host is known:
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">ts.net</domain>
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+    -->
+</network-security-config>
