@@ -49,7 +49,8 @@ export function CameraWall() {
           </span>
         }
       />
-      <div className="grid grid-cols-1 gap-md sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {/* Ring-style: two side-by-side tiles on phones, more on wider screens. */}
+      <div className="grid grid-cols-2 gap-sm lg:grid-cols-3 xl:grid-cols-4">
         {ordered.map((entity) => (
           <button
             key={entity.entity_id}
@@ -58,7 +59,7 @@ export function CameraWall() {
             aria-label={`Open ${resolveName(entity, overrides)} live view`}
             className="block text-left transition-transform duration-fast ease-ease active:scale-[0.98]"
           >
-            <CameraTile entity={entity} overrides={overrides} density="comfortable" />
+            <CameraTile entity={entity} overrides={overrides} density="compact" />
           </button>
         ))}
       </div>
