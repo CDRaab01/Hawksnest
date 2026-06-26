@@ -24,8 +24,9 @@ import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 
 /**
- * Full-screen camera view. Snapshot-first: an auto-refreshing snapshot (every ~2s) fills the frame;
- * the live MJPEG stream upgrade lands in a follow-up. Dismisses on the close button or a scrim tap.
+ * Full-screen camera view. Plays the live MJPEG stream when one is available (showing the
+ * auto-refreshing snapshot until the first frame), else just the refreshing snapshot. Dismisses on
+ * the close button or a scrim tap; leaving tears the stream down.
  */
 @Composable
 fun CameraLightbox(
@@ -47,12 +48,15 @@ fun CameraLightbox(
                 .background(Color.Black.copy(alpha = 0.96f)),
             contentAlignment = Alignment.Center,
         ) {
-            CameraSnapshot(
-                model = bustCache(snapshotUrl, bucket),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f),
-            )
+            val frameModifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+            if (streamUrl != null) {
+                // Live MJPEG (falls back to the snapshot internally until the first frame).
+                MjpegView(streamUrl = streamUrl, snapshotUrl = snapshotUrl, bucket = bucket, modifier = frameModifier)
+            } else {
+                CameraSnapshot(model = bustCache(snapshotUrl, bucket), modifier = frameModifier)
+            }
             Text(
                 name,
                 style = MaterialTheme.typography.titleMedium,
