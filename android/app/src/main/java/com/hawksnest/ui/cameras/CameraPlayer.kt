@@ -70,6 +70,9 @@ fun CameraPlayer(
     // null playhead = live; reset to live whenever the camera changes.
     var playhead by remember(cam.id) { mutableStateOf<Long?>(null) }
     var paused by remember(cam.id) { mutableStateOf(false) }
+    // Ring/go2rtc live is WebRTC (sub-second). Try it first; on failure, step down to HLS/MJPEG.
+    val canWebRtc = viewModel.canWebRtc(cam.entityId)
+    var webRtcFailed by remember(cam.id) { mutableStateOf(false) }
 
     val isLive = playhead == null
     val headTime = playhead ?: endMs
@@ -125,13 +128,19 @@ fun CameraPlayer(
             )
         }
 
-        // Transport ladder: recorded VOD (when scrubbed) → live HLS/demo video → MJPEG proxy →
-        // snapshot. Mirrors the web LivePlayer's step-down.
+        // Transport ladder: recorded VOD (when scrubbed) → live WebRTC (go2rtc) → live HLS/demo
+        // video → MJPEG proxy → snapshot. Mirrors the web LivePlayer's step-down.
         val frame = Modifier
             .fillMaxWidth()
             .aspectRatio(16f / 9f)
         when {
             !isLive && recordingUrl != null -> VideoPlayer(recordingUrl, frame, paused = paused)
+            isLive && canWebRtc && !webRtcFailed -> WebRtcPlayer(
+                entityId = cam.entityId,
+                viewModel = viewModel,
+                onFail = { webRtcFailed = true },
+                modifier = frame,
+            )
             liveUrl != null -> VideoPlayer(liveUrl!!, frame, loop = true)
             cam.streamUrl != null -> MjpegView(
                 streamUrl = cam.streamUrl!!,

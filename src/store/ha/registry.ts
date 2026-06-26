@@ -10,6 +10,28 @@ export interface EntityRegistryEntry {
   entity_id: string;
   area_id: string | null;
   device_id: string | null;
+  /** HA's category for non-primary entities — "config" | "diagnostic" | null. */
+  entity_category?: "config" | "diagnostic" | null;
+}
+
+/** Entity categories the main Devices list + History demote out of view (kept under device detail). */
+export const HIDDEN_ENTITY_CATEGORIES = new Set(["config", "diagnostic"]);
+
+/**
+ * entity_id → entity_category for entities HA marks `config`/`diagnostic` — the field HA's own app
+ * uses to demote battery/last-activity/volume/calibration toggles out of the primary device list.
+ * Only the hidden categories are retained.
+ */
+export function buildEntityCategories(
+  entities: EntityRegistryEntry[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of entities) {
+    if (e.entity_category && HIDDEN_ENTITY_CATEGORIES.has(e.entity_category)) {
+      out[e.entity_id] = e.entity_category;
+    }
+  }
+  return out;
 }
 export interface DeviceRegistryEntry {
   id: string;

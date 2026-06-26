@@ -111,4 +111,37 @@ class SecurityTest {
         val r = securityReadout(listOf(lock("lock.x", "unlocked")), overrides)
         assertEquals("Side Gate unlocked", r.summary)
     }
+
+    @Test
+    fun companionDoorSensorOnALock_isNotDoubleCounted() {
+        // The Schlage BE469ZP exposes a lock + a `*_current_status` door contact on the SAME device.
+        // Counting both produced "Lock unlocked · Lock Current status of the door open" duplication.
+        val deviceByEntity = mapOf(
+            "lock.front_door_lock" to "dev_front",
+            "binary_sensor.front_door_current_status" to "dev_front",
+        )
+        val r = securityReadout(
+            entities = listOf(
+                lock("lock.front_door_lock", "unlocked", "Lock"),
+                sensor("binary_sensor.front_door_current_status", "door", "on", "Lock Current status of the door"),
+            ),
+            areas = mapOf(
+                "lock.front_door_lock" to "Front Door",
+                "binary_sensor.front_door_current_status" to "Front Door",
+            ),
+            deviceByEntity = deviceByEntity,
+        )
+        // Only the lock is reported (named by its area), not its redundant companion contact.
+        assertEquals("Front Door unlocked", r.summary)
+    }
+
+    @Test
+    fun standaloneDoorContact_withoutALockOnItsDevice_stillCounts() {
+        val r = securityReadout(
+            entities = listOf(sensor("binary_sensor.garage", "garage_door", "on", "Garage")),
+            deviceByEntity = mapOf("binary_sensor.garage" to "dev_garage"),
+        )
+        assertFalse(r.allClear)
+        assertEquals("Garage open", r.summary)
+    }
 }

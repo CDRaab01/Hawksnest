@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.ServiceData
+import com.hawksnest.core.ha.WebRtcHandle
+import com.hawksnest.core.ha.WebRtcSignal
+import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.CameraEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -19,6 +22,22 @@ class CameraPlayerViewModel @Inject constructor(
 ) : ViewModel() {
 
     suspend fun liveStreamUrl(entityId: String): String? = connection.streamUrl(entityId)
+
+    /** True when [entityId] advertises go2rtc WebRTC and the source can negotiate it. */
+    fun canWebRtc(entityId: String): Boolean =
+        connection.supportsWebRtc() &&
+            entity(entityId)?.stringAttr("frontend_stream_type") == "web_rtc"
+
+    /** Begin a WebRTC negotiation; returns a handle to tear it down (null when unsupported). */
+    suspend fun webrtcOffer(
+        entityId: String,
+        offerSdp: String,
+        onSignal: (WebRtcSignal) -> Unit,
+    ): WebRtcHandle? = connection.webrtcOffer(entityId, offerSdp, onSignal)
+
+    /** Push a local trickle ICE candidate for an in-flight session. */
+    suspend fun webrtcCandidate(sessionId: String, candidate: String, sdpMid: String?, sdpMLineIndex: Int) =
+        connection.webrtcCandidate(sessionId, candidate, sdpMid, sdpMLineIndex)
 
     suspend fun events(camera: String, startMs: Long, endMs: Long): List<CameraEvent> =
         connection.fetchCameraEvents(camera, startMs, endMs)

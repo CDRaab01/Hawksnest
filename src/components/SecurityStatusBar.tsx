@@ -40,21 +40,36 @@ const DOOR_CLASSES = new Set(["door", "window", "garage_door"]);
 export function SecurityStatusBar() {
   const alarm = usePrimaryAlarm();
   const entities = useEntityStore((s) => s.entities);
+  const areas = useEntityStore((s) => s.areas);
+  const entityToDevice = useEntityStore((s) => s.devices.entityToDevice);
 
   const { securityLine, offlineLabel } = useMemo(() => {
     const all = Object.values(entities);
+    // A door's name: its area ("Front Door") reads better than the raw Z-Wave friendly_name
+    // ("Lock Current status of the door"); fall back to the normal resolution chain.
+    const label = (e: (typeof all)[number]) =>
+      areas[e.entity_id] ?? resolveName(e, overrides);
     const unlocked = all.filter(
       (e) => domainOf(e.entity_id) === "lock" && e.state !== "locked" && e.state !== "locking",
+    );
+    // Devices that own a lock — their companion door/bolt contact (the Schlage
+    // `binary_sensor.*_current_status`) is redundant with the lock state, so don't double-count it.
+    const lockDevices = new Set(
+      all
+        .filter((e) => domainOf(e.entity_id) === "lock")
+        .map((e) => entityToDevice[e.entity_id])
+        .filter(Boolean),
     );
     const openDoors = all.filter(
       (e) =>
         domainOf(e.entity_id) === "binary_sensor" &&
         DOOR_CLASSES.has(String(e.attributes.device_class ?? "")) &&
-        e.state === "on",
+        e.state === "on" &&
+        !lockDevices.has(entityToDevice[e.entity_id]),
     );
     const parts = [
-      ...unlocked.map((e) => `${resolveName(e, overrides)} unlocked`),
-      ...openDoors.map((e) => `${resolveName(e, overrides)} open`),
+      ...unlocked.map((e) => `${label(e)} unlocked`),
+      ...openDoors.map((e) => `${label(e)} open`),
     ];
     const offline = all.filter((e) => e.state === "unavailable");
     return {
@@ -63,10 +78,10 @@ export function SecurityStatusBar() {
         offline.length === 0
           ? null
           : offline.length === 1
-            ? `${resolveName(offline[0], overrides)} is offline`
-            : `${resolveName(offline[0], overrides)} +${offline.length - 1} more offline`,
+            ? `${label(offline[0])} is offline`
+            : `${label(offline[0])} +${offline.length - 1} more offline`,
     };
-  }, [entities]);
+  }, [entities, areas, entityToDevice]);
 
   const view = alarm ? alarmView(alarm.state) : null;
   const allSecure = securityLine === "All doors locked";

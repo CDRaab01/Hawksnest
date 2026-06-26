@@ -9,7 +9,7 @@ import type { Channel } from "../components/PanelCard";
 import { overrides } from "../config/overrides";
 import { resolveIcon, resolveName } from "../lib/resolve";
 import { domainOf } from "../lib/ha";
-import { useEntity } from "../store/entityStore";
+import { useEntity, useDeviceDiagnostics } from "../store/entityStore";
 import { fetchHistory } from "../store/connection";
 import type { HistoryPoint } from "../store/source";
 
@@ -59,6 +59,8 @@ export function EntityScreen() {
   const { id = "" } = useParams();
   const decoded = decodeURIComponent(id);
   const entity = useEntity(decoded);
+  // Diagnostics for this device, filtered out of the main Devices list but kept reachable here.
+  const diagnostics = useDeviceDiagnostics(decoded);
 
   const [hours, setHours] = useState(24);
   const [points, setPoints] = useState<HistoryPoint[]>([]);
@@ -180,6 +182,27 @@ export function EntityScreen() {
           )}
         </PanelCard>
       </section>
+
+      {diagnostics.length > 0 && (
+        <section className="space-y-md">
+          <SectionHeader label="Diagnostics" channel={channel} />
+          <PanelCard className="divide-y divide-hairline">
+            {diagnostics.map((d) => (
+              <div
+                key={d.entity_id}
+                className="flex items-center justify-between gap-md px-lg py-md"
+              >
+                <span className="truncate font-body text-body text-ink-dim">
+                  {resolveName(d, overrides)}
+                </span>
+                <span className="truncate font-body text-body text-ink">
+                  {d.state}
+                </span>
+              </div>
+            ))}
+          </PanelCard>
+        </section>
+      )}
 
       {attrs.length > 0 && (
         <section className="space-y-md">

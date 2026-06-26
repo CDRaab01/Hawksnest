@@ -55,7 +55,12 @@ class HistoryViewModel @Inject constructor(
         _feed.value = try {
             val end = System.currentTimeMillis()
             val start = end - hours * 3_600_000L
-            HistoryFeed.Loaded(connection.fetchLogbook(start, end))
+            // Drop config/diagnostic entities (the `sensor.*_last_activity`, `*_battery`, … spam) so
+            // the timeline shows meaningful state changes, not housekeeping noise.
+            val categories = connection.state.entityCategories.value
+            val events = connection.fetchLogbook(start, end)
+                .filter { it.entityId == null || it.entityId !in categories }
+            HistoryFeed.Loaded(events)
         } catch (_: Exception) {
             HistoryFeed.Error
         }

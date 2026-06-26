@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -59,6 +60,30 @@ class EntityDetailViewModel @Inject constructor(
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * The hidden config/diagnostic entities belonging to the same device as this entity (battery,
+     * last activity, volume, siren, motion-detection toggle…). They're filtered out of the main
+     * Devices list, so this entity's detail doubles as the device view that keeps them reachable.
+     */
+    val diagnostics: StateFlow<List<DeviceUi>> =
+        combine(state.entities, state.devices, state.entityCategories) { entities, index, categories ->
+            val deviceId = index.deviceByEntity[entityId] ?: return@combine emptyList()
+            val record = index.devices[deviceId] ?: return@combine emptyList()
+            record.entityIds
+                .filter { it != entityId && it in categories }
+                .mapNotNull { entities[it] }
+                .map { e ->
+                    DeviceUi(
+                        entityId = e.entityId,
+                        name = resolveName(e, overrides),
+                        stateText = e.state.replaceFirstChar { c -> c.uppercaseChar() },
+                        rawState = e.state,
+                        card = domainToCard(e.entityId),
+                        attributes = e.attributes,
+                    )
+                }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _hours = MutableStateFlow(24)
     val hours: StateFlow<Int> = _hours.asStateFlow()

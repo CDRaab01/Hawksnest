@@ -58,6 +58,7 @@ fun EntityDetailScreen(
     val device by viewModel.device.collectAsState()
     val hours by viewModel.hours.collectAsState()
     val history by viewModel.history.collectAsState()
+    val diagnostics by viewModel.diagnostics.collectAsState()
     val pulse = HawksnestTheme.pulse
     val channel = domainChannel(domainOf(viewModel.entityId), pulse)
 
@@ -132,6 +133,34 @@ fun EntityDetailScreen(
                         channel = channel,
                         modifier = Modifier.fillMaxWidth().height(96.dp),
                     )
+                }
+            }
+
+            if (diagnostics.isNotEmpty()) {
+                SectionHeader("Diagnostics", channel = channel)
+                PanelCard {
+                    diagnostics.forEach { d ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = HawksnestTheme.spacing.xs),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                d.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                d.stateText,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
 

@@ -5,6 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -33,6 +34,8 @@ class HaConnection(
 ) {
     private val nextId = AtomicInteger(1)
     private val pending = ConcurrentHashMap<Int, CompletableDeferred<JsonObject>>()
+    /** Subscribe-style commands (e.g. `camera/webrtc/offer`): id → event sink for its `event` frames. */
+    private val subscriptions = ConcurrentHashMap<Int, (JsonObject) -> Unit>()
     private val authGate = CompletableDeferred<Unit>()
     @Volatile private var ws: WebSocket? = null
     @Volatile private var entitiesSink: ((JsonObject) -> Unit)? = null
@@ -65,12 +68,22 @@ class HaConnection(
                 HaAuthException(HaMessages.errorMessage(frame) ?: "Invalid access token"),
             )
             HaMessages.TYPE_RESULT -> HaMessages.frameId(frame)?.let { pending.remove(it)?.complete(frame) }
-            HaMessages.TYPE_EVENT -> (frame["event"] as? JsonObject)?.let { entitiesSink?.invoke(it) }
+            HaMessages.TYPE_EVENT -> {
+                val event = frame["event"] as? JsonObject
+                val sub = HaMessages.frameId(frame)?.let { subscriptions[it] }
+                // Route to the matching subscribe-style command; otherwise it's the entity stream.
+                if (sub != null) event?.let(sub) else event?.let { entitiesSink?.invoke(it) }
+            }
         }
     }
 
-    /** Send a command and await its `result` frame. */
+    /**
+     * Send a command and await its `result` frame. Suspends on [authGate] first: HA's WebSocket
+     * rejects any non-`auth` frame during the handshake ("Auth message incorrectly formatted…")
+     * and closes the socket, so a command must never go out before `auth_ok`.
+     */
     suspend fun request(type: String, build: JsonObjectBuilder.() -> Unit = {}): JsonObject {
+        authGate.await()
         val id = nextId.getAndIncrement()
         val def = CompletableDeferred<JsonObject>()
         pending[id] = def
@@ -78,8 +91,39 @@ class HaConnection(
         return def.await()
     }
 
-    /** Fire-and-forget subscribe; entity events arrive via [onEntitiesEvent]. */
+    /**
+     * Start a subscribe-style command (HA streams `event` frames until unsubscribed). [onEvent]
+     * receives each event payload; the returned id is passed to [unsubscribe] to tear it down.
+     * Gated on auth like [request]. Suspends until HA acks the subscription with its `result` frame.
+     */
+    suspend fun subscribe(
+        type: String,
+        build: JsonObjectBuilder.() -> Unit = {},
+        onEvent: (JsonObject) -> Unit,
+    ): Int {
+        authGate.await()
+        val id = nextId.getAndIncrement()
+        subscriptions[id] = onEvent
+        val def = CompletableDeferred<JsonObject>()
+        pending[id] = def
+        ws?.send(HaMessages.command(id, type, build).toString())
+        def.await() // subscription acknowledged
+        return id
+    }
+
+    /** Stop routing events for a subscription and best-effort tell HA to unsubscribe. */
+    fun unsubscribe(id: Int) {
+        subscriptions.remove(id) ?: return
+        if (!authGate.isCompleted) return
+        ws?.send(
+            HaMessages.command(nextId.getAndIncrement(), "unsubscribe_events") { put("subscription", id) }
+                .toString(),
+        )
+    }
+
+    /** Fire-and-forget subscribe; entity events arrive via [onEntitiesEvent]. Post-auth only. */
     fun subscribeEntities() {
+        if (!authGate.isCompleted) return
         ws?.send(HaMessages.command(nextId.getAndIncrement(), "subscribe_entities").toString())
     }
 
@@ -89,6 +133,7 @@ class HaConnection(
         entityId: String?,
         serviceData: Map<String, Any?> = emptyMap(),
     ) {
+        authGate.await()
         val id = nextId.getAndIncrement()
         val def = CompletableDeferred<JsonObject>()
         pending[id] = def
@@ -97,6 +142,7 @@ class HaConnection(
     }
 
     fun ping() {
+        if (!authGate.isCompleted) return
         ws?.send(HaMessages.command(nextId.getAndIncrement(), "ping").toString())
     }
 
@@ -110,6 +156,7 @@ class HaConnection(
         if (!authGate.isCompleted) authGate.completeExceptionally(HaClosedException())
         pending.values.forEach { it.completeExceptionally(HaClosedException()) }
         pending.clear()
+        subscriptions.clear()
         closedCb?.invoke()
     }
 }
