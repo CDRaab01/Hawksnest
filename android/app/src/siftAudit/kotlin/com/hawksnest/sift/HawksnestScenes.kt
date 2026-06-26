@@ -18,10 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -36,6 +34,7 @@ import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.ui.components.ConnectionPill
 import com.hawksnest.ui.components.DataText
 import com.hawksnest.ui.components.PanelCard
+import com.hawksnest.ui.components.PulseButton
 import com.hawksnest.ui.components.SectionHeader
 import com.hawksnest.ui.components.StatTile
 
@@ -154,8 +153,8 @@ fun ControlsScene() {
                 DataText(text = "On · 80%")
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = {}) { Text("Toggle") }
-                    OutlinedButton(onClick = {}) { Text("Details") }
+                    PulseButton(text = "Toggle", onClick = {})
+                    PulseButton(text = "Details", onClick = {}, tonal = true)
                 }
             }
             PanelCard {
@@ -163,7 +162,7 @@ fun ControlsScene() {
                 Spacer(Modifier.height(4.dp))
                 DataText(text = "Locked")
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = {}) { Text("Unlock") }
+                PulseButton(text = "Unlock", onClick = {})
             }
         }
     }
@@ -195,7 +194,7 @@ fun SettingsScene() {
                 label = { Text("Long-lived access token") },
                 modifier = Modifier.fillMaxWidth(),
             )
-            Button(onClick = {}, modifier = Modifier.fillMaxWidth()) { Text("Connect") }
+            PulseButton(text = "Connect", onClick = {}, modifier = Modifier.fillMaxWidth())
         }
     }
 }

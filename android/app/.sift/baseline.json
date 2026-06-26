@@ -1,1 +1,21 @@
-[]
+[
+  "controls-dark:overused-font:tokens",
+  "controls-dark:repeated-section-kicker:kickers",
+  "controls-dark:tiny-body-text:humidity",
+  "controls-dark:tiny-body-text:living-room",
+  "controls-dark:tiny-body-text:temperature",
+  "controls-light:overused-font:tokens",
+  "controls-light:repeated-section-kicker:kickers",
+  "controls-light:tiny-body-text:humidity",
+  "controls-light:tiny-body-text:living-room",
+  "controls-light:tiny-body-text:temperature",
+  "security-hero-dark:overused-font:tokens",
+  "security-hero-dark:tiny-body-text:cameras",
+  "security-hero-dark:tiny-body-text:front-door",
+  "security-hero-light:overused-font:tokens",
+  "security-hero-light:tiny-body-text:cameras",
+  "security-hero-light:tiny-body-text:front-door",
+  "settings-dark:overused-font:tokens",
+  "settings-light:low-contrast-text:http-hawksnest-tailnet-ts-net-80",
+  "settings-light:overused-font:tokens"
+]

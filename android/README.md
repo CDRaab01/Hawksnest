@@ -29,7 +29,10 @@ components (`ui/components/`) are in place, plus:
 ## Build
 
 Requires the Android SDK (set `ANDROID_HOME`, or `sdk.dir` in `local.properties`). minSdk 26,
-target/compile 35, Kotlin 2.0, Compose.
+target/compile 35, Kotlin 2.0, Compose. No SDK handy? Run `bash scripts/setup-android-sdk.sh` from
+the repo root — it installs a minimal SDK (platform-35 + build-tools 35) and writes
+`android/local.properties`. (Run with `ANDROID_HOME` exported when using the Sift composite build,
+so the included Sift build finds the SDK too.)
 
 ```bash
 cd android
@@ -64,10 +67,10 @@ cd android
 ./gradlew :app:testDebugUnitTest --tests "*HawksnestDesignSlopTest"   # report → app/build/sift/report.json
 ```
 
-In CI it runs as the **advisory, non-gating** `sift-audit` job in `android-ci.yml`. Because the
-default `GITHUB_TOKEN` can't read a *different* private repo, that job checks Sift out with a PAT
-secret **`SIFT_REPO_TOKEN`** (read access to the Sift repo). Add that secret to enable the job;
-without it the advisory job goes red but never blocks the build.
+In CI it runs as the **advisory, non-gating** `sift-audit` job in `android-ci.yml`, gated by the
+committed baseline (`app/.sift/baseline.json`) so it only flags *new* slop. Both repos are public,
+so the job checks Sift out with the default token; the optional `SIFT_REPO_TOKEN` secret is only
+needed if the Sift repo is ever made private.
 
 ## Networking note
 

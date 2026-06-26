@@ -50,11 +50,10 @@ jobs:
 
   # ── Sift design-slop audit (advisory, non-gating) ──────────────────────────
   # Renders Hawksnest's Compose UI through the Sift auditor (a sibling repo) and uploads the
-  # findings report (app/build/sift/report.json). `continue-on-error` keeps it non-gating during
-  # adoption — the gate is the baseline in android/app/.sift/. The default GITHUB_TOKEN cannot read
-  # a *different* private repo, so checking out Sift uses a PAT secret `SIFT_REPO_TOKEN` with read
-  # access to the Sift repo; without it the checkout (and thus this advisory job) goes red but never
-  # blocks the workflow.
+  # findings report (app/build/sift/report.json). `continue-on-error` keeps it non-gating — the gate
+  # is the baseline in android/app/.sift/, so this only ever surfaces *new* slop. Both repos are
+  # public, so the default GITHUB_TOKEN can check Sift out; `SIFT_REPO_TOKEN` is an optional fallback
+  # if the Sift repo is ever made private.
   sift-audit:
     name: "Android — Sift design audit (advisory)"
     runs-on: ubuntu-latest
