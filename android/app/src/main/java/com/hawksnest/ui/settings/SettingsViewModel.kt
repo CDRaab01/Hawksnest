@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
+import com.hawksnest.push.FcmEnrollment
 import com.hawksnest.util.CredentialStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -18,10 +19,14 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     private val credentialStore: CredentialStore,
     private val connectionManager: ConnectionManager,
+    private val fcmEnrollment: FcmEnrollment,
 ) : ViewModel() {
 
     val status: StateFlow<ConnectionStatus> = connectionManager.state.status
     val error: StateFlow<String?> = connectionManager.state.error
+
+    /** Whether this build carries an FCM project config (else push is off). */
+    val pushConfigured: Boolean = fcmEnrollment.configured
 
     val savedUrl: StateFlow<String?> = credentialStore.haUrl
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -36,6 +41,8 @@ class SettingsViewModel @Inject constructor(
             if (url.isBlank() || tok.isBlank()) return@launch
             credentialStore.save(url, tok)
             connectionManager.reconnect()
+            // Re-push the FCM token now that HA creds exist (no-op if push isn't configured).
+            fcmEnrollment.enroll()
         }
     }
 

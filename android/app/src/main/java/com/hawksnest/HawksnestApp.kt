@@ -4,6 +4,8 @@ import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import com.hawksnest.core.ha.ConnectionManager
+import com.hawksnest.push.FcmEnrollment
+import com.hawksnest.push.PushChannels
 import dagger.hilt.android.HiltAndroidApp
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -20,10 +22,15 @@ class HawksnestApp : Application(), ImageLoaderFactory {
 
     @Inject lateinit var connectionManager: ConnectionManager
     @Inject lateinit var okHttpClient: OkHttpClient
+    @Inject lateinit var fcmEnrollment: FcmEnrollment
 
     override fun onCreate() {
         super.onCreate()
         connectionManager.start()
+        PushChannels.createChannels(this)
+        // Manual Firebase init (no google-services.json); no-op until FCM is configured.
+        fcmEnrollment.init()
+        fcmEnrollment.enroll()
     }
 
     override fun newImageLoader(): ImageLoader =

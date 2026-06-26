@@ -149,6 +149,27 @@ fun SettingsScreen(
             }
         }
 
+        SectionHeader("Notifications")
+        PanelCard {
+            Text(
+                if (viewModel.pushConfigured) "Security push enabled" else "Security push not configured",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                if (viewModel.pushConfigured) {
+                    "This build is wired to Firebase. Connect Home Assistant above and add the " +
+                        "input_text.hawksnest_push_token helper + the Hawksnest push automation (see PUSH.md)."
+                } else {
+                    "Push is off in this build. Add the FCM project config (fcm.* in local.properties / " +
+                        "CI secrets) and the HA-side automation to receive security alerts. See PUSH.md."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = HawksnestTheme.spacing.xs),
+            )
+        }
+
         SectionHeader("About")
         PanelCard {
             Text(

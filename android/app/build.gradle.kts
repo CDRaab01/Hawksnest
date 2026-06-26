@@ -36,6 +36,16 @@ android {
             "String", "HA_DEFAULT_URL",
             "\"${localProperties.getProperty("ha.url", "")}\""
         )
+
+        // FCM project config (Phase 4 push). Sourced from local.properties / env so the build stays
+        // green with no google-services.json — we initialize Firebase manually from these at runtime.
+        // Empty (the default) ⇒ push is disabled and the app behaves exactly as before.
+        fun fcm(key: String) =
+            System.getenv(key) ?: localProperties.getProperty("fcm.${key.removePrefix("FCM_").lowercase()}", "")
+        buildConfigField("String", "FCM_PROJECT_ID", "\"${fcm("FCM_PROJECT_ID")}\"")
+        buildConfigField("String", "FCM_APPLICATION_ID", "\"${fcm("FCM_APPLICATION_ID")}\"")
+        buildConfigField("String", "FCM_API_KEY", "\"${fcm("FCM_API_KEY")}\"")
+        buildConfigField("String", "FCM_SENDER_ID", "\"${fcm("FCM_SENDER_ID")}\"")
     }
 
     signingConfigs {
@@ -108,6 +118,11 @@ dependencies {
 
     // Coil — camera snapshot images (live MJPEG is hand-rolled on OkHttp)
     implementation(libs.coil.compose)
+
+    // Firebase Cloud Messaging — security push (initialized manually from BuildConfig; no
+    // google-services plugin, so no google-services.json is required to build).
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
