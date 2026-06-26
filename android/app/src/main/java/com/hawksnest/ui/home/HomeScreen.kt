@@ -29,6 +29,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,11 +44,15 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.alarmView
 import com.hawksnest.security.LocalBiometricGate
+import com.hawksnest.ui.cameras.CameraLightbox
+import com.hawksnest.ui.cameras.CameraSnapshot
+import com.hawksnest.ui.cameras.bustCache
 import com.hawksnest.ui.components.ConnectionPill
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.SectionHeader
 import com.hawksnest.ui.theme.HawksnestTheme
 import com.hawksnest.ui.theme.color
+import kotlinx.coroutines.delay
 
 /** Per-arm-mode glyph (Ring uses a distinct icon per mode). */
 private val ARM_ICON: Map<String, ImageVector> = mapOf(
@@ -64,6 +72,14 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.uiState.collectAsState()
+    // One ticking bucket shared by every tile so all snapshots refresh on the same ~5s beat.
+    val bucket by produceState(0L) {
+        while (true) {
+            value = System.currentTimeMillis() / 5000
+            delay(5000)
+        }
+    }
+    var lightbox by remember { mutableStateOf<CameraUi?>(null) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -97,7 +113,14 @@ fun HomeScreen(
             )
             ui.cameras.chunked(2).forEach { rowCams ->
                 Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
-                    rowCams.forEach { cam -> CameraTile(cam.name, cam.live, Modifier.weight(1f)) }
+                    rowCams.forEach { cam ->
+                        CameraTile(
+                            cam = cam,
+                            snapshotModel = bustCache(cam.snapshotUrl, bucket),
+                            onClick = { lightbox = cam },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                     if (rowCams.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
@@ -129,6 +152,15 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    lightbox?.let { cam ->
+        CameraLightbox(
+            name = cam.name,
+            snapshotUrl = cam.snapshotUrl,
+            streamUrl = cam.streamUrl,
+            onDismiss = { lightbox = null },
+        )
     }
 }
 
@@ -222,15 +254,23 @@ private fun ArmCircle(
 }
 
 @Composable
-private fun CameraTile(name: String, live: Boolean, modifier: Modifier = Modifier) {
+private fun CameraTile(
+    cam: CameraUi,
+    snapshotModel: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val pulse = HawksnestTheme.pulse
+    val name = cam.name
+    val live = cam.live
     PanelCard(modifier = modifier, contentPadding = 0.dp) {
         Box(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .background(Brush.verticalGradient(listOf(Color(0xFF2A2F37), Color(0xFF0E1116)))),
+                .clickable(onClick = onClick),
         ) {
+            CameraSnapshot(model = snapshotModel, modifier = Modifier.fillMaxSize())
             Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)

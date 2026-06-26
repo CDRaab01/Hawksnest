@@ -12,7 +12,10 @@ import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.AlarmView
 import com.hawksnest.core.logic.alarmView
 import com.hawksnest.core.logic.groupByArea
+import com.hawksnest.core.logic.isCameraLive
 import com.hawksnest.core.logic.resolveName
+import com.hawksnest.core.logic.snapshotUrl
+import com.hawksnest.core.logic.streamUrl
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +24,15 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class CameraUi(val entityId: String, val name: String, val live: Boolean)
+data class CameraUi(
+    val entityId: String,
+    val name: String,
+    val live: Boolean,
+    /** Signed snapshot URL resolved against the HA origin (null in demo / when down). */
+    val snapshotUrl: String? = null,
+    /** Derived MJPEG live-stream URL (used by the camera lightbox). */
+    val streamUrl: String? = null,
+)
 
 data class HomeUi(
     val status: ConnectionStatus = ConnectionStatus.CONNECTING,
@@ -49,9 +60,9 @@ class HomeViewModel @Inject constructor(
     private val state = connection.state
 
     val uiState: StateFlow<HomeUi> = combine(
-        state.entities, state.areas, state.status, state.error,
-    ) { entities, areas, status, error ->
-        buildUi(entities, areas, status, error)
+        state.entities, state.areas, state.status, state.error, state.baseUrl,
+    ) { entities, areas, status, error, baseUrl ->
+        buildUi(entities, areas, status, error, baseUrl)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUi())
 
     init {
@@ -71,6 +82,7 @@ class HomeViewModel @Inject constructor(
         areas: Map<String, String>,
         status: ConnectionStatus,
         error: String?,
+        baseUrl: String,
     ): HomeUi {
         val all = entities.values.toList()
 
@@ -97,12 +109,18 @@ class HomeViewModel @Inject constructor(
             else -> "${resolveName(offline[0], overrides)} +${offline.size - 1} more offline"
         }
 
+        val resolvedBase = baseUrl.ifEmpty { null }
         val cameras = all
             .filter { domainOf(it.entityId) == "camera" }
             .sortedBy { it.entityId }
             .map {
-                val live = it.stringAttr("entity_picture") != null && it.state != "unavailable"
-                CameraUi(it.entityId, resolveName(it, overrides), live)
+                CameraUi(
+                    entityId = it.entityId,
+                    name = resolveName(it, overrides),
+                    live = isCameraLive(it),
+                    snapshotUrl = snapshotUrl(it, resolvedBase),
+                    streamUrl = streamUrl(it, resolvedBase),
+                )
             }
 
         val rooms = groupByArea(all, areas)
