@@ -42,7 +42,15 @@ val fixtureEntities: List<HassEntity> = listOf(
     },
     ent("lock.back_door_lock", "locked") { put("friendly_name", "Lock") },
     ent("light.basement", "on") { put("friendly_name", "Basement"); put("brightness", 153) },
-    ent("alarm_control_panel.home", "disarmed") { put("friendly_name", "Alarm") },
+    ent("alarm_control_panel.home", "disarmed") {
+        put("friendly_name", "Alarm"); put("code_format", "number")
+    },
+    ent("binary_sensor.kitchen_smoke", "off") {
+        put("friendly_name", "Kitchen Smoke"); put("device_class", "smoke")
+    },
+    ent("binary_sensor.basement_leak", "off") {
+        put("friendly_name", "Basement Leak"); put("device_class", "moisture")
+    },
     ent("cover.living_room_blinds", "closed") {
         put("friendly_name", "Living Room Blinds"); put("device_class", "blind")
         put("current_position", 0)

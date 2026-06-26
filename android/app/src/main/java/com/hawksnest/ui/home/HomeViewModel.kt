@@ -48,9 +48,15 @@ data class HomeUi(
     val liveCameraCount: Int = 0,
     val roomCount: Int = 0,
     val roomsPreview: String = "",
+    /** Triggered life-safety sensors (smoke/CO/gas/leak), surfaced regardless of armed state. */
+    val lifeSafetyAlerts: List<String> = emptyList(),
+    val lifeSafetyMonitored: Int = 0,
+    /** The alarm panel enforces a disarm code (HA `code_format`) → show the PIN keypad. */
+    val alarmRequiresCode: Boolean = false,
 )
 
 private val DOOR_CLASSES = setOf("door", "window", "garage_door")
+private val LIFE_SAFETY_CLASSES = setOf("smoke", "carbon_monoxide", "gas", "moisture")
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -69,11 +75,13 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { connection.start() }
     }
 
-    /** Arm/disarm. Non-optimistic — the store reconciles from the source echo. */
-    fun arm(service: String) {
+    /** Arm/disarm. Non-optimistic — the store reconciles from the source echo. A [code] (from the
+     *  PIN keypad) is forwarded to HA as service data when the panel requires one. */
+    fun arm(service: String, code: String? = null) {
         val id = uiState.value.alarmEntityId ?: return
+        val extra = if (code.isNullOrEmpty()) emptyMap() else mapOf("code" to code)
         viewModelScope.launch {
-            connection.callService("alarm_control_panel", service, ServiceData(entityId = id))
+            connection.callService("alarm_control_panel", service, ServiceData(entityId = id, extra = extra))
         }
     }
 
@@ -123,6 +131,12 @@ class HomeViewModel @Inject constructor(
                 )
             }
 
+        // Life-safety is an always-on channel — surfaced no matter the armed state.
+        val lifeSafety = all.filter {
+            domainOf(it.entityId) == "binary_sensor" && it.stringAttr("device_class") in LIFE_SAFETY_CLASSES
+        }
+        val lifeSafetyAlerts = lifeSafety.filter { it.state == "on" }.map { resolveName(it, overrides) }
+
         val rooms = groupByArea(all, areas)
 
         return HomeUi(
@@ -138,6 +152,9 @@ class HomeViewModel @Inject constructor(
             liveCameraCount = cameras.count { it.live },
             roomCount = rooms.size,
             roomsPreview = rooms.take(4).joinToString(" · ") { it.area },
+            lifeSafetyAlerts = lifeSafetyAlerts,
+            lifeSafetyMonitored = lifeSafety.size,
+            alarmRequiresCode = alarmEntity?.stringAttr("code_format") != null,
         )
     }
 }

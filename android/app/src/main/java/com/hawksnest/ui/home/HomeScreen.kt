@@ -80,6 +80,7 @@ fun HomeScreen(
         }
     }
     var lightbox by remember { mutableStateOf<CameraUi?>(null) }
+    var showKeypad by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -97,7 +98,15 @@ fun HomeScreen(
             ConnectionPill(ui.status)
         }
 
-        SecurityHero(ui, onArm = viewModel::arm)
+        if (ui.lifeSafetyAlerts.isNotEmpty() || ui.lifeSafetyMonitored > 0) {
+            LifeSafetyStrip(ui)
+        }
+
+        SecurityHero(
+            ui,
+            onArm = viewModel::arm,
+            onDisarm = { if (ui.alarmRequiresCode) showKeypad = true else viewModel.arm("alarm_disarm") },
+        )
 
         if (ui.cameras.isNotEmpty()) {
             SectionHeader(
@@ -162,10 +171,45 @@ fun HomeScreen(
             onDismiss = { lightbox = null },
         )
     }
+
+    if (showKeypad) {
+        AlarmKeypadDialog(
+            onSubmit = { code -> viewModel.arm("alarm_disarm", code); showKeypad = false },
+            onDismiss = { showKeypad = false },
+        )
+    }
+}
+
+/**
+ * Life-safety (smoke/CO/gas/leak) — an always-on channel surfaced regardless of armed state. A
+ * triggered sensor shows a prominent streak-channel alert; otherwise a quiet monitored "all clear".
+ */
+@Composable
+private fun LifeSafetyStrip(ui: HomeUi) {
+    val pulse = HawksnestTheme.pulse
+    val alert = ui.lifeSafetyAlerts.isNotEmpty()
+    val channel = if (alert) pulse.streak else pulse.recovery
+    PanelCard(channel = channel) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(channel))
+            Spacer(Modifier.size(HawksnestTheme.spacing.sm))
+            Text(
+                if (alert) {
+                    "Life-safety: ${ui.lifeSafetyAlerts.joinToString(" · ")}"
+                } else {
+                    "Life-safety: all clear · ${ui.lifeSafetyMonitored} monitored"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (alert) channel else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
 
 @Composable
-private fun SecurityHero(ui: HomeUi, onArm: (String) -> Unit) {
+private fun SecurityHero(ui: HomeUi, onArm: (String) -> Unit, onDisarm: () -> Unit) {
     val pulse = HawksnestTheme.pulse
     val gate = LocalBiometricGate.current
     PanelCard(channel = ui.alarm?.let { pulse.color(it.channel) }, raised = true) {
@@ -181,8 +225,9 @@ private fun SecurityHero(ui: HomeUi, onArm: (String) -> Unit) {
                         active = ui.alarmRawState == b.state,
                         channel = pulse.color(alarmView(b.state).channel),
                         onClick = {
-                            // Disarm is the only "less secure" arm action — gate it.
-                            if (b.service == "alarm_disarm") gate("Disarm alarm") { onArm(b.service) } else onArm(b.service)
+                            // Disarm is the only "less secure" arm action — gate it, then route
+                            // through the PIN keypad if the panel requires a code.
+                            if (b.service == "alarm_disarm") gate("Disarm alarm") { onDisarm() } else onArm(b.service)
                         },
                     )
                 }
