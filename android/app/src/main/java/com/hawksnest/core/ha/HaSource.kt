@@ -7,6 +7,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.hawksnest.core.logic.LogEvent
+import com.hawksnest.core.logic.normalizeLogbook
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -64,6 +66,17 @@ class HaSource(
         }
         val result = frame["result"] as? JsonObject ?: return emptyList()
         return parseHistory(result, entityId)
+    }
+
+    override suspend fun fetchLogbook(startMs: Long, endMs: Long, entityIds: List<String>?): List<LogEvent> {
+        val c = conn ?: throw IllegalStateException("Not connected to Home Assistant.")
+        val frame = c.request("logbook/get_events") {
+            put("start_time", Instant.ofEpochMilli(startMs).toString())
+            put("end_time", Instant.ofEpochMilli(endMs).toString())
+            if (!entityIds.isNullOrEmpty()) putJsonArray("entity_ids") { entityIds.forEach { add(it) } }
+        }
+        val result = frame["result"] as? JsonArray ?: return emptyList()
+        return normalizeLogbook(result.mapNotNull { it as? JsonObject })
     }
 
     private suspend fun runLoop() {

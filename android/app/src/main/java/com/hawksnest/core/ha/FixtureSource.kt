@@ -1,5 +1,6 @@
 package com.hawksnest.core.ha
 
+import com.hawksnest.core.logic.LogEvent
 import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
 import kotlin.math.roundToInt
@@ -59,6 +60,30 @@ class FixtureSource @Inject constructor(private val state: HaState) : Source {
                 else -> current.state
             }
             HistoryPoint(t, s)
+        }
+    }
+
+    /**
+     * Synthesize a short demo logbook so the History tab isn't empty without a live HA — one event
+     * per entity (its current state), spaced a few minutes apart and clamped to the window. Real
+     * timestamps come from HA in the live source.
+     */
+    override suspend fun fetchLogbook(startMs: Long, endMs: Long, entityIds: List<String>?): List<LogEvent> {
+        val now = System.currentTimeMillis().coerceAtMost(endMs)
+        val entities = state.entities.value.values
+            .filter { entityIds == null || it.entityId in entityIds }
+            .take(20)
+        return entities.mapIndexedNotNull { i, e ->
+            val t = now - i * 7 * 60_000L
+            if (t < startMs) return@mapIndexedNotNull null
+            LogEvent(
+                timeMs = t,
+                name = e.friendlyName() ?: e.entityId,
+                message = "changed to ${e.state}",
+                entityId = e.entityId,
+                domain = domainOf(e.entityId),
+                state = e.state,
+            )
         }
     }
 

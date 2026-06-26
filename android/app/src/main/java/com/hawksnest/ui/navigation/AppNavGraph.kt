@@ -76,7 +76,9 @@ fun AppNavGraph(startDestination: String = Screen.Home.route) {
             composable(Screen.Rooms.route) {
                 RoomsScreen(onOpenArea = { area -> navController.navigate(Screen.Area.createRoute(area)) })
             }
-            composable(Screen.History.route) { HistoryScreen() }
+            composable(Screen.History.route) {
+                HistoryScreen(onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) })
+            }
             composable(Screen.Settings.route) { SettingsScreen() }
             composable(
                 route = Screen.Area.route,

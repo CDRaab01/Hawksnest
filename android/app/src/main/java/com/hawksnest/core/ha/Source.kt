@@ -1,5 +1,7 @@
 package com.hawksnest.core.ha
 
+import com.hawksnest.core.logic.LogEvent
+
 /** One historical sample for an entity. [t] is epoch milliseconds; [state] is the raw HA state. */
 data class HistoryPoint(val t: Long, val state: String)
 
@@ -30,5 +32,10 @@ interface Source {
     /** Fetch recent state history for one entity over the last [hours]. */
     suspend fun fetchHistory(entityId: String, hours: Int): List<HistoryPoint> {
         throw UnsupportedOperationException("This source cannot provide history.")
+    }
+
+    /** Fetch the logbook over `[startMs, endMs]`, optionally narrowed to specific entities. */
+    suspend fun fetchLogbook(startMs: Long, endMs: Long, entityIds: List<String>? = null): List<LogEvent> {
+        throw UnsupportedOperationException("This source cannot provide a logbook.")
     }
 }

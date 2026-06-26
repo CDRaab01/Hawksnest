@@ -60,4 +60,8 @@ class ConnectionManager @Inject constructor(
     /** Recent state history for one entity (live HA over WS; synthesized in demo). */
     suspend fun fetchHistory(entityId: String, hours: Int): List<HistoryPoint> =
         current?.fetchHistory(entityId, hours) ?: emptyList()
+
+    /** The logbook over `[startMs, endMs]` (live HA over WS; synthesized in demo). */
+    suspend fun fetchLogbook(startMs: Long, endMs: Long): List<com.hawksnest.core.logic.LogEvent> =
+        current?.fetchLogbook(startMs, endMs) ?: emptyList()
 }
