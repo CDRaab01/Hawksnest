@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Route, Routes } from "react-router-dom";
 import { DashboardScreen } from "./screens/DashboardScreen";
+import { RoomsScreen } from "./screens/RoomsScreen";
 import { AreaScreen } from "./screens/AreaScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { CustomizeScreen } from "./screens/CustomizeScreen";
@@ -27,6 +28,7 @@ export default function App() {
         <main className="mx-auto max-w-[1600px] px-lg py-xl">
           <Routes>
             <Route path="/" element={<DashboardScreen />} />
+            <Route path="/rooms" element={<RoomsScreen />} />
             <Route path="/area/:area" element={<AreaScreen />} />
             <Route path="/entity/:id" element={<EntityScreen />} />
             <Route path="/devices" element={<DevicesScreen />} />

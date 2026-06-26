@@ -2,6 +2,7 @@ import { Link, NavLink } from "react-router-dom";
 import {
   Shield,
   LayoutDashboard,
+  LayoutGrid,
   History as HistoryIcon,
   HardDrive,
   Workflow,
@@ -21,6 +22,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/rooms", label: "Rooms", icon: LayoutGrid },
   { to: "/history", label: "History", icon: HistoryIcon },
   { to: "/devices", label: "Devices", icon: HardDrive },
   { to: "/automations", label: "Automations", icon: Workflow },

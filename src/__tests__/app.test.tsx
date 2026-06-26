@@ -23,14 +23,19 @@ function renderAt(path: string) {
 }
 
 describe("Home", () => {
-  it("shows pinned favorites + area hub with resolved labels", async () => {
+  it("shows the security hero, a rooms entry, and resolved labels (no clutter)", async () => {
     renderAt("/");
-    // Source bootstrap populates the store on mount.
-    await screen.findByText("Areas");
-    // Favorites section header (also matches the alarm card's "Home" arm button).
-    expect(screen.getAllByText("Home").length).toBeGreaterThan(0);
-    // Favorite locks render as comfortable cards with actions.
-    expect(screen.getAllByText("Unlock").length).toBeGreaterThan(0);
+    // Source bootstrap populates the store on mount; the compact Rooms entry replaces the old hub.
+    // ("Rooms" appears in both the nav and the section header, so match all.)
+    expect((await screen.findAllByText("Rooms")).length).toBeGreaterThan(0);
+    // The three big arm circles are the focus of the hero.
+    expect(screen.getByRole("button", { name: "Off" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Away" })).toBeInTheDocument();
+    // The plain-language security line (the demo front-door contact reads open).
+    expect(screen.getByText("Front Door open")).toBeInTheDocument();
+    // The old big favorite control cards are gone from Home.
+    expect(screen.queryByText("Unlock")).toBeNull();
     // Labels are resolved; no raw attribute names leak.
     expect(screen.getAllByText("Front Door").length).toBeGreaterThan(0);
     expect(screen.queryByText(/Lock Current status/)).toBeNull();
