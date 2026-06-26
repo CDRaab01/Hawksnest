@@ -1,7 +1,7 @@
 import { createFixtureSource } from "./fixtureSource";
 import { createHaSource } from "./haSource";
 import { loadCredentials } from "./credentials";
-import type { HistoryPoint, ServiceData, Source } from "./source";
+import type { HistoryPoint, ServiceData, Source, WebRtcSignal } from "./source";
 import type { AutomationConfig } from "../lib/automations";
 import type { LogEvent } from "../lib/logbook";
 import type { CameraEvent } from "../lib/cameraEvents";
@@ -141,4 +141,30 @@ export function recordingUrlAt(
 /** Clip URL for one recorded event (null if unsupported). */
 export function eventClipUrl(eventId: string): string | null {
   return current?.eventClipUrl?.(eventId) ?? null;
+}
+
+/** True when the active source can negotiate WebRTC (live HA, not demo). */
+export function supportsWebRtc(): boolean {
+  return typeof current?.webrtcOffer === "function";
+}
+
+/** Begin a WebRTC live session (see Source.webrtcOffer). Rejects if unsupported. */
+export function webrtcOffer(
+  entityId: string,
+  offerSdp: string,
+  onSignal: (signal: WebRtcSignal) => void,
+): Promise<{ unsubscribe: () => void }> {
+  if (!current?.webrtcOffer) {
+    return Promise.reject(new Error("WebRTC unavailable."));
+  }
+  return current.webrtcOffer(entityId, offerSdp, onSignal);
+}
+
+/** Push a local trickle ICE candidate up for an in-flight WebRTC session. */
+export function webrtcCandidate(
+  sessionId: string,
+  candidate: RTCIceCandidateInit,
+): Promise<void> {
+  if (!current?.webrtcCandidate) return Promise.resolve();
+  return current.webrtcCandidate(sessionId, candidate);
 }

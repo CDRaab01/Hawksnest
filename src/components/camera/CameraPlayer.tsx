@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import type { HassEntity } from "../../lib/ha";
-import { fetchCameraEvents, recordingUrlAt } from "../../store/connection";
+import type { LogicalCamera } from "../../lib/cameraModel";
+import {
+  fetchCameraEvents,
+  recordingUrlAt,
+  streamUrl,
+  callService,
+} from "../../store/connection";
+import { useEntity } from "../../store/entityStore";
 import type { CameraEvent } from "../../lib/cameraEvents";
+import { ringEventsFromSelect } from "../../lib/ringEvents";
 import { LivePlayer } from "../LivePlayer";
 import { HlsPlayer } from "../HlsPlayer";
 import { CameraSwitcher } from "./CameraSwitcher";
@@ -10,56 +17,66 @@ import { TransportBar } from "./TransportBar";
 
 const DAY_MS = 24 * 3600_000;
 
-/** The Frigate camera name backing a `camera.<slug>` entity. */
-function cameraNameOf(entity: HassEntity): string {
-  const parts = entity.entity_id.split(".");
-  return parts[1] ?? entity.entity_id;
+function cameraNameOf(camera: LogicalCamera): string {
+  return camera.id.split(".")[1] ?? camera.id;
 }
 
 /**
  * Ring-style camera player: live feed + a scrubbable 24h timeline of recorded
  * events, an in-player camera switcher, and transport controls. The playhead is
- * `"live"` (the LivePlayer transport ladder) or an epoch-ms time (recorded HLS
- * VOD from the source). Events + recordings come from the active source — Frigate
- * live, or synthesized demo data playing the bundled clip.
+ * `"live"` or an epoch-ms time.
+ *
+ * Recorded events come from one of two backends, transparently:
+ * - **ring-mqtt** (`camera.eventSelectId` present): the last ~5 events from the
+ *   event-selector entity; seeking snaps to an event, sets the selector
+ *   (`select.select_option`), and plays the `camera.<base>_event` stream.
+ * - **Frigate / demo**: `fetchCameraEvents` + a continuous `recordingUrlAt` VOD
+ *   (demo synthesizes both and plays the bundled clip).
  */
 export function CameraPlayer({
-  entity,
+  camera,
   cameras,
   onSelectCamera,
 }: {
-  entity: HassEntity;
-  cameras: HassEntity[];
-  onSelectCamera: (entity: HassEntity) => void;
+  camera: LogicalCamera;
+  cameras: LogicalCamera[];
+  onSelectCamera: (camera: LogicalCamera) => void;
 }) {
-  const cameraName = cameraNameOf(entity);
+  const cameraName = cameraNameOf(camera);
+  const isRing = camera.eventSelectId !== null;
+  const ringSelect = useEntity(camera.eventSelectId ?? "");
 
-  // Fix the timeline window when the player opens (rolling 24h ending now).
   const [window] = useState(() => {
     const end = Date.now();
     return { start: end - DAY_MS, end };
   });
 
-  const [events, setEvents] = useState<CameraEvent[]>([]);
   const [playhead, setPlayhead] = useState<number | "live">("live");
   const [paused, setPaused] = useState(false);
 
-  // Re-fetch events when the camera changes; reset to live on switch.
+  // Demo/Frigate events come from the source; ring events come off the selector.
+  const [fetched, setFetched] = useState<CameraEvent[]>([]);
   useEffect(() => {
+    if (isRing) return;
     let active = true;
     setPlayhead("live");
     fetchCameraEvents(cameraName, window.start, window.end)
-      .then((evs) => active && setEvents(evs))
-      .catch(() => active && setEvents([]));
+      .then((e) => active && setFetched(e))
+      .catch(() => active && setFetched([]));
     return () => {
       active = false;
     };
-  }, [cameraName, window.start, window.end]);
+  }, [isRing, cameraName, window.start, window.end]);
+
+  const events = useMemo(
+    () => (isRing ? ringEventsFromSelect(ringSelect, cameraName, window.end) : fetched),
+    [isRing, ringSelect, cameraName, window.end, fetched],
+  );
 
   const isLive = playhead === "live";
   const headTime = isLive ? window.end : playhead;
+  const selected = isLive ? undefined : events.find((e) => e.startMs === headTime);
 
-  // Prev = latest event before the playhead; next = earliest after it.
   const { prev, next } = useMemo(() => {
     const before = events.filter((e) => e.startMs < headTime);
     const after = events.filter((e) => e.startMs > headTime);
@@ -69,17 +86,58 @@ export function CameraPlayer({
     };
   }, [events, headTime]);
 
-  const seek = (ms: number) => {
-    setPlayhead(Math.round(ms));
+  function seek(ms: number) {
+    if (isRing && events.length) {
+      // No continuous VOD on ring — snap to the nearest recorded event.
+      const nearest = events.reduce((best, e) =>
+        Math.abs(e.startMs - ms) < Math.abs(best.startMs - ms) ? e : best,
+      );
+      setPlayhead(nearest.startMs);
+    } else {
+      setPlayhead(Math.round(Math.min(window.end, Math.max(window.start, ms))));
+    }
     setPaused(false);
-  };
+  }
 
-  const recordingSrc = isLive ? null : recordingUrlAt(cameraName, headTime, window.end);
+  // ring recorded playback: select the event, then stream the `_event` camera.
+  const [ringSrc, setRingSrc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isRing || isLive || !selected || !camera.eventSelectId || !camera.eventStreamId) {
+      setRingSrc(null);
+      return;
+    }
+    let active = true;
+    setRingSrc(null);
+    (async () => {
+      try {
+        await callService("select", "select_option", {
+          entity_id: camera.eventSelectId!,
+          option: selected.id,
+        });
+      } catch {
+        /* selecting failed — still try to read whatever the event stream has */
+      }
+      const url = await streamUrl(camera.eventStreamId!);
+      if (active) setRingSrc(url);
+    })();
+    return () => {
+      active = false;
+    };
+    // selected is intentionally tracked by id only — its object identity changes
+    // each render, but re-selecting the same event would re-trigger the stream.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRing, isLive, selected?.id, camera.eventSelectId, camera.eventStreamId]);
+
+  const recordingSrc = isLive
+    ? null
+    : isRing
+      ? ringSrc
+      : recordingUrlAt(cameraName, headTime, window.end);
 
   return (
     <div className="space-y-md">
       <div className="flex items-center justify-between gap-md">
-        <CameraSwitcher cameras={cameras} current={entity} onSelect={onSelectCamera} />
+        <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
         <span
           className={[
             "flex items-center gap-xs rounded-sm px-sm py-xs caption-label",
@@ -97,9 +155,9 @@ export function CameraPlayer({
       </div>
 
       {isLive || !recordingSrc ? (
-        <LivePlayer entity={entity} />
+        <LivePlayer entity={camera.liveEntity} />
       ) : (
-        <HlsPlayer src={recordingSrc} paused={paused} loop />
+        <HlsPlayer src={recordingSrc} paused={paused} loop={!isRing} />
       )}
 
       <Timeline24h

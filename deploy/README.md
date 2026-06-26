@@ -47,18 +47,26 @@ browser ──http──> Hawksnest pod (nginx :80)
 kubectl -n home-automation rollout undo deployment/hawksnest
 ```
 
-## Camera streaming locations (HLS + Frigate)
-`nginx.conf` has dedicated, **buffering-off** locations for the Ring-style camera player:
-- `/api/hls/` — the on-demand HLS live feed HA returns from `camera/stream` (go2rtc). Like the
-  MJPEG stream, buffering must be off or nginx stalls the live playlist/segments.
-- `/api/frigate/` — Frigate's recorded-event clips, snapshots, and the VOD HLS playlists that back
-  the **timeline scrubber**. Reached same-origin through HA via the Frigate HA integration's views.
-  (No Frigate in the cluster yet — this location is ready for when it joins.)
+## Camera streaming locations (WebRTC / HLS, ring-mqtt + Frigate)
+The camera backend is **ring-mqtt** (Ring devices over MQTT, with an embedded **go2rtc** for
+streaming). It bridges each Ring camera into HA as several entities — `camera.<base>_live`,
+`_snapshot`, `_event`, `select.<base>_event_select`, and `binary_sensor.<base>_motion`/`_ding`
+— which the apps collapse into one logical camera.
 
-Both omit `X-Forwarded-For` for the same reason cameras do (see below). Until Frigate/go2rtc are
-deployed these paths simply 404/empty and the app degrades to MJPEG + snapshot; the web/Android apps
-already run the whole player against **demo data** (a bundled clip + synthesized events) with no
-backend, so the UI is exercisable before the backend exists.
+How each transport reaches HA through this one nginx origin:
+- **WebRTC (live, lowest latency)** — negotiated entirely over the existing `/api/websocket`
+  (`camera/webrtc/offer`); the media is UDP straight to go2rtc via ICE and never touches nginx. No
+  new route. (Web uses native WebRTC; Android uses go2rtc **LL-HLS** via ExoPlayer.)
+- **HLS (live fallback + ring recorded events)** — `camera/stream` and the `camera.<base>_event`
+  recording stream ride `/api/hls/` and `/api/camera_proxy_stream/` (both **buffering-off**).
+- **`/api/frigate/`** — optional: Frigate's continuous-VOD clips/playlists, kept buffering-off and
+  ready should a Frigate NVR ever join (it needs hardware ring-mqtt doesn't).
+
+Recorded-event playback on ring-mqtt picks one of the **last ~5 events** via the event-selector
+entity (Ring Protect required); it isn't a continuous 24h VOD. All locations omit `X-Forwarded-For`
+for the reason below. The web/Android apps run the whole player — live, timeline, transport,
+doorbell banner — against **demo data** (a bundled clip + synthesized events) with no backend, so
+the UI is exercisable before ring-mqtt is up.
 
 ## Note: HA trusted_proxies and X-Forwarded-For
 `nginx.conf` deliberately does **not** forward `X-Forwarded-For` to HA. When HA has

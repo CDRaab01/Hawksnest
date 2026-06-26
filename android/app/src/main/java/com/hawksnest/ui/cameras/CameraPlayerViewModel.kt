@@ -2,6 +2,8 @@ package com.hawksnest.ui.cameras
 
 import androidx.lifecycle.ViewModel
 import com.hawksnest.core.ha.ConnectionManager
+import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.logic.CameraEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -23,4 +25,17 @@ class CameraPlayerViewModel @Inject constructor(
 
     fun recordingUrl(camera: String, startMs: Long, endMs: Long): String? =
         connection.recordingUrlAt(camera, startMs, endMs)
+
+    /** Read a (live) entity from the store — used to pull a ring-mqtt event selector's options. */
+    fun entity(id: String): HassEntity? = connection.state.entities.value[id]
+
+    /** Select which ring-mqtt event plays, then resolve the `_event` stream URL. */
+    suspend fun playRingEvent(eventSelectId: String, option: String, eventStreamId: String): String? {
+        connection.callService(
+            "select",
+            "select_option",
+            ServiceData(entityId = eventSelectId, extra = mapOf("option" to option)),
+        )
+        return connection.streamUrl(eventStreamId)
+    }
 }

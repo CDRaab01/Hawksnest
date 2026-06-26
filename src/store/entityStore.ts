@@ -4,6 +4,8 @@ import { useShallow } from "zustand/react/shallow";
 import type { AreaRegistry, HassEntity } from "../lib/ha";
 import { domainOf } from "../lib/ha";
 import { groupByArea, type AreaGroup } from "../lib/areas";
+import { resolveCameras, type LogicalCamera } from "../lib/cameraModel";
+import { overrides } from "../config/overrides";
 import type { DeviceIndex, DeviceRecord } from "./ha/registry";
 import { useHidden } from "./prefsStore";
 
@@ -106,6 +108,16 @@ export function useCameraEntities(): HassEntity[] {
         .sort((a, b) => a.entity_id.localeCompare(b.entity_id)),
     [entities],
   );
+}
+
+/**
+ * Logical cameras — ring-mqtt's per-device entities (`_live`/`_snapshot`/`_event`
+ * + select/ding/motion siblings) collapsed into one camera each; plain HA/Frigate
+ * cameras pass through 1:1. Powers the camera wall + the Ring-style player.
+ */
+export function useLogicalCameras(): LogicalCamera[] {
+  const entities = useEntityStore((s) => s.entities);
+  return useMemo(() => resolveCameras(entities, overrides), [entities]);
 }
 
 /**

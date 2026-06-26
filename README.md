@@ -41,11 +41,16 @@ The real blended UI (dark-only), all rendering the owner's "Security" scene with
 labels** (HA's raw "Lock Current status …" → "Front Door"):
 
 - **Home** (`/`) — pinned favorites (large cards) above an **area hub** (`src/config/favorites.ts`).
-- **Cameras** — a **Ring-style player** (tap any camera): on-demand live (HLS via `camera/stream` →
-  MJPEG → snapshot), a scrubbable **24h timeline** of recorded events, an in-player camera switcher,
-  and transport (prev/next event, play/pause, snap-to-Live). Recorded events + footage come from
-  **Frigate** behind HA; **demo mode** runs the whole player against a bundled clip + synthesized
-  events with no backend (`src/components/camera/`, `src/lib/cameraEvents.ts`).
+- **Cameras** — a **Ring-style player** (tap any camera): on-demand low-latency live
+  (**WebRTC** via `camera/webrtc/offer` → HLS → MJPEG → snapshot), a scrubbable **timeline** of
+  recorded events, an in-player camera switcher, and transport (prev/next event, play/pause,
+  snap-to-Live). Plus an app-wide **doorbell banner** that fires on a camera's `_ding` and opens its
+  live view. The camera backend is **ring-mqtt** (Ring devices over MQTT + go2rtc): its split
+  entities (`_live`/`_snapshot`/`_event` + event-selector/ding/motion) are collapsed into one
+  logical camera (`src/lib/cameraModel.ts`), and recorded playback uses the **event selector**
+  (last ~5 events, Ring Protect). **demo mode** runs the whole player against a bundled clip +
+  synthesized events with no backend (`src/components/camera/`, `src/lib/{cameraModel,ringEvents,
+  doorbell}.ts`). (Frigate's continuous-VOD path is also supported via `src/lib/cameraEvents.ts`.)
 - **Area detail** (`/area/:area`) — **mixed density**: camera spans full width, controls render
   comfortable, read-only sensors render compact (`src/lib/density.ts`).
 - **Settings** (`/settings`) — connection status + the "Connect to Home Assistant" form, plus a

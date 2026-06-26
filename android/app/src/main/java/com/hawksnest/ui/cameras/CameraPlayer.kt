@@ -24,13 +24,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.ringEventsFromSelect
 import com.hawksnest.ui.home.CameraUi
 import com.hawksnest.ui.theme.HawksnestTheme
+import kotlin.math.abs
 
 private const val DAY_MS = 24 * 3600_000L
 
-/** The Frigate camera name backing a `camera.<slug>` entity. */
-private fun cameraNameOf(entityId: String): String = entityId.substringAfter('.', entityId)
+/** The Frigate/ring camera name backing a `camera.<slug>` logical id. */
+private fun cameraNameOf(id: String): String = id.substringAfter('.', id)
 
 /**
  * Ring-style camera player: live feed + a scrubbable 24h timeline of recorded events, an in-player
@@ -47,33 +49,60 @@ fun CameraPlayer(
     bucket: Long,
     modifier: Modifier = Modifier,
 ) {
-    val cameraName = cameraNameOf(cam.entityId)
+    val cameraName = cameraNameOf(cam.id)
+    val isRing = cam.eventSelectId != null
     // Fix the timeline window when the player opens (rolling 24h ending now).
     val window = remember { System.currentTimeMillis().let { it - DAY_MS to it } }
     val (startMs, endMs) = window
 
-    val events: List<CameraEvent> by produceState<List<CameraEvent>>(emptyList(), cam.entityId) {
-        value = viewModel.events(cameraName, startMs, endMs)
+    // Demo/Frigate events come from the source; ring events come off the selector.
+    val events: List<CameraEvent> by produceState<List<CameraEvent>>(emptyList(), cam.id) {
+        value = if (isRing) {
+            ringEventsFromSelect(viewModel.entity(cam.eventSelectId!!), cameraName, endMs)
+        } else {
+            viewModel.events(cameraName, startMs, endMs)
+        }
     }
-    val liveUrl: String? by produceState<String?>(null, cam.entityId) {
+    val liveUrl: String? by produceState<String?>(null, cam.id) {
         value = viewModel.liveStreamUrl(cam.entityId)
     }
 
     // null playhead = live; reset to live whenever the camera changes.
-    var playhead by remember(cam.entityId) { mutableStateOf<Long?>(null) }
-    var paused by remember(cam.entityId) { mutableStateOf(false) }
+    var playhead by remember(cam.id) { mutableStateOf<Long?>(null) }
+    var paused by remember(cam.id) { mutableStateOf(false) }
 
     val isLive = playhead == null
     val headTime = playhead ?: endMs
     val prev = events.lastOrNull { it.startMs < headTime }
     val next = events.firstOrNull { it.startMs > headTime }
+    val selected = if (isLive) null else events.firstOrNull { it.startMs == headTime }
 
     fun seek(ms: Long) {
-        playhead = ms.coerceIn(startMs, endMs)
+        playhead = if (isRing && events.isNotEmpty()) {
+            // No continuous VOD on ring — snap to the nearest recorded event.
+            events.minByOrNull { abs(it.startMs - ms) }!!.startMs
+        } else {
+            ms.coerceIn(startMs, endMs)
+        }
         paused = false
     }
 
-    val recordingUrl = if (isLive) null else viewModel.recordingUrl(cameraName, headTime, endMs)
+    // ring recorded playback: select the event, then stream the `_event` camera.
+    val ringSrc: String? by produceState<String?>(null, isLive, selected?.id) {
+        value = if (isRing && !isLive && selected != null &&
+            cam.eventSelectId != null && cam.eventStreamId != null
+        ) {
+            viewModel.playRingEvent(cam.eventSelectId, selected.id, cam.eventStreamId)
+        } else {
+            null
+        }
+    }
+
+    val recordingUrl = when {
+        isLive -> null
+        isRing -> ringSrc
+        else -> viewModel.recordingUrl(cameraName, headTime, endMs)
+    }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {

@@ -20,8 +20,13 @@ function lastChangedMs(lastChanged?: string): number | null {
  * placeholder when there's no stream (demo mode, an unavailable camera, or a
  * failed fetch) so the Security scene always reads correctly.
  */
-export function CameraTile({ entity, overrides, density = "comfortable" }: CardProps) {
-  const name = resolveName(entity, overrides);
+export function CameraTile({
+  entity,
+  overrides,
+  density = "comfortable",
+  name: nameOverride,
+}: CardProps & { name?: string }) {
+  const name = nameOverride ?? resolveName(entity, overrides);
   const aspect = density === "compact" ? "aspect-video" : "aspect-[4/3]";
   const bucket = useSnapshotBucket();
   const baseUrl = useHaBaseUrl();

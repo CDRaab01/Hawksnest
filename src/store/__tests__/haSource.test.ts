@@ -69,6 +69,10 @@ function makeFakeConn() {
         STREAM[msg.type]
       );
     },
+    subscribeMessage: async (_cb: unknown, msg: { type: string }) => {
+      sent.push(msg as Record<string, unknown>);
+      return () => {};
+    },
     close: () => {},
   } as unknown as Connection;
   return {
@@ -240,6 +244,29 @@ describe("createHaSource", () => {
     expect(source.eventClipUrl!("evt-1")).toBe(
       "http://ha/api/frigate/notifications/evt-1/clip.mp4",
     );
+  });
+
+  it("negotiates WebRTC: subscribes camera/webrtc/offer and sends candidates", async () => {
+    const { conn, sent } = makeFakeConn();
+    const deps: HaSourceDeps = {
+      connect: async () => conn,
+      subscribe: () => () => {},
+    };
+    const source = createHaSource({ url: "http://ha", token: "t" }, deps);
+    await source.start();
+
+    const handle = await source.webrtcOffer!("camera.front_door", "v=0...", () => {});
+    expect(typeof handle.unsubscribe).toBe("function");
+    const offer = sent.find((m) => m.type === "camera/webrtc/offer");
+    expect(offer).toMatchObject({
+      type: "camera/webrtc/offer",
+      entity_id: "camera.front_door",
+      offer: "v=0...",
+    });
+
+    await source.webrtcCandidate!("sess-1", { candidate: "candidate:..." });
+    const cand = sent.find((m) => m.type === "camera/webrtc/candidate");
+    expect(cand).toMatchObject({ type: "camera/webrtc/candidate", session_id: "sess-1" });
   });
 
   it("flags reconnecting when the connection drops", async () => {

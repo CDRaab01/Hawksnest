@@ -95,12 +95,9 @@ export function HlsPlayer({
     return () => {
       cancelled = true;
       destroy?.();
+      // Detach the source so the element stops fetching; no load() reset needed
+      // (and load() is unimplemented in jsdom, so calling it just adds noise).
       video.removeAttribute("src");
-      try {
-        video.load?.();
-      } catch {
-        /* jsdom: not implemented */
-      }
     };
   }, [src, onError]);
 

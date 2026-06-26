@@ -9,7 +9,7 @@ import {
   type HassEntities,
 } from "home-assistant-js-websocket";
 import { useEntityStore } from "./entityStore";
-import type { HistoryPoint, Source } from "./source";
+import type { HistoryPoint, Source, WebRtcSignal } from "./source";
 import type { AutomationConfig } from "../lib/automations";
 import { normalizeLogbook, type LogEvent, type RawLogbookEntry } from "../lib/logbook";
 import {
@@ -326,6 +326,24 @@ export function createHaSource(
     },
     eventClipUrl(eventId) {
       return buildEventClipUrl(eventId, withBase(FRIGATE_BASE, creds.url));
+    },
+    async webrtcOffer(entityId, offerSdp, onSignal) {
+      if (!conn) throw new Error("Not connected to Home Assistant.");
+      // `camera/webrtc/offer` is a subscribe-style command: HA streams back the
+      // session id, the SDP answer, and trickle ICE candidates (or an error).
+      const unsubscribe = await conn.subscribeMessage<WebRtcSignal>(
+        (msg) => onSignal(msg),
+        { type: "camera/webrtc/offer", entity_id: entityId, offer: offerSdp },
+      );
+      return { unsubscribe };
+    },
+    async webrtcCandidate(sessionId, candidate) {
+      if (!conn) throw new Error("Not connected to Home Assistant.");
+      await conn.sendMessagePromise({
+        type: "camera/webrtc/candidate",
+        session_id: sessionId,
+        candidate,
+      });
     },
     async getAutomationConfig(id) {
       const res = await fetch(automationUrl(creds, id), {

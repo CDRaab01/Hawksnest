@@ -1,23 +1,21 @@
-import { useState } from "react";
 import { CameraOff } from "lucide-react";
-import { useCameraEntities } from "../store/entityStore";
+import { useLogicalCameras } from "../store/entityStore";
+import { useCameraOverlay } from "../store/cameraOverlay";
 import { overrides } from "../config/overrides";
-import { resolveName } from "../lib/resolve";
 import { isCameraLive } from "../lib/cameraUrl";
 import { CameraTile } from "../cards/CameraTile";
-import { CameraLightbox } from "./CameraLightbox";
 import { SectionHeader } from "./SectionHeader";
 import { PanelCard } from "./PanelCard";
-import type { HassEntity } from "../lib/ha";
 
 /**
  * The Dashboard's camera wall — a full-width responsive grid of live snapshot
- * tiles (Ring-style). Tapping a tile opens the on-demand live view. Live cameras
- * sort ahead of unavailable ones so the wall reads "best first".
+ * tiles (Ring-style). One tile per logical camera (ring-mqtt's `_live`/`_snapshot`
+ * pair is collapsed upstream). Tapping a tile opens the on-demand player. Live
+ * cameras sort ahead of unavailable ones so the wall reads "best first".
  */
 export function CameraWall() {
-  const cameras = useCameraEntities();
-  const [active, setActive] = useState<HassEntity | null>(null);
+  const cameras = useLogicalCameras();
+  const openCamera = useCameraOverlay((s) => s.open);
 
   if (cameras.length === 0) {
     return (
@@ -34,9 +32,10 @@ export function CameraWall() {
   }
 
   const ordered = [...cameras].sort(
-    (a, b) => Number(isCameraLive(b)) - Number(isCameraLive(a)),
+    (a, b) =>
+      Number(isCameraLive(b.snapshotEntity)) - Number(isCameraLive(a.snapshotEntity)),
   );
-  const liveCount = cameras.filter(isCameraLive).length;
+  const liveCount = cameras.filter((c) => isCameraLive(c.snapshotEntity)).length;
 
   return (
     <section className="space-y-md">
@@ -51,22 +50,23 @@ export function CameraWall() {
       />
       {/* Ring-style: two side-by-side tiles on phones, more on wider screens. */}
       <div className="grid grid-cols-2 gap-sm lg:grid-cols-3 xl:grid-cols-4">
-        {ordered.map((entity) => (
+        {ordered.map((cam) => (
           <button
-            key={entity.entity_id}
+            key={cam.id}
             type="button"
-            onClick={() => setActive(entity)}
-            aria-label={`Open ${resolveName(entity, overrides)} live view`}
+            onClick={() => openCamera(cam.id)}
+            aria-label={`Open ${cam.name} live view`}
             className="block text-left transition-transform duration-fast ease-ease active:scale-[0.98]"
           >
-            <CameraTile entity={entity} overrides={overrides} density="compact" />
+            <CameraTile
+              entity={cam.snapshotEntity}
+              overrides={overrides}
+              density="compact"
+              name={cam.name}
+            />
           </button>
         ))}
       </div>
-
-      {active && (
-        <CameraLightbox entity={active} onClose={() => setActive(null)} />
-      )}
     </section>
   );
 }

@@ -6,15 +6,28 @@ import { CameraPlayer } from "../CameraPlayer";
 import { startConnection } from "../../../store/connection";
 import { useEntityStore } from "../../../store/entityStore";
 import type { HassEntity } from "../../../lib/ha";
+import type { LogicalCamera } from "../../../lib/cameraModel";
 
-const cam = (id: string): HassEntity => ({
-  entity_id: id,
-  state: "idle",
-  attributes: { entity_picture: `/api/camera_proxy/${id}?token=x` },
-});
+const lc = (id: string, name: string): LogicalCamera => {
+  const entity: HassEntity = {
+    entity_id: id,
+    state: "idle",
+    attributes: { entity_picture: `/api/camera_proxy/${id}?token=x` },
+  };
+  return {
+    id,
+    name,
+    liveEntity: entity,
+    snapshotEntity: entity,
+    eventStreamId: null,
+    eventSelectId: null,
+    dingId: null,
+    motionId: null,
+  };
+};
 
-const FRONT = cam("camera.front_door");
-const BACK = cam("camera.backyard");
+const FRONT = lc("camera.front_door", "Front Door");
+const BACK = lc("camera.backyard", "Backyard");
 
 beforeEach(() => {
   useEntityStore.setState({ entities: {}, areas: {}, status: "connecting" });
@@ -26,7 +39,7 @@ beforeEach(() => {
 function renderPlayer(onSelect = vi.fn()) {
   render(
     <MemoryRouter>
-      <CameraPlayer entity={FRONT} cameras={[FRONT, BACK]} onSelectCamera={onSelect} />
+      <CameraPlayer camera={FRONT} cameras={[FRONT, BACK]} onSelectCamera={onSelect} />
     </MemoryRouter>,
   );
   return onSelect;

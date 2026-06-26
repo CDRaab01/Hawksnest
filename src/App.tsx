@@ -13,7 +13,21 @@ import { AutomationEditScreen } from "./screens/AutomationEditScreen";
 import { TopNav } from "./components/TopNav";
 import { BottomBar } from "./components/BottomBar";
 import { SnapshotBucketProvider } from "./components/SnapshotBucket";
+import { DoorbellBanner } from "./components/DoorbellBanner";
+import { CameraLightbox } from "./components/CameraLightbox";
+import { useLogicalCameras } from "./store/entityStore";
+import { useCameraOverlay } from "./store/cameraOverlay";
 import { startConnection, stopConnection } from "./store/connection";
+
+/** App-wide full-screen camera player, opened from the wall or a doorbell alert. */
+function CameraOverlay() {
+  const openId = useCameraOverlay((s) => s.openId);
+  const close = useCameraOverlay((s) => s.close);
+  const cameras = useLogicalCameras();
+  const camera = openId ? cameras.find((c) => c.id === openId) : null;
+  if (!camera) return null;
+  return <CameraLightbox camera={camera} onClose={close} />;
+}
 
 export default function App() {
   // Start the data source once on mount (demo fixtures, or live HA if saved).
@@ -41,6 +55,8 @@ export default function App() {
           </Routes>
         </main>
         <BottomBar />
+        <DoorbellBanner />
+        <CameraOverlay />
       </div>
     </SnapshotBucketProvider>
   );

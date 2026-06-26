@@ -89,4 +89,32 @@ export interface Source {
   recordingUrlAt?: (camera: string, startMs: number, endMs: number) => string | null;
   /** A playable URL for one recorded event's clip. Null when unsupported. */
   eventClipUrl?: (eventId: string) => string | null;
+  /**
+   * Begin a WebRTC live session for a camera. Sends the browser's SDP `offer`
+   * to HA (`camera/webrtc/offer`, a subscribe-style command served by go2rtc)
+   * and streams the negotiation back through `onSignal` (session id, answer,
+   * trickle ICE candidates, or error). Resolves an unsubscribe handle. Only the
+   * live HA source implements this; demo has no WebRTC (the player falls back).
+   */
+  webrtcOffer?: (
+    entityId: string,
+    offerSdp: string,
+    onSignal: (signal: WebRtcSignal) => void,
+  ) => Promise<{ unsubscribe: () => void }>;
+  /** Push a local trickle ICE candidate up to HA for an in-flight WebRTC session. */
+  webrtcCandidate?: (
+    sessionId: string,
+    candidate: RTCIceCandidateInit,
+  ) => Promise<void>;
+}
+
+/** One message from HA's `camera/webrtc/offer` negotiation stream. */
+export interface WebRtcSignal {
+  type: "session" | "answer" | "candidate" | "error";
+  session_id?: string;
+  /** SDP answer (on `type: "answer"`). */
+  answer?: string;
+  /** Remote ICE candidate (on `type: "candidate"`). */
+  candidate?: RTCIceCandidateInit | string;
+  error?: string;
 }
