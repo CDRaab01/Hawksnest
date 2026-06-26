@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "low-contrast-text": "error",
+    "tiny-touch-target": "error",
+    "ai-palette": "info"
+  },
+  "ignoreScenes": [],
+  "ignoreFindings": [],
+  "baseline": ".sift/baseline.json"
+}

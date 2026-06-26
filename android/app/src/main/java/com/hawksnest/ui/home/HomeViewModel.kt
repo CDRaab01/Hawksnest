@@ -14,6 +14,7 @@ import com.hawksnest.core.logic.alarmView
 import com.hawksnest.core.logic.groupByArea
 import com.hawksnest.core.logic.isCameraLive
 import com.hawksnest.core.logic.resolveName
+import com.hawksnest.core.logic.securityReadout
 import com.hawksnest.core.logic.snapshotUrl
 import com.hawksnest.core.logic.streamUrl
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -55,9 +56,6 @@ data class HomeUi(
     val alarmRequiresCode: Boolean = false,
 )
 
-private val DOOR_CLASSES = setOf("door", "window", "garage_door")
-private val LIFE_SAFETY_CLASSES = setOf("smoke", "carbon_monoxide", "gas", "moisture")
-
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val connection: ConnectionManager,
@@ -97,25 +95,9 @@ class HomeViewModel @Inject constructor(
         val alarmEntity = all.firstOrNull { it.entityId.startsWith("alarm_control_panel.") }
         val alarm = alarmEntity?.let { alarmView(it.state) }
 
-        // Plain-language security summary (unlocked locks + open door/window contacts).
-        val unlocked = all.filter {
-            domainOf(it.entityId) == "lock" && it.state != "locked" && it.state != "locking"
-        }
-        val openDoors = all.filter {
-            domainOf(it.entityId) == "binary_sensor" &&
-                it.stringAttr("device_class") in DOOR_CLASSES && it.state == "on"
-        }
-        val parts = unlocked.map { "${resolveName(it, overrides)} unlocked" } +
-            openDoors.map { "${resolveName(it, overrides)} open" }
-        val secureAllClear = parts.isEmpty()
-        val securitySummary = if (secureAllClear) "All doors locked" else parts.joinToString(" · ")
-
-        val offline = all.filter { it.state == "unavailable" }
-        val offlineLabel = when {
-            offline.isEmpty() -> null
-            offline.size == 1 -> "${resolveName(offline[0], overrides)} is offline"
-            else -> "${resolveName(offline[0], overrides)} +${offline.size - 1} more offline"
-        }
+        // Plain-language security read-out (unlocked locks, open contacts, life-safety, offline).
+        // Pure + unit-tested in core/logic/Security.kt.
+        val security = securityReadout(all, overrides)
 
         val resolvedBase = baseUrl.ifEmpty { null }
         val cameras = all
@@ -131,12 +113,6 @@ class HomeViewModel @Inject constructor(
                 )
             }
 
-        // Life-safety is an always-on channel — surfaced no matter the armed state.
-        val lifeSafety = all.filter {
-            domainOf(it.entityId) == "binary_sensor" && it.stringAttr("device_class") in LIFE_SAFETY_CLASSES
-        }
-        val lifeSafetyAlerts = lifeSafety.filter { it.state == "on" }.map { resolveName(it, overrides) }
-
         val rooms = groupByArea(all, areas)
 
         return HomeUi(
@@ -145,15 +121,15 @@ class HomeViewModel @Inject constructor(
             alarm = alarm,
             alarmEntityId = alarmEntity?.entityId,
             alarmRawState = alarmEntity?.state,
-            securitySummary = securitySummary,
-            secureAllClear = secureAllClear,
-            offlineLabel = offlineLabel,
+            securitySummary = security.summary,
+            secureAllClear = security.allClear,
+            offlineLabel = security.offlineLabel,
             cameras = cameras,
             liveCameraCount = cameras.count { it.live },
             roomCount = rooms.size,
             roomsPreview = rooms.take(4).joinToString(" · ") { it.area },
-            lifeSafetyAlerts = lifeSafetyAlerts,
-            lifeSafetyMonitored = lifeSafety.size,
+            lifeSafetyAlerts = security.lifeSafetyAlerts,
+            lifeSafetyMonitored = security.lifeSafetyMonitored,
             alarmRequiresCode = alarmEntity?.stringAttr("code_format") != null,
         )
     }
