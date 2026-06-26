@@ -8,6 +8,7 @@ import android.net.Uri
  */
 sealed class Screen(val route: String) {
     data object Home : Screen("home")
+    data object Devices : Screen("devices")
     data object Cameras : Screen("cameras")
     data object Rooms : Screen("rooms")
     data object History : Screen("history")

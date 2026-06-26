@@ -14,9 +14,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.hawksnest.ui.area.AreaDetailScreen
+import com.hawksnest.ui.devices.DevicesScreen
 import com.hawksnest.ui.history.HistoryScreen
 import com.hawksnest.ui.home.HomeScreen
-import com.hawksnest.ui.cameras.CamerasScreen
 import com.hawksnest.ui.rooms.RoomsScreen
 import com.hawksnest.ui.settings.SettingsScreen
 
@@ -69,7 +69,9 @@ fun AppNavGraph(startDestination: String = Screen.Home.route) {
                     },
                 )
             }
-            composable(Screen.Cameras.route) { CamerasScreen() }
+            composable(Screen.Devices.route) {
+                DevicesScreen(onOpenArea = { area -> navController.navigate(Screen.Area.createRoute(area)) })
+            }
             composable(Screen.Rooms.route) {
                 RoomsScreen(onOpenArea = { area -> navController.navigate(Screen.Area.createRoute(area)) })
             }
