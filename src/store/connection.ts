@@ -1,9 +1,10 @@
 import { createFixtureSource } from "./fixtureSource";
 import { createHaSource } from "./haSource";
 import { loadCredentials } from "./credentials";
-import type { HistoryPoint, ServiceData, Source } from "./source";
+import type { HistoryPoint, ServiceData, Source, WebRtcSignal } from "./source";
 import type { AutomationConfig } from "../lib/automations";
 import type { LogEvent } from "../lib/logbook";
+import type { CameraEvent } from "../lib/cameraEvents";
 
 let current: Source | null = null;
 
@@ -99,4 +100,71 @@ export function deleteAutomationConfig(id: string): Promise<void> {
     return Promise.reject(new Error("Automations unavailable."));
   }
   return current.deleteAutomationConfig(id);
+}
+
+/**
+ * The on-demand live-stream URL for a camera (HLS from live HA; the bundled demo
+ * clip in demo). Resolves null when the active source has no stream — the player
+ * falls back to MJPEG/snapshot — so this never rejects on a missing capability.
+ */
+export function streamUrl(
+  entityId: string,
+  format: "hls" = "hls",
+): Promise<string | null> {
+  if (!current?.streamUrl) return Promise.resolve(null);
+  return current.streamUrl(entityId, format);
+}
+
+/**
+ * Recorded camera events over `[startMs, endMs]` for the timeline scrubber (live
+ * HA reads Frigate; fixtures synthesize). Resolves [] when the active source
+ * can't provide events, so the timeline renders empty rather than throwing.
+ */
+export function fetchCameraEvents(
+  camera: string,
+  startMs: number,
+  endMs: number,
+): Promise<CameraEvent[]> {
+  if (!current?.fetchCameraEvents) return Promise.resolve([]);
+  return current.fetchCameraEvents(camera, startMs, endMs);
+}
+
+/** Recorded-footage URL for `camera` over `[startMs, endMs]` (null if unsupported). */
+export function recordingUrlAt(
+  camera: string,
+  startMs: number,
+  endMs: number,
+): string | null {
+  return current?.recordingUrlAt?.(camera, startMs, endMs) ?? null;
+}
+
+/** Clip URL for one recorded event (null if unsupported). */
+export function eventClipUrl(eventId: string): string | null {
+  return current?.eventClipUrl?.(eventId) ?? null;
+}
+
+/** True when the active source can negotiate WebRTC (live HA, not demo). */
+export function supportsWebRtc(): boolean {
+  return typeof current?.webrtcOffer === "function";
+}
+
+/** Begin a WebRTC live session (see Source.webrtcOffer). Rejects if unsupported. */
+export function webrtcOffer(
+  entityId: string,
+  offerSdp: string,
+  onSignal: (signal: WebRtcSignal) => void,
+): Promise<{ unsubscribe: () => void }> {
+  if (!current?.webrtcOffer) {
+    return Promise.reject(new Error("WebRTC unavailable."));
+  }
+  return current.webrtcOffer(entityId, offerSdp, onSignal);
+}
+
+/** Push a local trickle ICE candidate up for an in-flight WebRTC session. */
+export function webrtcCandidate(
+  sessionId: string,
+  candidate: RTCIceCandidateInit,
+): Promise<void> {
+  if (!current?.webrtcCandidate) return Promise.resolve();
+  return current.webrtcCandidate(sessionId, candidate);
 }

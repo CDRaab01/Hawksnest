@@ -54,6 +54,15 @@ export const entities: HassEntity[] = [
     last_changed: ago(4),
   },
   {
+    // Doorbell ring sensor for the front-door camera (ring-mqtt names it
+    // `binary_sensor.<base>_ding`). Idle in demo; flipping it on raises the
+    // app-wide doorbell banner. Resolved onto the camera by base name.
+    entity_id: "binary_sensor.front_door_ding",
+    state: "off",
+    attributes: { friendly_name: "Front Door Ding", device_class: "occupancy" },
+    last_changed: ago(30),
+  },
+  {
     // Stock HA shows this simply as "Lock" — override forces "Front Door".
     entity_id: "lock.front_door_lock",
     state: "locked",
@@ -157,6 +166,7 @@ export const entities: HassEntity[] = [
 /** Area assignment — a registry concern, kept separate from state (see ha.ts). */
 export const areaRegistry: AreaRegistry = {
   "camera.front_door": "Front Door",
+  "binary_sensor.front_door_ding": "Front Door",
   "lock.front_door_lock": "Front Door",
   "binary_sensor.front_door_current_status": "Front Door",
   "binary_sensor.front_door_intrusion": "Front Door",

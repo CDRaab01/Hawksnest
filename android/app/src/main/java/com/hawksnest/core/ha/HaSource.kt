@@ -7,15 +7,25 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.FRIGATE_BASE
 import com.hawksnest.core.logic.LogEvent
 import com.hawksnest.core.logic.normalizeLogbook
+import com.hawksnest.core.logic.normalizeFrigateEvents
+import com.hawksnest.core.logic.recordingUrlAt as buildRecordingUrl
+import com.hawksnest.core.logic.eventClipUrl as buildEventClipUrl
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.time.Instant
 import kotlin.coroutines.coroutineContext
 
@@ -78,6 +88,58 @@ class HaSource(
         val result = frame["result"] as? JsonArray ?: return emptyList()
         return normalizeLogbook(result.mapNotNull { it as? JsonObject })
     }
+
+    /**
+     * Ask HA for an on-demand HLS stream URL (`camera/stream`). HA returns a signed, root-relative
+     * playlist path served under the same `/api` the nginx pod proxies; resolved against the origin
+     * like camera snapshots. Null on any failure so the player falls back to MJPEG/snapshot.
+     */
+    override suspend fun streamUrl(entityId: String): String? {
+        val c = conn ?: return null
+        return try {
+            val frame = c.request("camera/stream") {
+                put("entity_id", entityId)
+                put("format", "hls")
+            }
+            val url = (frame["result"] as? JsonObject)?.get("url")?.jsonPrimitive?.contentOrNull
+            url?.let { withBase(it, baseUrl) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Read recorded events for a Frigate camera over `[startMs, endMs]`. Frigate's HA integration
+     * exposes its API under `/api/frigate/…` (same-origin through nginx). Degrades to [] if Frigate
+     * isn't installed yet or the request fails, so the timeline renders empty rather than throwing.
+     */
+    override suspend fun fetchCameraEvents(camera: String, startMs: Long, endMs: Long): List<CameraEvent> {
+        val base = withBase(FRIGATE_BASE, baseUrl)
+        val url = "$base/events?camera=$camera&after=${startMs / 1000}&before=${endMs / 1000}&limit=500"
+        return withContext(Dispatchers.IO) {
+            try {
+                val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
+                client.newCall(req).execute().use { res ->
+                    if (!res.isSuccessful) return@use emptyList()
+                    val body = res.body?.string() ?: return@use emptyList()
+                    val arr = json.parseToJsonElement(body) as? JsonArray ?: return@use emptyList()
+                    normalizeFrigateEvents(arr.mapNotNull { it as? JsonObject }, base)
+                }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    override fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String =
+        buildRecordingUrl(camera, startMs, endMs, withBase(FRIGATE_BASE, baseUrl))
+
+    override fun eventClipUrl(eventId: String): String =
+        buildEventClipUrl(eventId, withBase(FRIGATE_BASE, baseUrl))
+
+    /** Prefix a root-relative HA/Frigate path with the connected origin; absolute/empty left alone. */
+    private fun withBase(path: String, base: String): String =
+        if (base.isEmpty() || !path.startsWith("/")) path else base.trimEnd('/') + path
 
     private suspend fun runLoop() {
         var backoff = 1_000L

@@ -7,6 +7,11 @@ import { overrides } from "../config/overrides";
 import type { HistoryPoint, ServiceData, Source } from "./source";
 import type { LogEvent } from "../lib/logbook";
 import type { HassEntity } from "../lib/ha";
+import {
+  DEMO_CLIP_URL,
+  DEMO_POSTER_URL,
+  type CameraEvent,
+} from "../lib/cameraEvents";
 
 // Discrete (on/off-ish) domains step between two states in the synthetic series;
 // everything else is treated as a numeric sensor and jittered around its value.
@@ -180,6 +185,43 @@ function synthLogbook(startMs: number, endMs: number): LogEvent[] {
     .sort((a, b) => b.when - a.when);
 }
 
+// Object labels the synthetic camera events cycle through, so the demo timeline
+// shows a believable mix of motion/person/vehicle markers.
+const DEMO_EVENT_LABELS = ["person", "motion", "car", "motion", "dog", "person"];
+
+/**
+ * Synthesize a believable 24h spread of recorded camera events for `camera` over
+ * `[startMs, endMs]`, so demo mode's timeline scrubber is populated without
+ * Frigate. Events land on a steady cadence, vary their label/duration, and point
+ * their thumbnail at the bundled demo poster. Returned oldest-first (timeline
+ * order). Deterministic per (camera, slot) so re-fetches are stable.
+ */
+function synthCameraEvents(
+  camera: string,
+  startMs: number,
+  endMs: number,
+): CameraEvent[] {
+  const stepMs = 37 * 60_000; // ~one event every 37 minutes
+  const out: CameraEvent[] = [];
+  let slot = 0;
+  for (let t = startMs; t <= endMs; t += stepMs, slot++) {
+    const label = DEMO_EVENT_LABELS[slot % DEMO_EVENT_LABELS.length];
+    const durationMs = 20_000 + (slot % 5) * 15_000; // 20s–80s
+    out.push({
+      id: `demo-${camera}-${slot}`,
+      camera,
+      label,
+      startMs: t,
+      endMs: Math.min(endMs, t + durationMs),
+      hasClip: true,
+      hasSnapshot: true,
+      thumbnailUrl: DEMO_POSTER_URL,
+      snapshotUrl: DEMO_POSTER_URL,
+    });
+  }
+  return out;
+}
+
 /** Drop one synthetic entity from the store (filtered rebuild of the map). */
 function removeEntity(entityId: string): void {
   const store = useEntityStore.getState();
@@ -223,6 +265,20 @@ export function createFixtureSource(): Source {
         return events.filter((e) => e.entityId && want.has(e.entityId));
       }
       return events;
+    },
+    async streamUrl(entityId) {
+      // Demo "live" feed: loop the bundled clip for any camera entity.
+      return domainOf(entityId) === "camera" ? DEMO_CLIP_URL : null;
+    },
+    async fetchCameraEvents(camera, startMs, endMs) {
+      return synthCameraEvents(camera, startMs, endMs);
+    },
+    recordingUrlAt() {
+      // Demo: every seek plays the same bundled clip (no real recordings).
+      return DEMO_CLIP_URL;
+    },
+    eventClipUrl() {
+      return DEMO_CLIP_URL;
     },
     async getAutomationConfig(id) {
       return configs.get(id) ?? null;

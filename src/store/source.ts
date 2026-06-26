@@ -1,5 +1,6 @@
 import type { AutomationConfig } from "../lib/automations";
 import type { LogEvent } from "../lib/logbook";
+import type { CameraEvent } from "../lib/cameraEvents";
 
 /** Optional service-call data. `entity_id` targets the entity; the rest is service data. */
 export type ServiceData = { entity_id?: string } & Record<string, unknown>;
@@ -58,4 +59,62 @@ export interface Source {
   getAutomationConfig?: (id: string) => Promise<AutomationConfig | null>;
   saveAutomationConfig?: (config: AutomationConfig) => Promise<void>;
   deleteAutomationConfig?: (id: string) => Promise<void>;
+  /**
+   * The on-demand live-stream URL for a camera, in the requested container.
+   * The live source asks HA over the WebSocket (`camera/stream`, format "hls")
+   * for a low-latency feed; the fixture source returns the bundled demo clip so
+   * demo mode plays real moving pixels. Resolves null when the source has no
+   * stream for that entity (the player then falls back to MJPEG/snapshot).
+   *
+   * (WebRTC is the next tier above this — wired here once go2rtc is on the
+   * cluster; the player's transport ladder already leaves a slot for it.)
+   */
+  streamUrl?: (entityId: string, format?: "hls") => Promise<string | null>;
+  /**
+   * Recorded motion/object events for a camera over `[startMs, endMs]`, powering
+   * the timeline scrubber. The live source reads them from Frigate; the fixture
+   * source synthesizes a believable 24h spread. `camera` is the Frigate camera
+   * name. Returned oldest-first. Rejects if the source can't provide events.
+   */
+  fetchCameraEvents?: (
+    camera: string,
+    startMs: number,
+    endMs: number,
+  ) => Promise<CameraEvent[]>;
+  /**
+   * A playable URL for recorded footage of `camera` over `[startMs, endMs]`
+   * (HLS VOD) — what the scrubber loads on seek. Pure URL builder, no fetch.
+   * The fixture source returns the demo clip. Null when unsupported.
+   */
+  recordingUrlAt?: (camera: string, startMs: number, endMs: number) => string | null;
+  /** A playable URL for one recorded event's clip. Null when unsupported. */
+  eventClipUrl?: (eventId: string) => string | null;
+  /**
+   * Begin a WebRTC live session for a camera. Sends the browser's SDP `offer`
+   * to HA (`camera/webrtc/offer`, a subscribe-style command served by go2rtc)
+   * and streams the negotiation back through `onSignal` (session id, answer,
+   * trickle ICE candidates, or error). Resolves an unsubscribe handle. Only the
+   * live HA source implements this; demo has no WebRTC (the player falls back).
+   */
+  webrtcOffer?: (
+    entityId: string,
+    offerSdp: string,
+    onSignal: (signal: WebRtcSignal) => void,
+  ) => Promise<{ unsubscribe: () => void }>;
+  /** Push a local trickle ICE candidate up to HA for an in-flight WebRTC session. */
+  webrtcCandidate?: (
+    sessionId: string,
+    candidate: RTCIceCandidateInit,
+  ) => Promise<void>;
+}
+
+/** One message from HA's `camera/webrtc/offer` negotiation stream. */
+export interface WebRtcSignal {
+  type: "session" | "answer" | "candidate" | "error";
+  session_id?: string;
+  /** SDP answer (on `type: "answer"`). */
+  answer?: string;
+  /** Remote ICE candidate (on `type: "candidate"`). */
+  candidate?: RTCIceCandidateInit | string;
+  error?: string;
 }

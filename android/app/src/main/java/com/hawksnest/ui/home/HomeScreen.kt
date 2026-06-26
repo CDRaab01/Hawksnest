@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -45,6 +46,7 @@ import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.alarmView
 import com.hawksnest.security.LocalBiometricGate
 import com.hawksnest.ui.cameras.CameraLightbox
+import com.hawksnest.ui.cameras.DoorbellBanner
 import com.hawksnest.ui.cameras.CameraSnapshot
 import com.hawksnest.ui.cameras.bustCache
 import com.hawksnest.ui.components.ConnectionPill
@@ -81,6 +83,18 @@ fun HomeScreen(
     }
     var lightbox by remember { mutableStateOf<CameraUi?>(null) }
     var showKeypad by remember { mutableStateOf(false) }
+
+    // Doorbell banner: show the latest ring until dismissed or auto-timeout.
+    var doorbellDismissedAt by remember { mutableStateOf(0L) }
+    val ring = ui.doorbell
+    val showDoorbell = ring != null && ring.whenMs > doorbellDismissedAt
+    LaunchedEffect(showDoorbell, ring?.whenMs) {
+        if (showDoorbell && ring != null) {
+            kotlinx.coroutines.delay(12_000)
+            doorbellDismissedAt = ring.whenMs
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -96,6 +110,17 @@ fun HomeScreen(
                 modifier = Modifier.weight(1f),
             )
             ConnectionPill(ui.status)
+        }
+
+        if (showDoorbell && ring != null) {
+            DoorbellBanner(
+                cameraName = ring.name,
+                onView = {
+                    ui.cameras.firstOrNull { it.id == ring.cameraId }?.let { lightbox = it }
+                    doorbellDismissedAt = ring.whenMs
+                },
+                onDismiss = { doorbellDismissedAt = ring.whenMs },
+            )
         }
 
         if (ui.lifeSafetyAlerts.isNotEmpty() || ui.lifeSafetyMonitored > 0) {
@@ -165,9 +190,8 @@ fun HomeScreen(
 
     lightbox?.let { cam ->
         CameraLightbox(
-            name = cam.name,
-            snapshotUrl = cam.snapshotUrl,
-            streamUrl = cam.streamUrl,
+            cameras = ui.cameras,
+            initial = cam,
             onDismiss = { lightbox = null },
         )
     }

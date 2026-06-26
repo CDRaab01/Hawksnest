@@ -7,12 +7,14 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.ServiceData
-import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.AlarmView
+import com.hawksnest.core.logic.DoorbellPress
+import com.hawksnest.core.logic.activeDoorbellPress
 import com.hawksnest.core.logic.alarmView
 import com.hawksnest.core.logic.groupByArea
 import com.hawksnest.core.logic.isCameraLive
+import com.hawksnest.core.logic.resolveCameras
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.core.logic.securityReadout
 import com.hawksnest.core.logic.snapshotUrl
@@ -26,13 +28,22 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class CameraUi(
+    /** Stable logical id (`camera.<base>`) — ring-mqtt's split entities collapse to one. */
+    val id: String,
+    /** The entity to stream live from (ring-mqtt's `_live`, or the camera itself). */
     val entityId: String,
     val name: String,
     val live: Boolean,
     /** Signed snapshot URL resolved against the HA origin (null in demo / when down). */
     val snapshotUrl: String? = null,
-    /** Derived MJPEG live-stream URL (used by the camera lightbox). */
+    /** Derived MJPEG live-stream URL (used as a fallback in the lightbox). */
     val streamUrl: String? = null,
+    /** ring-mqtt event selector (`select.<base>_event_select`), or null. */
+    val eventSelectId: String? = null,
+    /** ring-mqtt recorded-event playback stream (`camera.<base>_event`), or null. */
+    val eventStreamId: String? = null,
+    /** Doorbell press sensor (`binary_sensor.<base>_ding`), or null. */
+    val dingId: String? = null,
 )
 
 data class HomeUi(
@@ -47,6 +58,8 @@ data class HomeUi(
     val offlineLabel: String? = null,
     val cameras: List<CameraUi> = emptyList(),
     val liveCameraCount: Int = 0,
+    /** The most recent active doorbell ring, if any (drives the doorbell banner). */
+    val doorbell: DoorbellPress? = null,
     val roomCount: Int = 0,
     val roomsPreview: String = "",
     /** Triggered life-safety sensors (smoke/CO/gas/leak), surfaced regardless of armed state. */
@@ -100,18 +113,22 @@ class HomeViewModel @Inject constructor(
         val security = securityReadout(all, overrides)
 
         val resolvedBase = baseUrl.ifEmpty { null }
-        val cameras = all
-            .filter { domainOf(it.entityId) == "camera" }
-            .sortedBy { it.entityId }
-            .map {
-                CameraUi(
-                    entityId = it.entityId,
-                    name = resolveName(it, overrides),
-                    live = isCameraLive(it),
-                    snapshotUrl = snapshotUrl(it, resolvedBase),
-                    streamUrl = streamUrl(it, resolvedBase),
-                )
-            }
+        // Collapse ring-mqtt's per-device entities into one logical camera each.
+        val logical = resolveCameras(entities, overrides)
+        val cameras = logical.map { lc ->
+            CameraUi(
+                id = lc.id,
+                entityId = lc.liveEntity.entityId,
+                name = lc.name,
+                live = isCameraLive(lc.snapshotEntity),
+                snapshotUrl = snapshotUrl(lc.snapshotEntity, resolvedBase),
+                streamUrl = streamUrl(lc.liveEntity, resolvedBase),
+                eventSelectId = lc.eventSelectId,
+                eventStreamId = lc.eventStreamId,
+                dingId = lc.dingId,
+            )
+        }
+        val doorbell = activeDoorbellPress(logical, entities, System.currentTimeMillis())
 
         val rooms = groupByArea(all, areas)
 
@@ -126,6 +143,7 @@ class HomeViewModel @Inject constructor(
             offlineLabel = security.offlineLabel,
             cameras = cameras,
             liveCameraCount = cameras.count { it.live },
+            doorbell = doorbell,
             roomCount = rooms.size,
             roomsPreview = rooms.take(4).joinToString(" · ") { it.area },
             lifeSafetyAlerts = security.lifeSafetyAlerts,

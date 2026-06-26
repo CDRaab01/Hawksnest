@@ -131,7 +131,7 @@ describe("groupByArea", () => {
       "Living Room",
     ]);
     const frontDoor = groups.find((g) => g.area === "Front Door")!;
-    expect(frontDoor.entities.length).toBe(5);
+    expect(frontDoor.entities.length).toBe(6); // incl. the doorbell ding sensor
   });
 
   it("excludes hidden entities from counts and grouping", () => {
@@ -141,7 +141,7 @@ describe("groupByArea", () => {
       "lock.front_door_lock",
     ]);
     const frontDoor = groups.find((g) => g.area === "Front Door")!;
-    expect(frontDoor.entities.length).toBe(4);
+    expect(frontDoor.entities.length).toBe(5); // 6 minus the hidden lock
     expect(
       frontDoor.entities.some((e) => e.entity_id === "lock.front_door_lock"),
     ).toBe(false);

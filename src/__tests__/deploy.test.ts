@@ -42,6 +42,17 @@ describe("nginx.conf — same-origin HA reverse proxy", () => {
     expect(block).toMatch(/proxy_buffering\s+off/);
   });
 
+  it("streams HLS + Frigate VOD with buffering disabled (timeline scrubber)", () => {
+    // The HLS live feed and Frigate's recorded clips/VOD playlists are served as
+    // streams; each needs its own location with proxy_buffering off, or nginx
+    // stalls them — and neither may forward XFF (checked globally above).
+    for (const path of ["/api/hls/", "/api/frigate/"]) {
+      expect(nginx).toContain(`location ${path}`);
+      const block = nginx.slice(nginx.indexOf(`location ${path}`));
+      expect(block).toMatch(/proxy_buffering\s+off/);
+    }
+  });
+
   it("falls back to the SPA index for client-side routes", () => {
     expect(nginx).toContain("try_files $uri $uri/ /index.html");
   });

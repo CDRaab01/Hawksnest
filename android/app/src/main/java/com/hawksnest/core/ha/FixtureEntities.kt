@@ -29,6 +29,11 @@ val fixtureEntities: List<HassEntity> = listOf(
         put("friendly_name", "Basement Camera"); put("icon", "mdi:cctv")
         put("entity_picture", "/demo-cam-2.svg")
     },
+    // Doorbell ring sensor for the front-door camera (ring-mqtt names it
+    // `binary_sensor.<base>_ding`). Idle in demo; flipping it on raises the banner.
+    ent("binary_sensor.front_door_ding", "off") {
+        put("friendly_name", "Front Door Ding"); put("device_class", "occupancy")
+    },
     ent("lock.front_door_lock", "locked") { put("friendly_name", "Lock") },
     ent("binary_sensor.front_door_current_status", "on") {
         put("friendly_name", "Lock Current status"); put("device_class", "door")
@@ -84,6 +89,7 @@ val fixtureEntities: List<HassEntity> = listOf(
 /** Area assignment — a registry concern, kept separate from state. */
 val fixtureAreaRegistry: AreaRegistry = mapOf(
     "camera.front_door" to "Front Door",
+    "binary_sensor.front_door_ding" to "Front Door",
     "lock.front_door_lock" to "Front Door",
     "binary_sensor.front_door_current_status" to "Front Door",
     "binary_sensor.front_door_intrusion" to "Front Door",

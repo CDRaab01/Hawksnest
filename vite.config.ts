@@ -20,6 +20,10 @@ export default defineConfig({
       // than stale HA data.
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,woff,woff2}"],
+        // hls.js is a large (~500KB) lazy chunk only loaded for non-native HLS
+        // playback (a network-only feature) — keep it out of the offline shell
+        // precache. It's fetched on demand; offline, the player falls back.
+        globIgnores: ["**/hls-*.js"],
         // SPA navigations fall back to index.html, but never for /api routes.
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api/],

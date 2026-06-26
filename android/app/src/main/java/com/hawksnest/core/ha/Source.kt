@@ -1,5 +1,6 @@
 package com.hawksnest.core.ha
 
+import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.LogEvent
 
 /** One historical sample for an entity. [t] is epoch milliseconds; [state] is the raw HA state. */
@@ -38,4 +39,24 @@ interface Source {
     suspend fun fetchLogbook(startMs: Long, endMs: Long, entityIds: List<String>? = null): List<LogEvent> {
         throw UnsupportedOperationException("This source cannot provide a logbook.")
     }
+
+    /**
+     * The on-demand live-stream URL for a camera (HLS from live HA via `camera/stream`; the bundled
+     * demo clip in demo). Null when the source has no stream — the player falls back to MJPEG/snapshot.
+     * (WebRTC is the next tier above this, wired once go2rtc is on the cluster.)
+     */
+    suspend fun streamUrl(entityId: String): String? = null
+
+    /**
+     * Recorded motion/object events for a camera over `[startMs, endMs]`, powering the timeline
+     * scrubber. The live source reads them from Frigate; the fixture source synthesizes a 24h spread.
+     * [camera] is the Frigate camera name. Returned oldest-first.
+     */
+    suspend fun fetchCameraEvents(camera: String, startMs: Long, endMs: Long): List<CameraEvent> = emptyList()
+
+    /** Recorded-footage URL for [camera] over `[startMs, endMs]` (HLS VOD). Null when unsupported. */
+    fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String? = null
+
+    /** A playable URL for one recorded event's clip. Null when unsupported. */
+    fun eventClipUrl(eventId: String): String? = null
 }

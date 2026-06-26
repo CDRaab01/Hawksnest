@@ -47,6 +47,11 @@ const HISTORY: Record<string, unknown> = {
   },
 };
 
+// camera/stream returns a signed, root-relative HLS playlist path.
+const STREAM: Record<string, unknown> = {
+  "camera/stream": { url: "/api/hls/tok/master.m3u8" },
+};
+
 function makeFakeConn() {
   const listeners: Record<string, Array<() => void>> = {};
   const sent: Array<Record<string, unknown>> = [];
@@ -57,7 +62,16 @@ function makeFakeConn() {
     removeEventListener: () => {},
     sendMessagePromise: async (msg: { type: string }) => {
       sent.push(msg as Record<string, unknown>);
-      return REGISTRIES[msg.type] ?? HISTORY[msg.type] ?? LOGBOOK[msg.type];
+      return (
+        REGISTRIES[msg.type] ??
+        HISTORY[msg.type] ??
+        LOGBOOK[msg.type] ??
+        STREAM[msg.type]
+      );
+    },
+    subscribeMessage: async (_cb: unknown, msg: { type: string }) => {
+      sent.push(msg as Record<string, unknown>);
+      return () => {};
     },
     close: () => {},
   } as unknown as Connection;
@@ -194,6 +208,65 @@ describe("createHaSource", () => {
       { t: 1_700_000_000_000, state: "40" },
       { t: 1_700_003_600_000, state: "42" },
     ]);
+  });
+
+  it("requests an HLS stream URL and resolves it against the HA origin", async () => {
+    const { conn, sent } = makeFakeConn();
+    const deps: HaSourceDeps = {
+      connect: async () => conn,
+      subscribe: () => () => {},
+    };
+    const source = createHaSource({ url: "http://ha", token: "t" }, deps);
+    await source.start();
+    const url = await source.streamUrl!("camera.front_door");
+
+    const req = sent.find((m) => m.type === "camera/stream");
+    expect(req).toMatchObject({
+      type: "camera/stream",
+      entity_id: "camera.front_door",
+      format: "hls",
+    });
+    expect(url).toBe("http://ha/api/hls/tok/master.m3u8");
+  });
+
+  it("builds Frigate recording/clip URLs against the HA origin", async () => {
+    const { conn } = makeFakeConn();
+    const deps: HaSourceDeps = {
+      connect: async () => conn,
+      subscribe: () => () => {},
+    };
+    const source = createHaSource({ url: "http://ha", token: "t" }, deps);
+    await source.start();
+
+    expect(source.recordingUrlAt!("front", 1_700_000_000_000, 1_700_000_600_000)).toBe(
+      "http://ha/api/frigate/vod/front/start/1700000000/end/1700000600/master.m3u8",
+    );
+    expect(source.eventClipUrl!("evt-1")).toBe(
+      "http://ha/api/frigate/notifications/evt-1/clip.mp4",
+    );
+  });
+
+  it("negotiates WebRTC: subscribes camera/webrtc/offer and sends candidates", async () => {
+    const { conn, sent } = makeFakeConn();
+    const deps: HaSourceDeps = {
+      connect: async () => conn,
+      subscribe: () => () => {},
+    };
+    const source = createHaSource({ url: "http://ha", token: "t" }, deps);
+    await source.start();
+
+    const handle = await source.webrtcOffer!("camera.front_door", "v=0...", () => {});
+    expect(typeof handle.unsubscribe).toBe("function");
+    const offer = sent.find((m) => m.type === "camera/webrtc/offer");
+    expect(offer).toMatchObject({
+      type: "camera/webrtc/offer",
+      entity_id: "camera.front_door",
+      offer: "v=0...",
+    });
+
+    await source.webrtcCandidate!("sess-1", { candidate: "candidate:..." });
+    const cand = sent.find((m) => m.type === "camera/webrtc/candidate");
+    expect(cand).toMatchObject({ type: "camera/webrtc/candidate", session_id: "sess-1" });
   });
 
   it("flags reconnecting when the connection drops", async () => {
