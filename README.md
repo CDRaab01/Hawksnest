@@ -31,6 +31,23 @@ See [`deploy/README.md`](deploy/README.md) for the k3s deployment.
    point the URL directly at HA (e.g. `http://192.168.4.34:8123`).
 3. The header pill shows `Connected` / `Reconnecting` / `Offline` / `Demo data`.
 
+### Reaching home over Tailscale (Android)
+
+The Android app reaches Home Assistant over **Tailscale** rather than exposing HA to the internet —
+Hawksnest is *not* a VPN itself, it rides the tunnel the official Tailscale app provides on the
+device (the "sidecar" model; only one VPN can be active on Android, so embedding a second client
+isn't the right approach).
+
+1. Install the **[Tailscale](https://play.google.com/store/apps/details?id=com.tailscale.ipn)** app
+   and sign in to the same tailnet as your HA host / Hawksnest proxy. (Add the HA box to the tailnet,
+   or run a [subnet router](https://tailscale.com/kb/1019/subnets) so its LAN IP is routable.)
+2. In Hawksnest: **Settings → Tailscale** — tap **Open Tailscale** to install/launch it, set the
+   **Base URL** above to your tailnet host (a MagicDNS `…ts.net` name or a `100.x` address), then
+   **Test reachability** to confirm the tunnel routes to the host before chasing token errors.
+3. Cleartext HTTP to tailnet hosts is allowed by `network_security_config.xml`; front the proxy with
+   TLS and you can turn cleartext off entirely. Set `ha.url=` in `android/local.properties` to
+   prefill the URL into debug builds.
+
 ### Dev
 `npm run dev` proxies `/api` to `HA_PROXY_TARGET` (default `http://192.168.4.34:8123`), so the app
 is same-origin locally too. See `deploy/README.md`.

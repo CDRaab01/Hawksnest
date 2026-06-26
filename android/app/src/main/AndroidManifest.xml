@@ -6,6 +6,12 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
+    <!-- Package visibility (Android 11+): the Settings → Tailscale panel checks whether the official
+         Tailscale app is installed (to "Open" it vs. send the user to install it). -->
+    <queries>
+        <package android:name="com.tailscale.ipn" />
+    </queries>
+
     <application
         android:name=".HawksnestApp"
         android:allowBackup="false"
