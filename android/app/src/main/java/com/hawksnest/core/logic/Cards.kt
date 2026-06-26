@@ -8,7 +8,7 @@ import com.hawksnest.core.ha.domainOf
  * switches on).
  */
 enum class CardType {
-    LOCK, CAMERA, BINARY_SENSOR, LIGHT, ALARM, COVER, CLIMATE, MEDIA_PLAYER, FAN, GENERIC,
+    LOCK, CAMERA, BINARY_SENSOR, LIGHT, SWITCH, ALARM, COVER, CLIMATE, MEDIA_PLAYER, FAN, GENERIC,
 }
 
 private val CARD_BY_DOMAIN: Map<String, CardType> = mapOf(
@@ -17,6 +17,7 @@ private val CARD_BY_DOMAIN: Map<String, CardType> = mapOf(
     "image" to CardType.CAMERA,
     "binary_sensor" to CardType.BINARY_SENSOR,
     "light" to CardType.LIGHT,
+    "switch" to CardType.SWITCH,
     "alarm_control_panel" to CardType.ALARM,
     "cover" to CardType.COVER,
     "climate" to CardType.CLIMATE,

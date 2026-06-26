@@ -83,11 +83,16 @@ class HaConnection(
         ws?.send(HaMessages.command(nextId.getAndIncrement(), "subscribe_entities").toString())
     }
 
-    suspend fun callService(domain: String, service: String, entityId: String?) {
+    suspend fun callService(
+        domain: String,
+        service: String,
+        entityId: String?,
+        serviceData: Map<String, Any?> = emptyMap(),
+    ) {
         val id = nextId.getAndIncrement()
         val def = CompletableDeferred<JsonObject>()
         pending[id] = def
-        ws?.send(HaMessages.callService(id, domain, service, entityId).toString())
+        ws?.send(HaMessages.callService(id, domain, service, entityId, serviceData).toString())
         def.await()
     }
 

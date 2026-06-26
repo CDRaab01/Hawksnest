@@ -3,6 +3,9 @@ package com.hawksnest.core.ha
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -38,15 +41,25 @@ object HaMessages {
             build()
         }
 
-    /** `call_service` with an optional entity target. */
-    fun callService(id: Int, domain: String, service: String, entityId: String?): JsonObject =
-        buildJsonObject {
-            put("id", id)
-            put("type", "call_service")
-            put("domain", domain)
-            put("service", service)
-            if (entityId != null) putJsonObject("target") { put("entity_id", entityId) }
+    /** `call_service` with an optional entity target and extra service data (brightness, temp, …). */
+    fun callService(
+        id: Int,
+        domain: String,
+        service: String,
+        entityId: String?,
+        serviceData: Map<String, Any?> = emptyMap(),
+    ): JsonObject = buildJsonObject {
+        put("id", id)
+        put("type", "call_service")
+        put("domain", domain)
+        put("service", service)
+        if (serviceData.isNotEmpty()) {
+            putJsonObject("service_data") {
+                serviceData.forEach { (k, v) -> put(k, anyToJsonElement(v)) }
+            }
         }
+        if (entityId != null) putJsonObject("target") { put("entity_id", entityId) }
+    }
 
     /** The `type` field of any incoming frame, or null. */
     fun frameType(frame: JsonObject): String? = frame["type"]?.jsonPrimitive?.contentOrNull
@@ -62,4 +75,14 @@ object HaMessages {
     fun errorMessage(frame: JsonObject): String? =
         frame["message"]?.jsonPrimitive?.contentOrNull
             ?: (frame["error"] as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull
+}
+
+/** Convert a loosely-typed service-data value into a JSON element for the WS payload. */
+internal fun anyToJsonElement(v: Any?): JsonElement = when (v) {
+    null -> JsonNull
+    is JsonElement -> v
+    is Boolean -> JsonPrimitive(v)
+    is Number -> JsonPrimitive(v)
+    is String -> JsonPrimitive(v)
+    else -> JsonPrimitive(v.toString())
 }

@@ -40,15 +40,16 @@ class DevicesViewModel @Inject constructor(
                             stateText = e.state.replaceFirstChar { c -> c.uppercaseChar() },
                             rawState = e.state,
                             card = domainToCard(e.entityId),
+                            attributes = e.attributes,
                         )
                     },
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun call(entityId: String, service: String) {
+    fun call(entityId: String, service: String, extra: Map<String, Any?> = emptyMap()) {
         viewModelScope.launch {
-            connection.callService(domainOf(entityId), service, ServiceData(entityId = entityId))
+            connection.callService(domainOf(entityId), service, ServiceData(entityId = entityId, extra = extra))
         }
     }
 }

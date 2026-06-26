@@ -56,7 +56,7 @@ fun AreaDetailScreen(
             verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
         ) {
             devices.forEach { device ->
-                DeviceControlCard(device, onCall = { service -> viewModel.call(device.entityId, service) })
+                DeviceControlCard(device, onCall = { service, extra -> viewModel.call(device.entityId, service, extra) })
             }
         }
     }

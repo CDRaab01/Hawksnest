@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -44,6 +45,9 @@ fun PulseBottomBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(pulse.panel)
+                // Lift the tab row above the system gesture/3-button bar; the panel background
+                // still fills behind the inset so it reads as one continuous bar.
+                .navigationBarsPadding()
                 .padding(horizontal = HawksnestTheme.spacing.sm, vertical = HawksnestTheme.spacing.sm),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),

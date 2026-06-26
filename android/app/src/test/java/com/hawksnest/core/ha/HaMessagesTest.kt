@@ -32,6 +32,24 @@ class HaMessagesTest {
     }
 
     @Test
+    fun `callService omits service_data when none given`() {
+        val m = HaMessages.callService(1, "switch", "turn_on", "switch.fan")
+        assertFalse(m.containsKey("service_data"))
+    }
+
+    @Test
+    fun `callService includes service_data with extra payload`() {
+        val m = HaMessages.callService(
+            7, "light", "turn_on", "light.kitchen",
+            serviceData = mapOf("brightness_pct" to 50),
+        )
+        val data = m["service_data"]?.jsonObject
+        assertEquals(50, data?.get("brightness_pct")?.jsonPrimitive?.content?.toInt())
+        // target still set alongside the data
+        assertEquals("light.kitchen", m["target"]?.jsonObject?.get("entity_id")?.jsonPrimitive?.content)
+    }
+
+    @Test
     fun `result frame success + type`() {
         val ok = frame("""{"id":1,"type":"result","success":true,"result":null}""")
         assertEquals("result", HaMessages.frameType(ok))

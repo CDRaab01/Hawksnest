@@ -45,7 +45,7 @@ class HaSource(
 
     override suspend fun callService(domain: String, service: String, data: ServiceData) {
         val c = conn ?: throw IllegalStateException("Not connected to Home Assistant.")
-        c.callService(domain, service, data.entityId)
+        c.callService(domain, service, data.entityId, data.extra)
     }
 
     override suspend fun fetchHistory(entityId: String, hours: Int): List<HistoryPoint> = emptyList()
