@@ -44,6 +44,7 @@ fun SettingsScreen(
     val error by viewModel.error.collectAsState()
     val savedUrl by viewModel.savedUrl.collectAsState()
     val hasToken by viewModel.hasToken.collectAsState()
+    val reachability by viewModel.reachability.collectAsState()
 
     val defaultUrl = savedUrl ?: BuildConfig.HA_DEFAULT_URL
     var url by remember(defaultUrl) { mutableStateOf(defaultUrl) }
@@ -125,6 +126,13 @@ fun SettingsScreen(
                 modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
             )
         }
+
+        SectionHeader("Tailscale")
+        TailscalePanel(
+            savedUrl = savedUrl,
+            reachability = reachability,
+            onTest = { viewModel.testReachability(url) },
+        )
 
         SectionHeader("Automation")
         PanelCard(onClick = onOpenAutomations) {
