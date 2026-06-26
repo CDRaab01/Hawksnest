@@ -2,6 +2,7 @@ package com.hawksnest.core.ha
 
 import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
+import kotlin.math.roundToInt
 
 /**
  * Demo data source — no live HA. Loads the fixtures into [HaState] and simulates service calls
@@ -34,6 +35,31 @@ class FixtureSource @Inject constructor(private val state: HaState) : Source {
         }
         // Mirror the live source's non-optimistic echo: we mutate the store as HA would.
         state.upsertEntities(listOf(current.copy(state = newState, attributes = JsonObject(attrs))))
+    }
+
+    /**
+     * Synthesize a plausible series so the demo's entity-detail chart renders. Numeric entities get
+     * a gentle deterministic wave around their current value; discrete entities hold their state.
+     * The last sample matches the live state so the chart's latest point agrees with the card.
+     */
+    override suspend fun fetchHistory(entityId: String, hours: Int): List<HistoryPoint> {
+        val current = state.entities.value[entityId] ?: return emptyList()
+        val now = System.currentTimeMillis()
+        val n = 24
+        val stepMs = hours * 3600_000L / n
+        val base = current.state.toFloatOrNull()
+        return (0 until n).map { i ->
+            val t = now - (n - 1 - i) * stepMs
+            val s = when {
+                i == n - 1 -> current.state // anchor the latest point to the live state
+                base != null -> {
+                    val wave = base * (1f + 0.06f * kotlin.math.sin(i.toFloat()))
+                    ((wave * 10).roundToInt() / 10f).toString()
+                }
+                else -> current.state
+            }
+            HistoryPoint(t, s)
+        }
     }
 
     /** The resulting state for a simulated `domain.service`, or null to keep the current state. */

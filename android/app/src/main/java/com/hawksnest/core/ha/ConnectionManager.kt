@@ -56,4 +56,8 @@ class ConnectionManager @Inject constructor(
     suspend fun callService(domain: String, service: String, data: ServiceData) {
         current?.callService(domain, service, data)
     }
+
+    /** Recent state history for one entity (live HA over WS; synthesized in demo). */
+    suspend fun fetchHistory(entityId: String, hours: Int): List<HistoryPoint> =
+        current?.fetchHistory(entityId, hours) ?: emptyList()
 }

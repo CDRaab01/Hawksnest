@@ -29,6 +29,7 @@ import com.hawksnest.ui.theme.HawksnestTheme
 @Composable
 fun AreaDetailScreen(
     onBack: () -> Unit,
+    onOpenEntity: (String) -> Unit,
     viewModel: AreaDetailViewModel = hiltViewModel(),
 ) {
     val devices by viewModel.devices.collectAsState()
@@ -56,7 +57,11 @@ fun AreaDetailScreen(
             verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
         ) {
             devices.forEach { device ->
-                DeviceControlCard(device, onCall = { service, extra -> viewModel.call(device.entityId, service, extra) })
+                DeviceControlCard(
+                    device,
+                    onCall = { service, extra -> viewModel.call(device.entityId, service, extra) },
+                    onOpen = { onOpenEntity(device.entityId) },
+                )
             }
         }
     }

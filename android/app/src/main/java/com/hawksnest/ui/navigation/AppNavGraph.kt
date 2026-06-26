@@ -15,6 +15,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.hawksnest.ui.area.AreaDetailScreen
 import com.hawksnest.ui.devices.DevicesScreen
+import com.hawksnest.ui.entity.EntityDetailScreen
 import com.hawksnest.ui.history.HistoryScreen
 import com.hawksnest.ui.home.HomeScreen
 import com.hawksnest.ui.rooms.RoomsScreen
@@ -70,7 +71,7 @@ fun AppNavGraph(startDestination: String = Screen.Home.route) {
                 )
             }
             composable(Screen.Devices.route) {
-                DevicesScreen(onOpenArea = { area -> navController.navigate(Screen.Area.createRoute(area)) })
+                DevicesScreen(onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) })
             }
             composable(Screen.Rooms.route) {
                 RoomsScreen(onOpenArea = { area -> navController.navigate(Screen.Area.createRoute(area)) })
@@ -81,7 +82,16 @@ fun AppNavGraph(startDestination: String = Screen.Home.route) {
                 route = Screen.Area.route,
                 arguments = listOf(navArgument("area") { type = NavType.StringType }),
             ) {
-                AreaDetailScreen(onBack = { navController.popBackStack() })
+                AreaDetailScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) },
+                )
+            }
+            composable(
+                route = Screen.Entity.route,
+                arguments = listOf(navArgument("entityId") { type = NavType.StringType }),
+            ) {
+                EntityDetailScreen(onBack = { navController.popBackStack() })
             }
         }
     }

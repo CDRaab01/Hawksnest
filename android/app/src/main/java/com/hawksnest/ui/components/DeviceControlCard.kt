@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -66,11 +68,24 @@ private val DOOR_CLASSES = setOf("door", "window", "opening", "garage_door", "co
  * reconciles from HA's echo. Shared by the Devices tab and per-room Area detail.
  */
 @Composable
-fun DeviceControlCard(device: DeviceUi, onCall: (service: String, extra: Map<String, Any?>) -> Unit) {
+fun DeviceControlCard(
+    device: DeviceUi,
+    onCall: (service: String, extra: Map<String, Any?>) -> Unit,
+    onOpen: (() -> Unit)? = null,
+) {
     val pulse = HawksnestTheme.pulse
     PanelCard {
-        Text(device.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-        Text(subtitle(device), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(device.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                Text(subtitle(device), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (onOpen != null) {
+                IconButton(onClick = onOpen) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
         when (device.card) {
             CardType.LOCK -> ControlRow {
                 PulseButton(

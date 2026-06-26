@@ -23,7 +23,7 @@ import com.hawksnest.ui.theme.HawksnestTheme
  */
 @Composable
 fun DevicesScreen(
-    onOpenArea: (String) -> Unit,
+    onOpenEntity: (String) -> Unit,
     viewModel: DevicesViewModel = hiltViewModel(),
 ) {
     val groups by viewModel.groups.collectAsState()
@@ -43,7 +43,11 @@ fun DevicesScreen(
                 modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
             )
             group.devices.forEach { device ->
-                DeviceControlCard(device, onCall = { service, extra -> viewModel.call(device.entityId, service, extra) })
+                DeviceControlCard(
+                    device,
+                    onCall = { service, extra -> viewModel.call(device.entityId, service, extra) },
+                    onOpen = { onOpenEntity(device.entityId) },
+                )
             }
         }
     }

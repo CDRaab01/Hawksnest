@@ -9,7 +9,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import okhttp3.OkHttpClient
+import java.time.Instant
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -48,7 +53,18 @@ class HaSource(
         c.callService(domain, service, data.entityId, data.extra)
     }
 
-    override suspend fun fetchHistory(entityId: String, hours: Int): List<HistoryPoint> = emptyList()
+    override suspend fun fetchHistory(entityId: String, hours: Int): List<HistoryPoint> {
+        val c = conn ?: throw IllegalStateException("Not connected to Home Assistant.")
+        val startIso = Instant.now().minusSeconds(hours * 3600L).toString()
+        val frame = c.request("history/history_during_period") {
+            put("start_time", startIso)
+            putJsonArray("entity_ids") { add(entityId) }
+            put("minimal_response", true)
+            put("no_attributes", true)
+        }
+        val result = frame["result"] as? JsonObject ?: return emptyList()
+        return parseHistory(result, entityId)
+    }
 
     private suspend fun runLoop() {
         var backoff = 1_000L
