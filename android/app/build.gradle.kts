@@ -122,6 +122,12 @@ dependencies {
     // Coil — camera snapshot images (live MJPEG is hand-rolled on OkHttp)
     implementation(libs.coil.compose)
 
+    // Media3 / ExoPlayer — HLS live + recorded VOD playback and the demo clip (the Ring-style
+    // camera player). HLS module pulls in the playlist parser; MJPEG stays on the OkHttp decoder.
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.exoplayer.hls)
+    implementation(libs.androidx.media3.ui)
+
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 

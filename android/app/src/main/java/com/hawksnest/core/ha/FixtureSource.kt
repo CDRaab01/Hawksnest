@@ -1,5 +1,7 @@
 package com.hawksnest.core.ha
 
+import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.DEMO_CLIP_URI
 import com.hawksnest.core.logic.LogEvent
 import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
@@ -85,6 +87,47 @@ class FixtureSource @Inject constructor(private val state: HaState) : Source {
                 state = e.state,
             )
         }
+    }
+
+    /** Demo "live" feed: loop the bundled clip for any camera entity. */
+    override suspend fun streamUrl(entityId: String): String? =
+        if (domainOf(entityId) == "camera") DEMO_CLIP_URI else null
+
+    /** Demo: every seek plays the same bundled clip (no real recordings). */
+    override fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String = DEMO_CLIP_URI
+
+    override fun eventClipUrl(eventId: String): String = DEMO_CLIP_URI
+
+    /**
+     * Synthesize a believable 24h spread of recorded camera events so the demo timeline scrubber is
+     * populated without Frigate. Events land on a steady cadence, vary their label/duration, and are
+     * returned oldest-first. Mirrors `fixtureSource.synthCameraEvents` on the web.
+     */
+    override suspend fun fetchCameraEvents(camera: String, startMs: Long, endMs: Long): List<CameraEvent> {
+        val stepMs = 37 * 60_000L // ~one event every 37 minutes
+        val labels = listOf("person", "motion", "car", "motion", "dog", "person")
+        val out = mutableListOf<CameraEvent>()
+        var slot = 0
+        var t = startMs
+        while (t <= endMs) {
+            val durationMs = 20_000L + (slot % 5) * 15_000L // 20s–80s
+            out.add(
+                CameraEvent(
+                    id = "demo-$camera-$slot",
+                    camera = camera,
+                    label = labels[slot % labels.size],
+                    startMs = t,
+                    endMs = minOf(endMs, t + durationMs),
+                    hasClip = true,
+                    hasSnapshot = false,
+                    thumbnailUrl = null,
+                    snapshotUrl = null,
+                ),
+            )
+            t += stepMs
+            slot++
+        }
+        return out
     }
 
     /** The resulting state for a simulated `domain.service`, or null to keep the current state. */

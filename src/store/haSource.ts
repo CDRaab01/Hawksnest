@@ -13,6 +13,14 @@ import type { HistoryPoint, Source } from "./source";
 import type { AutomationConfig } from "../lib/automations";
 import { normalizeLogbook, type LogEvent, type RawLogbookEntry } from "../lib/logbook";
 import {
+  normalizeFrigateEvents,
+  recordingUrlAt as buildRecordingUrl,
+  eventClipUrl as buildEventClipUrl,
+  FRIGATE_BASE,
+  type CameraEvent,
+  type RawFrigateEvent,
+} from "../lib/cameraEvents";
+import {
   buildAreaRegistry,
   buildDeviceIndex,
   toEntityRecord,
@@ -155,6 +163,67 @@ async function fetchEntityHistory(
     .sort((a, b) => a.t - b.t);
 }
 
+/** Prefix a root-relative HA/Frigate path with the connected origin (Settings may
+ *  point straight at HA, where the page origin would 404). Empty/absolute → as-is. */
+function withBase(path: string, baseUrl: string): string {
+  if (!baseUrl || !path.startsWith("/")) return path;
+  return `${baseUrl.replace(/\/+$/, "")}${path}`;
+}
+
+/**
+ * Ask HA for an on-demand stream URL for a camera. `camera/stream` returns a
+ * signed, root-relative HLS playlist path (`/api/hls/<token>/master.m3u8`) that
+ * HA serves under the same `/api` the nginx pod already proxies. Resolved
+ * against the connected origin like camera snapshots.
+ */
+async function fetchStreamUrl(
+  conn: Connection,
+  entityId: string,
+  baseUrl: string,
+  format: "hls",
+): Promise<string | null> {
+  try {
+    const res = await conn.sendMessagePromise<{ url?: string }>({
+      type: "camera/stream",
+      entity_id: entityId,
+      format,
+    });
+    return res?.url ? withBase(res.url, baseUrl) : null;
+  } catch {
+    // Camera can't produce a stream (or HA lacks the stream integration) — the
+    // player falls back to MJPEG/snapshot, so don't surface this as an error.
+    return null;
+  }
+}
+
+/**
+ * Read recorded events for a Frigate camera over `[startMs, endMs]`. Frigate's
+ * HA integration exposes its API under `/api/frigate/…` (same-origin through the
+ * nginx proxy). Degrades to [] if Frigate isn't installed yet or the request
+ * fails, so the timeline renders empty rather than throwing.
+ */
+async function fetchFrigateEvents(
+  creds: HaCredentials,
+  camera: string,
+  startMs: number,
+  endMs: number,
+): Promise<CameraEvent[]> {
+  const base = withBase(FRIGATE_BASE, creds.url);
+  const url =
+    `${base}/events?camera=${encodeURIComponent(camera)}` +
+    `&after=${Math.floor(startMs / 1000)}&before=${Math.floor(endMs / 1000)}&limit=500`;
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${creds.token}` },
+    });
+    if (!res.ok) return [];
+    const raw = (await res.json()) as RawFrigateEvent[];
+    return normalizeFrigateEvents(raw ?? [], base);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Live Home Assistant source over the WebSocket API. `home-assistant-js-websocket`
  * handles auth + automatic reconnect; we mirror its entity stream into the store
@@ -244,6 +313,19 @@ export function createHaSource(
     async fetchLogbook(startMs, endMs, opts) {
       if (!conn) throw new Error("Not connected to Home Assistant.");
       return fetchLogbook(conn, startMs, endMs, opts?.entityIds);
+    },
+    async streamUrl(entityId, format = "hls") {
+      if (!conn) return null;
+      return fetchStreamUrl(conn, entityId, store().baseUrl, format);
+    },
+    async fetchCameraEvents(camera, startMs, endMs) {
+      return fetchFrigateEvents(creds, camera, startMs, endMs);
+    },
+    recordingUrlAt(camera, startMs, endMs) {
+      return buildRecordingUrl(camera, startMs, endMs, withBase(FRIGATE_BASE, creds.url));
+    },
+    eventClipUrl(eventId) {
+      return buildEventClipUrl(eventId, withBase(FRIGATE_BASE, creds.url));
     },
     async getAutomationConfig(id) {
       const res = await fetch(automationUrl(creds, id), {

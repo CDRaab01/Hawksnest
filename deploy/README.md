@@ -47,6 +47,19 @@ browser ──http──> Hawksnest pod (nginx :80)
 kubectl -n home-automation rollout undo deployment/hawksnest
 ```
 
+## Camera streaming locations (HLS + Frigate)
+`nginx.conf` has dedicated, **buffering-off** locations for the Ring-style camera player:
+- `/api/hls/` — the on-demand HLS live feed HA returns from `camera/stream` (go2rtc). Like the
+  MJPEG stream, buffering must be off or nginx stalls the live playlist/segments.
+- `/api/frigate/` — Frigate's recorded-event clips, snapshots, and the VOD HLS playlists that back
+  the **timeline scrubber**. Reached same-origin through HA via the Frigate HA integration's views.
+  (No Frigate in the cluster yet — this location is ready for when it joins.)
+
+Both omit `X-Forwarded-For` for the same reason cameras do (see below). Until Frigate/go2rtc are
+deployed these paths simply 404/empty and the app degrades to MJPEG + snapshot; the web/Android apps
+already run the whole player against **demo data** (a bundled clip + synthesized events) with no
+backend, so the UI is exercisable before the backend exists.
+
 ## Note: HA trusted_proxies and X-Forwarded-For
 `nginx.conf` deliberately does **not** forward `X-Forwarded-For` to HA. When HA has
 `use_x_forwarded_for` enabled and the request's proxy IP isn't in `trusted_proxies`, HA does **not**

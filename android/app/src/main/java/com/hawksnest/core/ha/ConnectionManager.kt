@@ -64,4 +64,15 @@ class ConnectionManager @Inject constructor(
     /** The logbook over `[startMs, endMs]` (live HA over WS; synthesized in demo). */
     suspend fun fetchLogbook(startMs: Long, endMs: Long): List<com.hawksnest.core.logic.LogEvent> =
         current?.fetchLogbook(startMs, endMs) ?: emptyList()
+
+    /** On-demand live-stream URL for a camera (HLS from live HA; bundled demo clip in demo). */
+    suspend fun streamUrl(entityId: String): String? = current?.streamUrl(entityId)
+
+    /** Recorded camera events over `[startMs, endMs]` for the timeline scrubber. */
+    suspend fun fetchCameraEvents(camera: String, startMs: Long, endMs: Long): List<com.hawksnest.core.logic.CameraEvent> =
+        current?.fetchCameraEvents(camera, startMs, endMs) ?: emptyList()
+
+    /** Recorded-footage URL for [camera] over `[startMs, endMs]` (null if unsupported). */
+    fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String? =
+        current?.recordingUrlAt(camera, startMs, endMs)
 }

@@ -165,9 +165,8 @@ fun HomeScreen(
 
     lightbox?.let { cam ->
         CameraLightbox(
-            name = cam.name,
-            snapshotUrl = cam.snapshotUrl,
-            streamUrl = cam.streamUrl,
+            cameras = ui.cameras,
+            initial = cam,
             onDismiss = { lightbox = null },
         )
     }

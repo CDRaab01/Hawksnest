@@ -41,6 +41,11 @@ The real blended UI (dark-only), all rendering the owner's "Security" scene with
 labels** (HA's raw "Lock Current status …" → "Front Door"):
 
 - **Home** (`/`) — pinned favorites (large cards) above an **area hub** (`src/config/favorites.ts`).
+- **Cameras** — a **Ring-style player** (tap any camera): on-demand live (HLS via `camera/stream` →
+  MJPEG → snapshot), a scrubbable **24h timeline** of recorded events, an in-player camera switcher,
+  and transport (prev/next event, play/pause, snap-to-Live). Recorded events + footage come from
+  **Frigate** behind HA; **demo mode** runs the whole player against a bundled clip + synthesized
+  events with no backend (`src/components/camera/`, `src/lib/cameraEvents.ts`).
 - **Area detail** (`/area/:area`) — **mixed density**: camera spans full width, controls render
   comfortable, read-only sensors render compact (`src/lib/density.ts`).
 - **Settings** (`/settings`) — connection status + the "Connect to Home Assistant" form, plus a
