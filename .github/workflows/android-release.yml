@@ -7,8 +7,15 @@ name: Android Release
 #   HAWKSNEST_KEY_ALIAS          the key alias
 #   HAWKSNEST_KEY_PASSWORD       the key password
 # The signed APK is uploaded as an artifact and installs as an update over previous signed builds.
+#
+# Two triggers: the manual "Run workflow" button (works once this file is on the default branch),
+# and pushing a tag like `android-release-1` (works from any branch — tag events use the workflow
+# file at the tagged commit). Bump the tag number to cut a new signed build.
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "android-release-*"
 
 jobs:
   release:
