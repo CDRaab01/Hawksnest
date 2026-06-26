@@ -11,6 +11,7 @@ import { HistoryScreen } from "./screens/HistoryScreen";
 import { AutomationsScreen } from "./screens/AutomationsScreen";
 import { AutomationEditScreen } from "./screens/AutomationEditScreen";
 import { TopNav } from "./components/TopNav";
+import { BottomBar } from "./components/BottomBar";
 import { SnapshotBucketProvider } from "./components/SnapshotBucket";
 import { startConnection, stopConnection } from "./store/connection";
 
@@ -25,7 +26,7 @@ export default function App() {
     <SnapshotBucketProvider>
       <div className="min-h-full bg-bg">
         <TopNav />
-        <main className="mx-auto max-w-[1600px] px-lg py-xl">
+        <main className="mx-auto max-w-[1600px] px-lg py-xl pb-28">
           <Routes>
             <Route path="/" element={<DashboardScreen />} />
             <Route path="/rooms" element={<RoomsScreen />} />
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="/settings" element={<SettingsScreen />} />
           </Routes>
         </main>
+        <BottomBar />
       </div>
     </SnapshotBucketProvider>
   );
