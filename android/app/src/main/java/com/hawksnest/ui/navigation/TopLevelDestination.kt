@@ -9,12 +9,13 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
- * The four bottom-bar destinations — security-forward: Home (status at a glance) · Cameras ·
- * History (activity timeline) · Settings. Material 3 caps the bar at 3–5; four keeps tap targets
- * wide and thumb-reachable.
+ * The five bottom-bar destinations — security-forward: Home (status at a glance) · Cameras · Rooms ·
+ * History (activity timeline) · Settings. Material 3 caps the bar at 3–5.
  */
 enum class TopLevelDestination(
     val route: String,
@@ -36,6 +37,13 @@ enum class TopLevelDestination(
         label = "Cameras",
         icon = Icons.Filled.Videocam,
         iconOutlined = Icons.Outlined.Videocam,
+    ),
+    ROOMS(
+        route = Screen.Rooms.route,
+        navRoute = Screen.Rooms.route,
+        label = "Rooms",
+        icon = Icons.Filled.GridView,
+        iconOutlined = Icons.Outlined.GridView,
     ),
     HISTORY(
         route = Screen.History.route,

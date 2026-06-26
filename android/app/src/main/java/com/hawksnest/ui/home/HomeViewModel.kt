@@ -2,7 +2,6 @@ package com.hawksnest.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.hawksnest.config.favorites
 import com.hawksnest.config.overrides
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
@@ -22,17 +21,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class FavoriteKind { LOCK, ALARM, OTHER }
-
 data class CameraUi(val entityId: String, val name: String, val live: Boolean)
-data class FavoriteUi(
-    val entityId: String,
-    val name: String,
-    val stateText: String,
-    val kind: FavoriteKind,
-    val alarmState: String? = null,
-)
-data class AreaUi(val area: String, val deviceCount: Int, val preview: String)
 
 data class HomeUi(
     val status: ConnectionStatus = ConnectionStatus.CONNECTING,
@@ -40,12 +29,17 @@ data class HomeUi(
     val alarm: AlarmView? = null,
     val alarmEntityId: String? = null,
     val alarmRawState: String? = null,
+    /** Plain-language security read-out: "All doors locked" or "Front Door open · …". */
+    val securitySummary: String = "",
+    val secureAllClear: Boolean = true,
     val offlineLabel: String? = null,
     val cameras: List<CameraUi> = emptyList(),
     val liveCameraCount: Int = 0,
-    val favorites: List<FavoriteUi> = emptyList(),
-    val areas: List<AreaUi> = emptyList(),
+    val roomCount: Int = 0,
+    val roomsPreview: String = "",
 )
+
+private val DOOR_CLASSES = setOf("door", "window", "garage_door")
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -64,10 +58,11 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { connection.start() }
     }
 
-    /** Arm/disarm, lock/unlock, etc. Non-optimistic — the store reconciles from the source echo. */
-    fun callService(domain: String, service: String, entityId: String) {
+    /** Arm/disarm. Non-optimistic — the store reconciles from the source echo. */
+    fun arm(service: String) {
+        val id = uiState.value.alarmEntityId ?: return
         viewModelScope.launch {
-            connection.callService(domain, service, ServiceData(entityId = entityId))
+            connection.callService("alarm_control_panel", service, ServiceData(entityId = id))
         }
     }
 
@@ -81,6 +76,19 @@ class HomeViewModel @Inject constructor(
 
         val alarmEntity = all.firstOrNull { it.entityId.startsWith("alarm_control_panel.") }
         val alarm = alarmEntity?.let { alarmView(it.state) }
+
+        // Plain-language security summary (unlocked locks + open door/window contacts).
+        val unlocked = all.filter {
+            domainOf(it.entityId) == "lock" && it.state != "locked" && it.state != "locking"
+        }
+        val openDoors = all.filter {
+            domainOf(it.entityId) == "binary_sensor" &&
+                it.stringAttr("device_class") in DOOR_CLASSES && it.state == "on"
+        }
+        val parts = unlocked.map { "${resolveName(it, overrides)} unlocked" } +
+            openDoors.map { "${resolveName(it, overrides)} open" }
+        val secureAllClear = parts.isEmpty()
+        val securitySummary = if (secureAllClear) "All doors locked" else parts.joinToString(" · ")
 
         val offline = all.filter { it.state == "unavailable" }
         val offlineLabel = when {
@@ -97,29 +105,7 @@ class HomeViewModel @Inject constructor(
                 CameraUi(it.entityId, resolveName(it, overrides), live)
             }
 
-        val favs = favorites.mapNotNull { id -> entities[id] }.map { e ->
-            val domain = domainOf(e.entityId)
-            val kind = when (domain) {
-                "lock" -> FavoriteKind.LOCK
-                "alarm_control_panel" -> FavoriteKind.ALARM
-                else -> FavoriteKind.OTHER
-            }
-            FavoriteUi(
-                entityId = e.entityId,
-                name = resolveName(e, overrides),
-                stateText = e.state.replaceFirstChar { it.uppercaseChar() },
-                kind = kind,
-                alarmState = if (kind == FavoriteKind.ALARM) e.state else null,
-            )
-        }
-
-        val areaGroups = groupByArea(all, areas).map { g ->
-            AreaUi(
-                area = g.area,
-                deviceCount = g.entities.size,
-                preview = g.entities.take(3).joinToString(" · ") { resolveName(it, overrides) },
-            )
-        }
+        val rooms = groupByArea(all, areas)
 
         return HomeUi(
             status = status,
@@ -127,11 +113,13 @@ class HomeViewModel @Inject constructor(
             alarm = alarm,
             alarmEntityId = alarmEntity?.entityId,
             alarmRawState = alarmEntity?.state,
+            securitySummary = securitySummary,
+            secureAllClear = secureAllClear,
             offlineLabel = offlineLabel,
             cameras = cameras,
             liveCameraCount = cameras.count { it.live },
-            favorites = favs,
-            areas = areaGroups,
+            roomCount = rooms.size,
+            roomsPreview = rooms.take(4).joinToString(" · ") { it.area },
         )
     }
 }

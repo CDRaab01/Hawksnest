@@ -1,6 +1,7 @@
 package com.hawksnest.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,23 +37,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.hawksnest.core.logic.AlarmView
 import com.hawksnest.core.logic.ARM_BUTTONS
+import com.hawksnest.core.logic.alarmView
 import com.hawksnest.ui.components.ConnectionPill
 import com.hawksnest.ui.components.PanelCard
-import com.hawksnest.ui.components.PulseButton
 import com.hawksnest.ui.components.SectionHeader
 import com.hawksnest.ui.theme.HawksnestTheme
 import com.hawksnest.ui.theme.color
-import com.hawksnest.ui.theme.icon
+
+/** Per-arm-mode glyph (Ring uses a distinct icon per mode). */
+private val ARM_ICON: Map<String, ImageVector> = mapOf(
+    "alarm_disarm" to Icons.Filled.LockOpen,
+    "alarm_arm_home" to Icons.Filled.Home,
+    "alarm_arm_away" to Icons.Filled.Lock,
+)
 
 /**
- * Home — the security-forward landing screen, mirroring the web Dashboard: a connection-aware
- * header, the arm/disarm hero with a Ring-style offline line, a **2-up camera grid** (like Ring),
- * the pinned favorites, and the area hub. Reads everything live from [HomeViewModel].
+ * Home — a glanceable, camera-forward landing screen (Ring-style), mirroring the web Dashboard:
+ * three big circular arm buttons + a one-line security read-out, the 2-up camera grid, and a single
+ * compact "Rooms" entry. Device controls live one tap deeper (Rooms → area detail).
  */
 @Composable
-fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
+fun HomeScreen(
+    onOpenRooms: () -> Unit = {},
+    viewModel: HomeViewModel = hiltViewModel(),
+) {
     val ui by viewModel.uiState.collectAsState()
     Column(
         modifier = Modifier
@@ -67,14 +80,7 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
             ConnectionPill(ui.status)
         }
 
-        SecurityHero(
-            alarm = ui.alarm,
-            rawState = ui.alarmRawState,
-            offlineLabel = ui.offlineLabel,
-            onArm = { service ->
-                ui.alarmEntityId?.let { viewModel.callService("alarm_control_panel", service, it) }
-            },
-        )
+        SecurityHero(ui, onArm = viewModel::arm)
 
         if (ui.cameras.isNotEmpty()) {
             SectionHeader(
@@ -88,107 +94,124 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
                     )
                 },
             )
-            // Ring-style: two side-by-side tiles per row.
             ui.cameras.chunked(2).forEach { rowCams ->
                 Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
-                    rowCams.forEach { cam ->
-                        CameraTile(cam.name, cam.live, Modifier.weight(1f))
-                    }
+                    rowCams.forEach { cam -> CameraTile(cam.name, cam.live, Modifier.weight(1f)) }
                     if (rowCams.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
 
-        if (ui.favorites.isNotEmpty()) {
-            SectionHeader("Home", channel = HawksnestTheme.pulse.effort)
-            ui.favorites.forEach { fav ->
-                FavoriteCard(fav, onArm = { service ->
-                    viewModel.callService("alarm_control_panel", service, fav.entityId)
-                }, onLock = { service ->
-                    viewModel.callService("lock", service, fav.entityId)
-                })
-            }
-        }
-
-        if (ui.areas.isNotEmpty()) {
-            SectionHeader("Areas", channel = HawksnestTheme.pulse.recovery)
-            ui.areas.forEach { AreaRow(it) }
-        }
-    }
-}
-
-@Composable
-private fun SecurityHero(
-    alarm: AlarmView?,
-    rawState: String?,
-    offlineLabel: String?,
-    onArm: (String) -> Unit,
-) {
-    val pulse = HawksnestTheme.pulse
-    val channelColor = alarm?.let { pulse.color(it.channel) } ?: MaterialTheme.colorScheme.onSurface
-    PanelCard(channel = alarm?.let { pulse.color(it.channel) }, raised = true) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (alarm != null) {
-                Icon(
-                    imageVector = alarm.glyph.icon(),
-                    contentDescription = null,
-                    tint = channelColor,
-                    modifier = Modifier.size(34.dp),
-                )
-                Spacer(Modifier.size(HawksnestTheme.spacing.md))
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "SECURITY",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    alarm?.label ?: "No alarm panel",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = channelColor,
-                )
-            }
-        }
-        if (alarm != null) {
-            Spacer(Modifier.size(HawksnestTheme.spacing.md))
-            Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
-                ARM_BUTTONS.forEach { b ->
-                    ArmSegment(
-                        label = b.label,
-                        active = rawState == b.state,
-                        onClick = { onArm(b.service) },
-                        modifier = Modifier.weight(1f),
+        if (ui.roomCount > 0) {
+            SectionHeader("Rooms", channel = HawksnestTheme.pulse.recovery)
+            PanelCard(onClick = onOpenRooms) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "${ui.roomCount} ${if (ui.roomCount == 1) "room" else "rooms"}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            ui.roomsPreview,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
         }
-        if (offlineLabel != null) {
-            Spacer(Modifier.size(HawksnestTheme.spacing.md))
+    }
+}
+
+@Composable
+private fun SecurityHero(ui: HomeUi, onArm: (String) -> Unit) {
+    val pulse = HawksnestTheme.pulse
+    PanelCard(channel = ui.alarm?.let { pulse.color(it.channel) }, raised = true) {
+        if (ui.alarm != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xl, Alignment.CenterHorizontally),
+            ) {
+                ARM_BUTTONS.forEach { b ->
+                    ArmCircle(
+                        label = b.label,
+                        icon = ARM_ICON[b.service] ?: Icons.Filled.LockOpen,
+                        active = ui.alarmRawState == b.state,
+                        channel = pulse.color(alarmView(b.state).channel),
+                        onClick = { onArm(b.service) },
+                    )
+                }
+            }
+        } else {
             Text(
-                offlineLabel,
-                style = MaterialTheme.typography.bodySmall,
-                color = pulse.streak,
+                "No alarm panel",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        Spacer(Modifier.size(HawksnestTheme.spacing.md))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                ui.securitySummary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (ui.secureAllClear) pulse.recovery else pulse.streak,
+            )
+            ui.offlineLabel?.let {
+                Text(
+                    " · $it",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = pulse.streak,
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ArmSegment(label: String, active: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun ArmCircle(
+    label: String,
+    icon: ImageVector,
+    active: Boolean,
+    channel: Color,
+    onClick: () -> Unit,
+) {
     val pulse = HawksnestTheme.pulse
-    Box(
-        modifier = modifier
-            .clip(MaterialTheme.shapes.small)
-            .background(if (active) pulse.effortDim else pulse.panelHigh)
-            .clickable(onClick = onClick)
-            .padding(vertical = HawksnestTheme.spacing.sm),
-        contentAlignment = Alignment.Center,
-    ) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(if (active) channel else pulse.panelHigh)
+                .then(
+                    if (active) Modifier
+                    else Modifier.border(1.dp, pulse.hairline, CircleShape),
+                )
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (active) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(26.dp),
+            )
+        }
+        Spacer(Modifier.size(HawksnestTheme.spacing.xs))
         Text(
             label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (active) pulse.effort else MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (active) channel else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -201,11 +224,8 @@ private fun CameraTile(name: String, live: Boolean, modifier: Modifier = Modifie
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .background(
-                    Brush.verticalGradient(listOf(Color(0xFF2A2F37), Color(0xFF0E1116))),
-                ),
+                .background(Brush.verticalGradient(listOf(Color(0xFF2A2F37), Color(0xFF0E1116)))),
         ) {
-            // Freshness badge (top-start)
             Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -223,7 +243,6 @@ private fun CameraTile(name: String, live: Boolean, modifier: Modifier = Modifie
                     color = Color.White.copy(alpha = 0.9f),
                 )
             }
-            // Name (bottom)
             Box(
                 Modifier
                     .align(Alignment.BottomStart)
@@ -233,73 +252,6 @@ private fun CameraTile(name: String, live: Boolean, modifier: Modifier = Modifie
             ) {
                 Text(name, style = MaterialTheme.typography.bodyMedium, color = Color.White)
             }
-        }
-    }
-}
-
-@Composable
-private fun FavoriteCard(
-    fav: FavoriteUi,
-    onArm: (String) -> Unit,
-    onLock: (String) -> Unit,
-) {
-    val pulse = HawksnestTheme.pulse
-    PanelCard {
-        Text(fav.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-        Text(fav.stateText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        when (fav.kind) {
-            FavoriteKind.LOCK -> {
-                Spacer(Modifier.size(HawksnestTheme.spacing.md))
-                Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
-                    PulseButton(
-                        text = "Lock", onClick = { onLock("lock") },
-                        modifier = Modifier.weight(1f), tonal = true, compact = true,
-                        channel = pulse.recovery, onChannel = pulse.onRecovery, dimChannel = pulse.recoveryDim,
-                    )
-                    PulseButton(
-                        text = "Unlock", onClick = { onLock("unlock") },
-                        modifier = Modifier.weight(1f), tonal = true, compact = true,
-                        channel = pulse.streak, onChannel = pulse.onStreak, dimChannel = pulse.streakDim,
-                    )
-                }
-            }
-            FavoriteKind.ALARM -> {
-                Spacer(Modifier.size(HawksnestTheme.spacing.md))
-                Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
-                    ARM_BUTTONS.forEach { b ->
-                        ArmSegment(
-                            label = b.label,
-                            active = fav.alarmState == b.state,
-                            onClick = { onArm(b.service) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            }
-            FavoriteKind.OTHER -> Unit
-        }
-    }
-}
-
-@Composable
-private fun AreaRow(area: AreaUi) {
-    PanelCard(onClick = { /* Phase 1: area detail navigation */ }) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(area.area, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text(
-                    "${area.deviceCount} device${if (area.deviceCount == 1) "" else "s"} · ${area.preview}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Icon(
-                Icons.Filled.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
