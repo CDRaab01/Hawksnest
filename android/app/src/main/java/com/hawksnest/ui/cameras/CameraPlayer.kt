@@ -10,23 +10,34 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.ringEventsFromSelect
 import com.hawksnest.ui.home.CameraUi
 import com.hawksnest.ui.theme.HawksnestTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 private const val DAY_MS = 24 * 3600_000L
@@ -111,6 +122,10 @@ fun CameraPlayer(
         Row(verticalAlignment = Alignment.CenterVertically) {
             CameraSwitcher(cameras = cameras, current = cam, onSelect = onSelectCamera)
             Spacer(Modifier.weight(1f))
+            cam.sirenSwitchId?.let { sirenId ->
+                SirenButton(sirenId, viewModel)
+                Spacer(Modifier.size(8.dp))
+            }
             Box(
                 Modifier
                     .size(8.dp)
@@ -168,6 +183,67 @@ fun CameraPlayer(
             onNext = { if (next != null) seek(next.startMs) else playhead = null },
             onTogglePlay = { paused = !paused },
             onLive = { playhead = null },
+        )
+    }
+}
+
+/**
+ * Manual siren toggle bound to ring-mqtt's `switch.<base>_siren` (rendered only when that
+ * entity exists — siren-capable cameras). The siren is loud, so turning it ON is a two-tap
+ * action (first tap arms "Confirm", a second within ~3s fires it); turning it OFF is one tap.
+ */
+@Composable
+private fun SirenButton(
+    entityId: String,
+    viewModel: CameraPlayerViewModel,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val on by viewModel.sirenOn(entityId).collectAsState(initial = false)
+    var armed by remember { mutableStateOf(false) }
+    LaunchedEffect(armed) {
+        if (armed) {
+            delay(3000)
+            armed = false
+        }
+    }
+    val pulse = HawksnestTheme.pulse
+    val bg = when {
+        on -> pulse.streak
+        armed -> pulse.streakDim
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val fg = when {
+        on -> Color.White
+        armed -> pulse.streak
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(bg)
+            .clickable {
+                when {
+                    on -> {
+                        scope.launch { viewModel.setSiren(entityId, false) }
+                        armed = false
+                    }
+                    !armed -> armed = true
+                    else -> {
+                        scope.launch { viewModel.setSiren(entityId, true) }
+                        armed = false
+                    }
+                }
+            }
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(Icons.Filled.Campaign, contentDescription = null, tint = fg, modifier = Modifier.size(16.dp))
+        Text(
+            if (on) "Siren on" else if (armed) "Confirm" else "Siren",
+            style = MaterialTheme.typography.labelMedium,
+            color = fg,
         )
     }
 }

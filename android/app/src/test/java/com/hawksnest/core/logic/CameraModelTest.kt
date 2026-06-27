@@ -27,6 +27,7 @@ class CameraModelTest {
                 ent("select.front_door_event_select", "Front Door Event Select"),
                 ent("binary_sensor.front_door_ding", "Front Door Ding"),
                 ent("binary_sensor.front_door_motion", "Front Door Motion"),
+                ent("switch.front_door_siren", "Front Door Siren"),
                 ent("light.kitchen", "Kitchen"),
             ),
         )
@@ -40,6 +41,7 @@ class CameraModelTest {
         assertEquals("select.front_door_event_select", c.eventSelectId)
         assertEquals("binary_sensor.front_door_ding", c.dingId)
         assertEquals("binary_sensor.front_door_motion", c.motionId)
+        assertEquals("switch.front_door_siren", c.sirenSwitchId)
     }
 
     @Test
@@ -51,6 +53,7 @@ class CameraModelTest {
         assertEquals("Driveway", c.name)
         assertEquals(null, c.eventSelectId)
         assertEquals(null, c.dingId)
+        assertEquals(null, c.sirenSwitchId)
         assertEquals("camera.driveway", c.liveEntity.entityId)
         assertEquals("camera.driveway", c.snapshotEntity.entityId)
     }

@@ -60,6 +60,8 @@ data class CameraUi(
     val eventStreamId: String? = null,
     /** Doorbell press sensor (`binary_sensor.<base>_ding`), or null. */
     val dingId: String? = null,
+    /** ring-mqtt siren switch (`switch.<base>_siren`) on siren-capable cameras, or null. */
+    val sirenSwitchId: String? = null,
 )
 
 data class HomeUi(
@@ -147,6 +149,7 @@ class HomeViewModel @Inject constructor(
                 eventSelectId = lc.eventSelectId,
                 eventStreamId = lc.eventStreamId,
                 dingId = lc.dingId,
+                sirenSwitchId = lc.sirenSwitchId,
             )
         }
         val doorbell = activeDoorbellPress(logical, entities, System.currentTimeMillis())

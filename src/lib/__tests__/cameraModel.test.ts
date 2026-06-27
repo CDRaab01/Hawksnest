@@ -21,6 +21,7 @@ describe("resolveCameras", () => {
       ent("select.front_door_event_select", "Front Door Event Select"),
       ent("binary_sensor.front_door_ding", "Front Door Ding"),
       ent("binary_sensor.front_door_motion", "Front Door Motion"),
+      ent("switch.front_door_siren", "Front Door Siren"),
       // Unrelated entities must be ignored.
       ent("light.kitchen", "Kitchen"),
     );
@@ -35,6 +36,7 @@ describe("resolveCameras", () => {
     expect(c.eventSelectId).toBe("select.front_door_event_select");
     expect(c.dingId).toBe("binary_sensor.front_door_ding");
     expect(c.motionId).toBe("binary_sensor.front_door_motion");
+    expect(c.sirenSwitchId).toBe("switch.front_door_siren");
   });
 
   it("maps a plain HA camera to a logical camera with no siblings", () => {
@@ -47,6 +49,7 @@ describe("resolveCameras", () => {
       eventSelectId: null,
       dingId: null,
       motionId: null,
+      sirenSwitchId: null,
     });
     // live + snapshot both fall back to the single camera entity.
     expect(cams[0].liveEntity.entity_id).toBe("camera.driveway");
