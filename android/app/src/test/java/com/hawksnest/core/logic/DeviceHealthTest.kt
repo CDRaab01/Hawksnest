@@ -55,6 +55,13 @@ class DeviceHealthTest {
     }
 
     @Test
+    fun `controller offline only when every z-wave entity is unavailable`() {
+        assertFalse(zwaveControllerOffline(emptyList()))
+        assertFalse(zwaveControllerOffline(listOf("locked", "unavailable")))
+        assertTrue(zwaveControllerOffline(listOf("unavailable", "unknown", "unavailable")))
+    }
+
+    @Test
     fun `relative time formats coarse buckets`() {
         val now = 1_000_000_000_000L
         assertEquals("now", relativeTime(now, now))

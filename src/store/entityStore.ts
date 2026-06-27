@@ -6,6 +6,7 @@ import { domainOf } from "../lib/ha";
 import { groupByArea, type AreaGroup } from "../lib/areas";
 import { resolveCameras, type LogicalCamera } from "../lib/cameraModel";
 import { overrides } from "../config/overrides";
+import { zwaveControllerOffline } from "../lib/deviceHealth";
 import type { DeviceIndex, DeviceRecord } from "./ha/registry";
 import { useHidden } from "./prefsStore";
 
@@ -19,6 +20,8 @@ interface EntityState {
   devices: DeviceIndex;
   /** entity_id → "config"/"diagnostic" for entities the main list + History hide. */
   categories: Record<string, string>;
+  /** Entity ids owned by the Z-Wave JS integration (for controller-liveness detection). */
+  zwaveEntityIds: string[];
   status: ConnectionStatus;
   error?: string;
   /**
@@ -38,6 +41,8 @@ interface EntityState {
   setDevices: (devices: DeviceIndex) => void;
   /** Replace the entity-category map (resolved from the registry on connect). */
   setCategories: (categories: Record<string, string>) => void;
+  /** Replace the Z-Wave entity-id list (resolved from the registry on connect). */
+  setZWaveEntityIds: (ids: string[]) => void;
   /** Merge a batch of entity updates (live state changes). */
   upsertEntities: (entities: HassEntity[]) => void;
   setStatus: (status: ConnectionStatus, error?: string) => void;
@@ -50,6 +55,7 @@ export const useEntityStore = create<EntityState>((set) => ({
   areas: {},
   devices: EMPTY_DEVICE_INDEX,
   categories: {},
+  zwaveEntityIds: [],
   status: "connecting",
   baseUrl: "",
   setSnapshot: (entities, areas) => set({ entities, areas }),
@@ -57,6 +63,7 @@ export const useEntityStore = create<EntityState>((set) => ({
   setAreas: (areas) => set({ areas }),
   setDevices: (devices) => set({ devices }),
   setCategories: (categories) => set({ categories }),
+  setZWaveEntityIds: (zwaveEntityIds) => set({ zwaveEntityIds }),
   upsertEntities: (list) =>
     set((s) => {
       const entities = { ...s.entities };
@@ -184,6 +191,20 @@ export function useDeviceDiagnostics(entityId: string): HassEntity[] {
 /** Device records resolved from the HA registries (Devices hub registry view). */
 export const useDeviceRecords = (): DeviceRecord[] =>
   useEntityStore(useShallow((s) => Object.values(s.devices.devices)));
+
+/**
+ * True when we're live with HA and the Z-Wave controller looks offline (every
+ * Z-Wave entity is unavailable at once). Drives the app-wide warning banner.
+ * Never fires in demo mode or before the registry resolves the Z-Wave entities.
+ */
+export const useZWaveControllerOffline = (): boolean =>
+  useEntityStore((s) => {
+    if (s.status !== "connected") return false;
+    const zwave = s.zwaveEntityIds
+      .map((id) => s.entities[id])
+      .filter((e): e is HassEntity => e !== undefined);
+    return zwaveControllerOffline(zwave);
+  });
 
 /** The device that owns an entity, if the registry placed it on one. */
 export const useEntityDevice = (entityId: string): DeviceRecord | undefined =>

@@ -47,6 +47,19 @@ class RegistryTest {
     }
 
     @Test
+    fun `zwave entity ids keeps only the zwave_js platform`() {
+        val entities = arr(
+            """[
+              {"entity_id":"lock.front","platform":"zwave_js"},
+              {"entity_id":"light.basement","platform":"zwave_js"},
+              {"entity_id":"camera.porch","platform":"ring"},
+              {"entity_id":"sensor.weather"}
+            ]""",
+        )
+        assertEquals(listOf("lock.front", "light.basement"), buildZWaveEntityIds(entities))
+    }
+
+    @Test
     fun `device index maps device to its entities and back`() {
         val areas = arr("""[{"area_id":"a1","name":"Basement"}]""")
         val devices = arr("""[{"id":"d1","area_id":"a1","name":"Basement Cam","name_by_user":"Basement"}]""")

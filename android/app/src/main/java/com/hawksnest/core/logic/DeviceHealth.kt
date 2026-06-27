@@ -63,6 +63,17 @@ fun zwaveHealth(siblings: List<Pair<String, String>>): ZWaveHealth {
 }
 
 /**
+ * True when the Z-Wave controller/radio looks offline: there are Z-Wave entity
+ * states and *every one* is `unavailable`/`unknown`. A single dead node leaves the
+ * rest reporting, so this only fires when the whole network drops at once — the
+ * symptom of the stick or zwave-js-ui going down. Mirrors web `zwaveControllerOffline`.
+ */
+fun zwaveControllerOffline(states: List<String>): Boolean {
+    if (states.isEmpty()) return false
+    return states.all { it.lowercase() in OFFLINE_STATES }
+}
+
+/**
  * Compact "x ago" label from an epoch-ms timestamp. Ported from web
  * `src/lib/relativeTime.ts`; `now` is injectable so it's deterministic in tests.
  */

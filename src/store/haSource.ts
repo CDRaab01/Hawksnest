@@ -24,6 +24,7 @@ import {
   buildAreaRegistry,
   buildDeviceIndex,
   buildEntityCategories,
+  buildZWaveEntityIds,
   toEntityRecord,
   type AreaRegistryEntry,
   type DeviceIndex,
@@ -59,6 +60,7 @@ async function fetchRegistry(conn: Connection): Promise<{
   areas: ReturnType<typeof buildAreaRegistry>;
   devices: DeviceIndex;
   categories: Record<string, string>;
+  zwaveEntityIds: string[];
 }> {
   const [areas, entities, devices] = await Promise.all([
     conn.sendMessagePromise<AreaRegistryEntry[]>({
@@ -75,6 +77,7 @@ async function fetchRegistry(conn: Connection): Promise<{
     areas: buildAreaRegistry(areas, entities, devices),
     devices: buildDeviceIndex(areas, entities, devices),
     categories: buildEntityCategories(entities),
+    zwaveEntityIds: buildZWaveEntityIds(entities),
   };
 }
 
@@ -246,10 +249,11 @@ export function createHaSource(
   async function loadAreas() {
     if (!conn) return;
     try {
-      const { areas, devices, categories } = await fetchRegistry(conn);
+      const { areas, devices, categories, zwaveEntityIds } = await fetchRegistry(conn);
       store().setAreas(areas);
       store().setDevices(devices);
       store().setCategories(categories);
+      store().setZWaveEntityIds(zwaveEntityIds);
     } catch {
       // Registry unavailable (older HA / limited token) — keep entities,
       // they group under "Unassigned" rather than failing the connection.

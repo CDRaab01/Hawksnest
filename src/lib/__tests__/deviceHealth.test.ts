@@ -4,6 +4,7 @@ import {
   summarizeHealth,
   zwaveHealth,
   isZWaveDiagnostic,
+  zwaveControllerOffline,
 } from "../deviceHealth";
 import type { HassEntity } from "../ha";
 
@@ -87,6 +88,31 @@ describe("zwaveHealth", () => {
     expect(isZWaveDiagnostic("sensor.front_door_last_seen")).toBe(true);
     expect(isZWaveDiagnostic("sensor.front_door_round_trip_time")).toBe(true);
     expect(isZWaveDiagnostic("sensor.front_door_battery")).toBe(false);
+  });
+});
+
+describe("zwaveControllerOffline", () => {
+  it("is false when there are no Z-Wave entities", () => {
+    expect(zwaveControllerOffline([])).toBe(false);
+  });
+
+  it("is false when at least one Z-Wave entity still reports", () => {
+    expect(
+      zwaveControllerOffline([
+        e({ entity_id: "lock.front", state: "locked" }),
+        e({ entity_id: "lock.back", state: "unavailable" }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is true only when every Z-Wave entity is unavailable", () => {
+    expect(
+      zwaveControllerOffline([
+        e({ entity_id: "lock.front", state: "unavailable" }),
+        e({ entity_id: "lock.back", state: "unknown" }),
+        e({ entity_id: "light.basement", state: "unavailable" }),
+      ]),
+    ).toBe(true);
   });
 });
 

@@ -14,6 +14,7 @@ import { TopNav } from "./components/TopNav";
 import { BottomBar } from "./components/BottomBar";
 import { SnapshotBucketProvider } from "./components/SnapshotBucket";
 import { DoorbellBanner } from "./components/DoorbellBanner";
+import { ZWaveStatusBanner } from "./components/ZWaveStatusBanner";
 import { CameraLightbox } from "./components/CameraLightbox";
 import { useLogicalCameras } from "./store/entityStore";
 import { useCameraOverlay } from "./store/cameraOverlay";
@@ -56,6 +57,7 @@ export default function App() {
         </main>
         <BottomBar />
         <DoorbellBanner />
+        <ZWaveStatusBanner />
         <CameraOverlay />
       </div>
     </SnapshotBucketProvider>

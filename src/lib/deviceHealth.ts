@@ -105,6 +105,17 @@ export function zwaveHealth(siblings: HassEntity[]): ZWaveHealth {
   return { nodeStatus, dead: nodeStatus === DEAD_NODE_STATUS, lastSeenMs, rttMs };
 }
 
+/**
+ * True when the Z-Wave controller/radio looks offline: there are Z-Wave entities
+ * and *every one* reports `unavailable`/`unknown`. A single dead node leaves the
+ * rest reporting, so this only fires when the whole network drops at once — the
+ * symptom of the stick or zwave-js-ui going down (the spec's "fragile link").
+ */
+export function zwaveControllerOffline(zwaveEntities: HassEntity[]): boolean {
+  if (zwaveEntities.length === 0) return false;
+  return zwaveEntities.every((e) => OFFLINE_STATES.has(e.state.toLowerCase()));
+}
+
 export interface HealthSummary {
   total: number;
   online: number;

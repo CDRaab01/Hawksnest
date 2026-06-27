@@ -1,10 +1,13 @@
 package com.hawksnest.ui.navigation
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -13,6 +16,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.hawksnest.ui.components.ZWaveStatusBanner
 import com.hawksnest.ui.area.AreaDetailScreen
 import com.hawksnest.ui.automations.AutomationEditScreen
 import com.hawksnest.ui.automations.AutomationsScreen
@@ -54,13 +58,17 @@ fun AppNavGraph(startDestination: String = Screen.Home.route) {
             }
         },
     ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = startDestination,
+        Box(
             modifier = Modifier
+                .fillMaxSize()
                 .padding(innerPadding)
                 .consumeWindowInsets(innerPadding),
         ) {
+            NavHost(
+                navController = navController,
+                startDestination = startDestination,
+                modifier = Modifier.fillMaxSize(),
+            ) {
             composable(Screen.Home.route) {
                 HomeScreen(
                     onOpenRooms = {
@@ -112,6 +120,13 @@ fun AppNavGraph(startDestination: String = Screen.Home.route) {
             ) {
                 EntityDetailScreen(onBack = { navController.popBackStack() })
             }
+            }
+
+            ZWaveStatusBanner(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(12.dp),
+            )
         }
     }
 }
