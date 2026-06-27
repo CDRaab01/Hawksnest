@@ -8,15 +8,17 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Bathtub
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DoorFront
 import androidx.compose.material.icons.filled.Garage
 import androidx.compose.material.icons.filled.KingBed
@@ -57,8 +59,9 @@ import com.hawksnest.ui.theme.HawksnestTheme
 import com.hawksnest.ui.theme.PulseColors
 
 /**
- * Rooms — the area hub. Each room is a card with a per-room icon, a rotating channel accent, and a
- * few at-a-glance highlight chips (unlocked / motion / lights on / cameras / temp) → area detail.
+ * Rooms — the area hub, a 2-column grid of room tiles. Each tile has a per-room icon, a stable
+ * channel accent keyed to the room *type* (so a room's color never shifts as rooms come and go), and
+ * a few at-a-glance highlight chips (unlocked / motion / lights on / cameras / temp) → area detail.
  */
 @Composable
 fun RoomsScreen(
@@ -67,62 +70,58 @@ fun RoomsScreen(
 ) {
     val rooms by viewModel.rooms.collectAsState()
     val pulse = HawksnestTheme.pulse
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(HawksnestTheme.spacing.lg),
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(HawksnestTheme.spacing.lg),
+        horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
         verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
     ) {
-        SectionHeader("Rooms", channel = pulse.recovery)
-        rooms.forEachIndexed { index, room ->
-            val channel = roomChannel(index)
-            val accent = pulse.base(channel)
-            PanelCard(onClick = { onOpenArea(room.area) }, channel = accent) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(pulse.dim(channel)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            roomIcon(room.iconKey),
-                            contentDescription = null,
-                            tint = accent,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-                    Column(
-                        Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
-                    ) {
-                        Text(
-                            room.area,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            "${room.deviceCount} device${if (room.deviceCount == 1) "" else "s"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (room.highlights.isNotEmpty()) {
-                            HighlightRow(room.highlights)
-                        }
-                    }
-                    Icon(
-                        Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            SectionHeader("Rooms", channel = pulse.recovery)
+        }
+        items(rooms, key = { it.area }) { room ->
+            RoomCard(room = room, onClick = { onOpenArea(room.area) })
+        }
+    }
+}
+
+@Composable
+private fun RoomCard(room: RoomUi, onClick: () -> Unit) {
+    val pulse = HawksnestTheme.pulse
+    val channel = roomChannel(room.iconKey)
+    val accent = pulse.base(channel)
+    PanelCard(onClick = onClick, channel = accent) {
+        Column(verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(pulse.dim(channel)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    roomIcon(room.iconKey),
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Text(
+                room.area,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "${room.deviceCount} device${if (room.deviceCount == 1) "" else "s"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (room.highlights.isNotEmpty()) {
+                HighlightRow(room.highlights)
             }
         }
     }
@@ -156,10 +155,21 @@ private fun HighlightChip(highlight: RoomHighlight) {
     }
 }
 
-/** Rotating per-room accent, mirroring the web AreaCard (streak → effort → strength → recovery). */
-private val ROOM_CHANNEL_CYCLE = listOf(Channel.STREAK, Channel.EFFORT, Channel.STRENGTH, Channel.RECOVERY)
-
-private fun roomChannel(index: Int): Channel = ROOM_CHANNEL_CYCLE[index % ROOM_CHANNEL_CYCLE.size]
+/**
+ * Stable per-room-*type* accent (keyed to the icon/type, not list position) so a room always wears
+ * the same color regardless of how many rooms exist or their order. There are only four PULSE
+ * channels, so related room types are grouped onto a sensible one:
+ *  - streak (warm):  kitchen, dining, laundry
+ *  - effort (blue):  bath, front door, garage, security
+ *  - strength (violet): bedroom, office, living, basement
+ *  - recovery (green):  outdoor + everything unclassified
+ */
+private fun roomChannel(iconKey: String): Channel = when (iconKey) {
+    "kitchen", "dining", "laundry" -> Channel.STREAK
+    "bath", "frontdoor", "garage", "security" -> Channel.EFFORT
+    "bedroom", "office", "living", "basement" -> Channel.STRENGTH
+    else -> Channel.RECOVERY // outdoor, unassigned, default
+}
 
 private fun PulseColors.base(channel: Channel): Color = when (channel) {
     Channel.EFFORT -> effort

@@ -38,7 +38,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.CardType
-import com.hawksnest.security.LocalBiometricGate
 import com.hawksnest.ui.theme.HawksnestTheme
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -75,7 +74,6 @@ fun DeviceControlCard(
     onOpen: (() -> Unit)? = null,
 ) {
     val pulse = HawksnestTheme.pulse
-    val gate = LocalBiometricGate.current
     PanelCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
@@ -97,7 +95,7 @@ fun DeviceControlCard(
                 )
                 PulseButton(
                     text = "Unlock",
-                    onClick = { gate("Unlock ${device.name}") { onCall("unlock", emptyMap()) } },
+                    onClick = { onCall("unlock", emptyMap()) },
                     modifier = Modifier.weight(1f), tonal = true, compact = true,
                     channel = pulse.streak, onChannel = pulse.onStreak, dimChannel = pulse.streakDim,
                 )
@@ -157,10 +155,7 @@ fun DeviceControlCard(
                     ArmSegment(
                         label = b.label,
                         active = device.rawState == b.state,
-                        onClick = {
-                            val act = { onCall(b.service, emptyMap()) }
-                            if (b.service == "alarm_disarm") gate("Disarm ${device.name}") { act() } else act()
-                        },
+                        onClick = { onCall(b.service, emptyMap()) },
                         modifier = Modifier.weight(1f),
                     )
                 }

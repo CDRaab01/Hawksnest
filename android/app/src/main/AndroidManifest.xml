@@ -2,9 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Push (Phase 4) + biometric gate (Phase 3); declared early, used later. -->
+    <!-- Push (Phase 4); declared early, used later. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <!-- Package visibility (Android 11+): the Settings → Tailscale panel checks whether the official
          Tailscale app is installed (to "Open" it vs. send the user to install it). -->
@@ -14,7 +13,9 @@
 
     <application
         android:name=".HawksnestApp"
-        android:allowBackup="false"
+        android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
