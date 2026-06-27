@@ -85,6 +85,14 @@ class EntityDetailViewModel @Inject constructor(
                 }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** True when this entity is owned by the Z-Wave JS integration (enables node maintenance). */
+    val isZWave: StateFlow<Boolean> =
+        state.zwaveEntityIds.map { entityId in it }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    private val _maintenanceMsg = MutableStateFlow<String?>(null)
+    val maintenanceMsg: StateFlow<String?> = _maintenanceMsg.asStateFlow()
+
     private val _hours = MutableStateFlow(24)
     val hours: StateFlow<Int> = _hours.asStateFlow()
 
@@ -114,6 +122,25 @@ class EntityDetailViewModel @Inject constructor(
     fun call(service: String, extra: Map<String, Any?> = emptyMap()) {
         viewModelScope.launch {
             connection.callService(domainOf(entityId), service, ServiceData(entityId = entityId, extra = extra))
+        }
+    }
+
+    /** Ping the node (is it reachable?). Entity-targeted `zwave_js` service. */
+    fun ping() = zwaveMaintenance("ping", "Ping sent.")
+
+    /** Re-read the node's values. Entity-targeted `zwave_js` service. */
+    fun refresh() = zwaveMaintenance("refresh_value", "Refresh requested.")
+
+    fun clearMaintenanceMsg() { _maintenanceMsg.value = null }
+
+    private fun zwaveMaintenance(service: String, ok: String) {
+        viewModelScope.launch {
+            _maintenanceMsg.value = try {
+                connection.callService("zwave_js", service, ServiceData(entityId = entityId))
+                ok
+            } catch (_: Exception) {
+                "Couldn't reach Home Assistant."
+            }
         }
     }
 }

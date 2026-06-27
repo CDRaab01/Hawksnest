@@ -18,8 +18,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,17 +30,24 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.ha.domainOf
+import com.hawksnest.core.logic.isLockEntity
+import com.hawksnest.core.logic.isZWaveDiagnostic
+import com.hawksnest.core.logic.relativeTime
+import com.hawksnest.core.logic.zwaveHealth
 import com.hawksnest.ui.components.DeviceControlCard
 import com.hawksnest.ui.components.PanelCard
+import com.hawksnest.ui.components.PulseButton
 import com.hawksnest.ui.components.SectionHeader
 import com.hawksnest.ui.components.Sparkline
 import com.hawksnest.ui.theme.HawksnestTheme
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 private data class Range(val label: String, val hours: Int)
 
-private val RANGES = listOf(Range("6h", 6), Range("24h", 24), Range("7d", 24 * 7))
+private val RANGES =
+    listOf(Range("6h", 6), Range("24h", 24), Range("7d", 24 * 7), Range("30d", 24 * 30))
 
 private val HIDDEN_ATTRS = setOf(
     "friendly_name", "icon", "supported_features", "supported_color_modes",
@@ -46,7 +55,7 @@ private val HIDDEN_ATTRS = setOf(
 )
 
 /**
- * Entity detail (drill-in): the live control card, a state-history chart with a 6h/24h/7d toggle,
+ * Entity detail (drill-in): the live control card, a state-history chart with a 6h/24h/7d/30d toggle,
  * and a relevant-attributes list. Degrades to clear empty/error states instead of crashing. Ported
  * from the web `EntityScreen`.
  */
@@ -59,8 +68,27 @@ fun EntityDetailScreen(
     val hours by viewModel.hours.collectAsState()
     val history by viewModel.history.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
+    val isZWave by viewModel.isZWave.collectAsState()
+    val maintenanceMsg by viewModel.maintenanceMsg.collectAsState()
     val pulse = HawksnestTheme.pulse
     val channel = domainChannel(domainOf(viewModel.entityId), pulse)
+    // Z-Wave node diagnostics read from the device's diagnostic siblings, shown as
+    // a structured panel and removed from the raw Diagnostics dump below.
+    val zwave = remember(diagnostics) {
+        zwaveHealth(diagnostics.map { it.entityId to it.rawState })
+    }
+    val otherDiagnostics = remember(diagnostics) {
+        diagnostics.filterNot { isZWaveDiagnostic(it.entityId) }
+    }
+    val hasZWave = zwave.nodeStatus != null || zwave.lastSeenMs != null || zwave.rttMs != null
+
+    // Auto-clear the maintenance result a few seconds after it lands.
+    LaunchedEffect(maintenanceMsg) {
+        if (maintenanceMsg != null) {
+            delay(4000)
+            viewModel.clearMaintenanceMsg()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -112,6 +140,11 @@ fun EntityDetailScreen(
             SectionHeader("Control", channel = channel)
             DeviceControlCard(current, onCall = { service, extra -> viewModel.call(service, extra) })
 
+            if (isLockEntity(viewModel.entityId)) {
+                SectionHeader("Keypad codes", channel = channel)
+                LockCodes()
+            }
+
             SectionHeader(
                 "History",
                 channel = channel,
@@ -136,10 +169,55 @@ fun EntityDetailScreen(
                 }
             }
 
-            if (diagnostics.isNotEmpty()) {
+            if (hasZWave) {
+                SectionHeader("Z-Wave", channel = if (zwave.dead) pulse.streak else channel)
+                PanelCard {
+                    if (zwave.dead) {
+                        Text(
+                            "This device has dropped off the Z-Wave mesh — it isn't responding to the controller.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = pulse.streak,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = HawksnestTheme.spacing.xs),
+                        )
+                    }
+                    zwave.nodeStatus?.let { status ->
+                        ZWaveRow(
+                            "Node status",
+                            status.replaceFirstChar { c -> c.uppercaseChar() },
+                            valueColor = when {
+                                zwave.dead -> pulse.streak
+                                status == "alive" -> pulse.recovery
+                                else -> MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                    zwave.lastSeenMs?.let { ZWaveRow("Last seen", relativeTime(it)) }
+                    zwave.rttMs?.let { ZWaveRow("Signal (round-trip)", "$it ms") }
+                }
+            }
+
+            if (isZWave) {
+                SectionHeader("Maintenance", channel = channel)
+                PanelCard {
+                    Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
+                        PulseButton("Ping", onClick = { viewModel.ping() }, tonal = true, modifier = Modifier.weight(1f))
+                        PulseButton("Refresh", onClick = { viewModel.refresh() }, tonal = true, modifier = Modifier.weight(1f))
+                    }
+                    maintenanceMsg?.let { msg ->
+                        Text(
+                            msg,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
+                        )
+                    }
+                }
+            }
+
+            if (otherDiagnostics.isNotEmpty()) {
                 SectionHeader("Diagnostics", channel = channel)
                 PanelCard {
-                    diagnostics.forEach { d ->
+                    otherDiagnostics.forEach { d ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = HawksnestTheme.spacing.xs),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -188,6 +266,23 @@ fun EntityDetailScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ZWaveRow(label: String, value: String, valueColor: Color = MaterialTheme.colorScheme.onSurface) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = HawksnestTheme.spacing.xs),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = valueColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

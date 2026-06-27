@@ -115,4 +115,23 @@ fun buildDeviceIndex(areas: JsonArray, entities: JsonArray, devices: JsonArray):
     return DeviceIndex(out, deviceByEntity)
 }
 
+/** HA's integration platform id for Z-Wave JS entities. */
+const val ZWAVE_PLATFORM = "zwave_js"
+
+/**
+ * The entity ids owned by the Z-Wave JS integration (`platform == "zwave_js"`),
+ * parsed from `config/entity_registry/list`. Used to detect a controller/radio
+ * outage: if every Z-Wave entity reports `unavailable` at once, the stick or
+ * zwave-js-ui is down — not one dead node. Mirrors web `buildZWaveEntityIds`.
+ */
+fun buildZWaveEntityIds(entities: JsonArray): List<String> {
+    val out = mutableListOf<String>()
+    for (el in entities) {
+        val o = el as? JsonObject ?: continue
+        if (o.str("platform") != ZWAVE_PLATFORM) continue
+        o.str("entity_id")?.let { out.add(it) }
+    }
+    return out
+}
+
 private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull

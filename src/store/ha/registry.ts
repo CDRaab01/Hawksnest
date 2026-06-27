@@ -12,6 +12,22 @@ export interface EntityRegistryEntry {
   device_id: string | null;
   /** HA's category for non-primary entities — "config" | "diagnostic" | null. */
   entity_category?: "config" | "diagnostic" | null;
+  /** The integration that owns the entity (e.g. "zwave_js", "ring"). */
+  platform?: string | null;
+}
+
+/** HA's integration platform id for Z-Wave JS entities. */
+export const ZWAVE_PLATFORM = "zwave_js";
+
+/**
+ * The entity ids owned by the Z-Wave JS integration (`platform === "zwave_js"`).
+ * Used to detect a controller/radio outage: if every Z-Wave entity reports
+ * `unavailable` at once, the stick or zwave-js-ui is down — not one dead node.
+ */
+export function buildZWaveEntityIds(entities: EntityRegistryEntry[]): string[] {
+  return entities
+    .filter((e) => e.platform === ZWAVE_PLATFORM)
+    .map((e) => e.entity_id);
 }
 
 /** Entity categories the main Devices list + History demote out of view (kept under device detail). */

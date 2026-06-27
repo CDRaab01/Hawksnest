@@ -4,8 +4,21 @@ import {
   buildAreaRegistry,
   buildDeviceIndex,
   buildEntityCategories,
+  buildZWaveEntityIds,
   toEntityRecord,
 } from "../registry";
+
+describe("buildZWaveEntityIds", () => {
+  it("keeps only entities owned by the zwave_js platform", () => {
+    const ids = buildZWaveEntityIds([
+      { entity_id: "lock.front", area_id: null, device_id: "d1", platform: "zwave_js" },
+      { entity_id: "light.basement", area_id: null, device_id: "d2", platform: "zwave_js" },
+      { entity_id: "camera.porch", area_id: null, device_id: "d3", platform: "ring" },
+      { entity_id: "sensor.weather", area_id: null, device_id: null },
+    ]);
+    expect(ids).toEqual(["lock.front", "light.basement"]);
+  });
+});
 
 describe("buildEntityCategories", () => {
   it("keeps only config/diagnostic entities", () => {

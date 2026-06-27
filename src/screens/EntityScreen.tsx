@@ -9,7 +9,15 @@ import type { Channel } from "../components/PanelCard";
 import { overrides } from "../config/overrides";
 import { resolveIcon, resolveName } from "../lib/resolve";
 import { domainOf } from "../lib/ha";
-import { useEntity, useDeviceDiagnostics } from "../store/entityStore";
+import { zwaveHealth, isZWaveDiagnostic } from "../lib/deviceHealth";
+import { relativeTime } from "../lib/relativeTime";
+import { ZWaveMaintenance } from "../components/devices/ZWaveMaintenance";
+import { LockCodes } from "../components/devices/LockCodes";
+import {
+  useEntity,
+  useDeviceDiagnostics,
+  useIsZWaveEntity,
+} from "../store/entityStore";
 import { fetchHistory } from "../store/connection";
 import type { HistoryPoint } from "../store/source";
 
@@ -29,6 +37,7 @@ const RANGES: { label: string; hours: number }[] = [
   { label: "6h", hours: 6 },
   { label: "24h", hours: 24 },
   { label: "7d", hours: 24 * 7 },
+  { label: "30d", hours: 24 * 30 },
 ];
 
 // Attributes that are plumbing, not worth surfacing in the detail list.
@@ -51,7 +60,7 @@ function prettyKey(key: string): string {
 /**
  * Entity detail (drill-in). Reachable by tapping any card. Shows the live
  * primary control (the same domain card), a relevant-attributes list, and a
- * state-history chart with a 6h / 24h / 7d range toggle backed by the active
+ * state-history chart with a 6h / 24h / 7d / 30d range toggle backed by the active
  * source's fetchHistory (live HA over WS; synthesized in demo). Degrades to a
  * clear "history unavailable" state instead of crashing.
  */
@@ -61,6 +70,8 @@ export function EntityScreen() {
   const entity = useEntity(decoded);
   // Diagnostics for this device, filtered out of the main Devices list but kept reachable here.
   const diagnostics = useDeviceDiagnostics(decoded);
+  // Z-Wave entities get node-maintenance actions (ping / refresh).
+  const isZWave = useIsZWaveEntity(decoded);
 
   const [hours, setHours] = useState(24);
   const [points, setPoints] = useState<HistoryPoint[]>([]);
@@ -120,6 +131,13 @@ export function EntityScreen() {
   const Icon = resolveIcon(entity, overrides);
   const name = resolveName(entity, overrides);
   const channel = DOMAIN_CHANNEL[domainOf(decoded)] ?? "effort";
+  // Z-Wave node diagnostics (node status / last-seen / signal) read from the
+  // device's diagnostic siblings, surfaced as a structured panel and removed
+  // from the raw Diagnostics dump below so they aren't shown twice.
+  const zwave = zwaveHealth(diagnostics);
+  const hasZWave =
+    zwave.nodeStatus !== null || zwave.lastSeenMs !== null || zwave.rttMs !== null;
+  const otherDiagnostics = diagnostics.filter((d) => !isZWaveDiagnostic(d.entity_id));
   const attrs = Object.entries(entity.attributes).filter(
     ([k, v]) =>
       !HIDDEN_ATTRS.has(k) &&
@@ -142,6 +160,13 @@ export function EntityScreen() {
         <SectionHeader label="Control" channel={channel} />
         <EntityCard entity={entity} overrides={overrides} density="comfortable" />
       </section>
+
+      {domainOf(decoded) === "lock" && (
+        <section className="space-y-md">
+          <SectionHeader label="Keypad codes" channel={channel} />
+          <LockCodes lockEntityId={decoded} />
+        </section>
+      )}
 
       <section className="space-y-md">
         <SectionHeader
@@ -183,11 +208,59 @@ export function EntityScreen() {
         </PanelCard>
       </section>
 
-      {diagnostics.length > 0 && (
+      {hasZWave && (
+        <section className="space-y-md">
+          <SectionHeader label="Z-Wave" channel={zwave.dead ? "streak" : channel} />
+          <PanelCard className="divide-y divide-hairline">
+            {zwave.dead && (
+              <div className="px-lg py-md font-body text-caption text-streak">
+                This device has dropped off the Z-Wave mesh — it isn't responding
+                to the controller.
+              </div>
+            )}
+            {zwave.nodeStatus !== null && (
+              <div className="flex items-center justify-between gap-md px-lg py-md">
+                <span className="font-body text-body text-ink-dim">Node status</span>
+                <span
+                  className={[
+                    "font-body text-body capitalize",
+                    zwave.dead ? "text-streak" : zwave.nodeStatus === "alive" ? "text-recovery" : "text-ink",
+                  ].join(" ")}
+                >
+                  {zwave.nodeStatus}
+                </span>
+              </div>
+            )}
+            {zwave.lastSeenMs !== null && (
+              <div className="flex items-center justify-between gap-md px-lg py-md">
+                <span className="font-body text-body text-ink-dim">Last seen</span>
+                <span className="font-body text-body text-ink">
+                  {relativeTime(zwave.lastSeenMs)}
+                </span>
+              </div>
+            )}
+            {zwave.rttMs !== null && (
+              <div className="flex items-center justify-between gap-md px-lg py-md">
+                <span className="font-body text-body text-ink-dim">Signal (round-trip)</span>
+                <span className="font-mono text-body text-ink">{zwave.rttMs} ms</span>
+              </div>
+            )}
+          </PanelCard>
+        </section>
+      )}
+
+      {isZWave && (
+        <section className="space-y-md">
+          <SectionHeader label="Maintenance" channel="effort" />
+          <ZWaveMaintenance entityId={decoded} />
+        </section>
+      )}
+
+      {otherDiagnostics.length > 0 && (
         <section className="space-y-md">
           <SectionHeader label="Diagnostics" channel={channel} />
           <PanelCard className="divide-y divide-hairline">
-            {diagnostics.map((d) => (
+            {otherDiagnostics.map((d) => (
               <div
                 key={d.entity_id}
                 className="flex items-center justify-between gap-md px-lg py-md"

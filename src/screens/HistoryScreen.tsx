@@ -10,7 +10,11 @@ import { fetchLogbook } from "../store/connection";
 import { useConnection, useEntityCategories } from "../store/entityStore";
 import type { LogEvent } from "../lib/logbook";
 
-const RANGE_HOURS: Record<HistoryRange, number> = { "24h": 24, "7d": 24 * 7 };
+const RANGE_HOURS: Record<HistoryRange, number> = {
+  "24h": 24,
+  "7d": 24 * 7,
+  "30d": 24 * 30,
+};
 
 // Float useful event domains to the front of the chip row.
 const DOMAIN_ORDER = [

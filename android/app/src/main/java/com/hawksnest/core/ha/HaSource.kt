@@ -316,6 +316,7 @@ class HaSource(
             state.setAreas(buildAreaRegistry(areas, entitiesReg, devices))
             state.setEntityCategories(buildEntityCategories(entitiesReg))
             state.setDevices(buildDeviceIndex(areas, entitiesReg, devices))
+            state.setZWaveEntityIds(buildZWaveEntityIds(entitiesReg))
         } catch (_: Exception) {
             // non-fatal: without a registry, entities just group under "Unassigned"
         }

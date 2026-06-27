@@ -31,6 +31,10 @@ class HaState @Inject constructor() {
     private val _devices = MutableStateFlow(DeviceIndex())
     val devices: StateFlow<DeviceIndex> = _devices.asStateFlow()
 
+    /** Entity ids owned by the Z-Wave JS integration (for controller-liveness detection). */
+    private val _zwaveEntityIds = MutableStateFlow<List<String>>(emptyList())
+    val zwaveEntityIds: StateFlow<List<String>> = _zwaveEntityIds.asStateFlow()
+
     private val _status = MutableStateFlow(ConnectionStatus.CONNECTING)
     val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
 
@@ -63,6 +67,8 @@ class HaState @Inject constructor() {
     fun setEntityCategories(categories: EntityCategories) { _entityCategories.value = categories }
 
     fun setDevices(devices: DeviceIndex) { _devices.value = devices }
+
+    fun setZWaveEntityIds(ids: List<String>) { _zwaveEntityIds.value = ids }
 
     /** Merge a batch of entity updates (live state changes). */
     fun upsertEntities(list: List<HassEntity>) {
