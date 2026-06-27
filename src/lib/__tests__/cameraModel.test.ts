@@ -56,6 +56,20 @@ describe("resolveCameras", () => {
     expect(cams[0].snapshotEntity.entity_id).toBe("camera.driveway");
   });
 
+  it("folds HA Ring's `_live_view` entity into the base camera (no duplicate tile)", () => {
+    const entities = map(
+      ent("camera.back", "Back"),
+      ent("camera.back_live_view", "Back Live view"),
+    );
+    const cams = resolveCameras(entities, {});
+    expect(cams).toHaveLength(1);
+    const c = cams[0];
+    expect(c.id).toBe("camera.back");
+    expect(c.name).toBe("Back"); // "Live view" stripped
+    expect(c.liveEntity.entity_id).toBe("camera.back_live_view");
+    expect(c.snapshotEntity.entity_id).toBe("camera.back"); // the real still
+  });
+
   it("handles a live-only ring camera (no snapshot) and sorts by id", () => {
     const cams = resolveCameras(
       map(

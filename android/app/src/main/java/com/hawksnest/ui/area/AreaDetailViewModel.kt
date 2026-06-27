@@ -8,6 +8,7 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.logic.domainToCard
+import com.hawksnest.core.logic.isPrimaryEntity
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.ui.components.DeviceUi
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,10 +31,12 @@ class AreaDetailViewModel @Inject constructor(
     private val state = connection.state
 
     val devices: StateFlow<List<DeviceUi>> =
-        combine(state.entities, state.areas) { entities, areas ->
+        combine(state.entities, state.areas, state.entityCategories) { entities, areas, categories ->
             val ids = areas.filterValues { it == area }.keys
+            // Show real controls only — HA config/diagnostic + ring-mqtt housekeeping entities
+            // (battery, last-activity, volume, info…) stay under each device's detail view.
             entities.values
-                .filter { it.entityId in ids }
+                .filter { it.entityId in ids && isPrimaryEntity(it.entityId, categories) }
                 .sortedBy { it.entityId }
                 .map { e ->
                     DeviceUi(

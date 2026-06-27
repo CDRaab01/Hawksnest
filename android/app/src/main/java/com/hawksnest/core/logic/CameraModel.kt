@@ -29,13 +29,17 @@ private fun objectIdOf(entityId: String): String =
 private data class Classified(val base: String, val role: String)
 
 private fun classify(objectId: String): Classified = when {
+    // HA's official Ring integration adds a dedicated live-view entity
+    // (`camera.<base>_live_view`, "X Live view") alongside the snapshot camera — treat it as the
+    // live feed so it folds into the base camera instead of becoming a second tile.
+    objectId.endsWith("_live_view") -> Classified(objectId.removeSuffix("_live_view"), "live")
     objectId.endsWith("_live") -> Classified(objectId.removeSuffix("_live"), "live")
     objectId.endsWith("_snapshot") -> Classified(objectId.removeSuffix("_snapshot"), "snapshot")
     objectId.endsWith("_event") -> Classified(objectId.removeSuffix("_event"), "event")
     else -> Classified(objectId, "standalone")
 }
 
-private val ROLE_SUFFIX = Regex("\\s+(Live|Snapshot|Event)$", RegexOption.IGNORE_CASE)
+private val ROLE_SUFFIX = Regex("\\s+(Live view|Live|Snapshot|Event)$", RegexOption.IGNORE_CASE)
 
 /** Strip a trailing role word ring-mqtt appends to friendly names ("Front Door Live"). */
 private fun cleanName(name: String): String = name.replace(ROLE_SUFFIX, "")

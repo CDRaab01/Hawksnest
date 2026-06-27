@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.ringEventsFromSelect
+import com.hawksnest.core.logic.vodPositionMs
 import com.hawksnest.ui.home.CameraUi
 import com.hawksnest.ui.theme.HawksnestTheme
 import kotlinx.coroutines.delay
@@ -57,7 +58,6 @@ fun CameraPlayer(
     cameras: List<CameraUi>,
     onSelectCamera: (CameraUi) -> Unit,
     viewModel: CameraPlayerViewModel,
-    bucket: Long,
     modifier: Modifier = Modifier,
 ) {
     val cameraName = cameraNameOf(cam.id)
@@ -112,11 +112,15 @@ fun CameraPlayer(
         }
     }
 
+    // Continuous (Frigate) VOD spans the WHOLE window and is built once — scrubbing seeks within it
+    // (see seekToMs below) instead of rebuilding a playlist per move, which re-buffered (stutter)
+    // and could crash ExoPlayer on a backwards seek. Ring snaps to discrete event streams instead.
     val recordingUrl = when {
         isLive -> null
         isRing -> ringSrc
-        else -> viewModel.recordingUrl(cameraName, headTime, endMs)
+        else -> viewModel.recordingUrl(cameraName, startMs, endMs)
     }
+    val seekToMs = if (isLive || isRing) null else vodPositionMs(headTime, startMs)
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -153,7 +157,8 @@ fun CameraPlayer(
             .fillMaxWidth()
             .aspectRatio(16f / 9f)
         when {
-            !isLive && recordingUrl != null -> VideoPlayer(recordingUrl, frame, paused = paused)
+            !isLive && recordingUrl != null ->
+                VideoPlayer(recordingUrl, frame, paused = paused, seekToMs = seekToMs)
             isLive && canWebRtc && !webRtcFailed -> WebRtcPlayer(
                 entityId = cam.entityId,
                 viewModel = viewModel,
@@ -164,10 +169,9 @@ fun CameraPlayer(
             cam.streamUrl != null -> MjpegView(
                 streamUrl = cam.streamUrl!!,
                 snapshotUrl = cam.snapshotUrl,
-                bucket = bucket,
                 modifier = frame,
             )
-            else -> CameraSnapshot(model = bustCache(cam.snapshotUrl, bucket), modifier = frame)
+            else -> RefreshingSnapshot(url = cam.snapshotUrl, modifier = frame)
         }
 
         Timeline24h(

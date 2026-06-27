@@ -59,6 +59,22 @@ class CameraModelTest {
     }
 
     @Test
+    fun `folds HA Ring's _live_view entity into the base camera`() {
+        val cams = resolveCameras(
+            map(
+                ent("camera.back", "Back"),
+                ent("camera.back_live_view", "Back Live view"),
+            ),
+        )
+        assertEquals(1, cams.size)
+        val c = cams[0]
+        assertEquals("camera.back", c.id)
+        assertEquals("Back", c.name)
+        assertEquals("camera.back_live_view", c.liveEntity.entityId)
+        assertEquals("camera.back", c.snapshotEntity.entityId)
+    }
+
+    @Test
     fun `handles a live-only ring camera and sorts by id`() {
         val cams = resolveCameras(
             map(ent("camera.zzz_live", "Zzz Live"), ent("camera.aaa", "Aaa")),

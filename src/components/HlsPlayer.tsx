@@ -33,6 +33,7 @@ export function HlsPlayer({
   loop = false,
   muted = true,
   paused = false,
+  seekSeconds,
   onError,
   className,
 }: {
@@ -41,6 +42,8 @@ export function HlsPlayer({
   loop?: boolean;
   muted?: boolean;
   paused?: boolean;
+  /** Scrub position (seconds into the media). Seeks the existing element — no reload/re-init. */
+  seekSeconds?: number;
   onError?: () => void;
   className?: string;
 }) {
@@ -53,6 +56,27 @@ export function HlsPlayer({
     if (paused) safePause(video);
     else safePlay(video);
   }, [paused]);
+
+  // Scrub by seeking the SAME element instead of swapping `src` per move. A single
+  // window-spanning VOD + seekTo is smooth; rebuilding the source each scrub re-buffered (stutter)
+  // and could crash the player. Apply once the media can seek (metadata ready), else on load.
+  useEffect(() => {
+    const video = ref.current;
+    if (!video || seekSeconds == null || !Number.isFinite(seekSeconds)) return;
+    const target = Math.max(0, seekSeconds);
+    const apply = () => {
+      try {
+        video.currentTime = target;
+      } catch {
+        /* not seekable yet / jsdom */
+      }
+    };
+    if (video.readyState >= 1) apply();
+    else {
+      video.addEventListener("loadedmetadata", apply, { once: true });
+      return () => video.removeEventListener("loadedmetadata", apply);
+    }
+  }, [seekSeconds, src]);
 
   useEffect(() => {
     const video = ref.current;

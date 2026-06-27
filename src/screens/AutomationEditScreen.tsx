@@ -7,6 +7,7 @@ import { SectionHeader } from "../components/SectionHeader";
 import { overrides } from "../config/overrides";
 import { resolveName } from "../lib/resolve";
 import { groupByArea } from "../lib/areas";
+import { primaryEntities } from "../lib/entityVisibility";
 import { domainOf } from "../lib/ha";
 import {
   ACTION_DOMAINS,
@@ -55,9 +56,12 @@ function EntitySelect({
 }) {
   const entities = useEntityStore((s) => s.entities);
   const areas = useEntityStore((s) => s.areas);
+  const categories = useEntityStore((s) => s.categories);
+  // Drop HA config/diagnostic + ring-mqtt housekeeping entities so the picker lists real
+  // controls/signals, not "Back Battery / Back Door Info / Back Event Stream / …" noise.
   const groups = useMemo(
-    () => groupByArea(Object.values(entities), areas),
-    [entities, areas],
+    () => groupByArea(primaryEntities(Object.values(entities), categories), areas),
+    [entities, areas, categories],
   );
   const allow = filterDomains ?? (filterDomain ? [filterDomain] : null);
   return (

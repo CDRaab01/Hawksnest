@@ -9,6 +9,7 @@ import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.ha.historyLevels
 import com.hawksnest.core.logic.domainToCard
+import com.hawksnest.core.logic.isNoiseEntity
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.ui.components.DeviceUi
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -71,7 +72,7 @@ class EntityDetailViewModel @Inject constructor(
             val deviceId = index.deviceByEntity[entityId] ?: return@combine emptyList()
             val record = index.devices[deviceId] ?: return@combine emptyList()
             record.entityIds
-                .filter { it != entityId && it in categories }
+                .filter { it != entityId && (it in categories || isNoiseEntity(it)) }
                 .mapNotNull { entities[it] }
                 .map { e ->
                     DeviceUi(

@@ -14,7 +14,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -25,7 +24,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.ui.home.CameraUi
-import kotlinx.coroutines.delay
 
 /**
  * Full-screen camera view hosting the Ring-style [CameraPlayer] (live + timeline scrubber +
@@ -42,12 +40,6 @@ fun CameraLightbox(
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         var current by remember { mutableStateOf(initial) }
-        val bucket by produceState(0L) {
-            while (true) {
-                value = System.currentTimeMillis() / 2000
-                delay(2000)
-            }
-        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -60,7 +52,6 @@ fun CameraLightbox(
                 cameras = cameras.ifEmpty { listOf(initial) },
                 onSelectCamera = { current = it },
                 viewModel = viewModel,
-                bucket = bucket,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),

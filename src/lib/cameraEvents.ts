@@ -70,6 +70,17 @@ export function recordingUrlAt(
   return `${base}/vod/${encodeURIComponent(camera)}/start/${start}/end/${end}/master.m3u8`;
 }
 
+/**
+ * In-media playback position (seconds) for a scrub to `headMs` within a VOD that spans
+ * `[windowStartMs, …]`. Clamped to ≥ 0 so scrubbing *before* the window start can't address a
+ * negative offset (which is the kind of out-of-range seek that crashes some players). Pairing this
+ * with a single window-spanning VOD lets the player `seekTo()` instead of reloading a new playlist
+ * per scrub — the fix for scrub stutter.
+ */
+export function vodPositionSeconds(headMs: number, windowStartMs: number): number {
+  return Math.max(0, (headMs - windowStartMs) / 1000);
+}
+
 /** The downloadable clip (mp4) for a single recorded event. Pure builder. */
 export function eventClipUrl(eventId: string, base: string = FRIGATE_BASE): string {
   return `${base}/notifications/${encodeURIComponent(eventId)}/clip.mp4`;

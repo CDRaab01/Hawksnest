@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.logic.LogEvent
+import com.hawksnest.core.logic.isPrimaryEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,11 +56,12 @@ class HistoryViewModel @Inject constructor(
         _feed.value = try {
             val end = System.currentTimeMillis()
             val start = end - hours * 3_600_000L
-            // Drop config/diagnostic entities (the `sensor.*_last_activity`, `*_battery`, … spam) so
-            // the timeline shows meaningful state changes, not housekeeping noise.
+            // Drop config/diagnostic + ring-mqtt housekeeping entities (the `sensor.*_last_activity`,
+            // `*_info`, `*_battery`, … spam) so the timeline shows meaningful state changes, not
+            // noise. `*_last_activity` is untagged by ring-mqtt, so a category-only check isn't enough.
             val categories = connection.state.entityCategories.value
             val events = connection.fetchLogbook(start, end)
-                .filter { it.entityId == null || it.entityId !in categories }
+                .filter { it.entityId == null || isPrimaryEntity(it.entityId!!, categories) }
             HistoryFeed.Loaded(events)
         } catch (_: Exception) {
             HistoryFeed.Error

@@ -4,6 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import type { AreaRegistry, HassEntity } from "../lib/ha";
 import { domainOf } from "../lib/ha";
 import { groupByArea, type AreaGroup } from "../lib/areas";
+import { isPrimaryEntity, isNoiseEntity } from "../lib/entityVisibility";
 import { resolveCameras, type LogicalCamera } from "../lib/cameraModel";
 import { overrides } from "../config/overrides";
 import { zwaveControllerOffline } from "../lib/deviceHealth";
@@ -115,14 +116,26 @@ export const usePresenceEntities = (): HassEntity[] =>
     }),
   );
 
-/** All entities grouped by area, memoized on the underlying refs. */
+/**
+ * All entities grouped by area, memoized on the underlying refs. Filters out HA
+ * config/diagnostic + ring-mqtt housekeeping entities so an area detail shows real controls, not
+ * the per-device "battery / last-activity / volume / event-stream" clutter (those stay reachable
+ * under each device's Diagnostics section).
+ */
 export function useEntitiesByArea(): AreaGroup[] {
   const entities = useEntityStore((s) => s.entities);
   const areas = useEntityStore((s) => s.areas);
+  const categories = useEntityStore((s) => s.categories);
   const hidden = useHidden();
   return useMemo(
-    () => groupByArea(Object.values(entities), areas, undefined, hidden),
-    [entities, areas, hidden],
+    () =>
+      groupByArea(
+        Object.values(entities).filter((e) => isPrimaryEntity(e.entity_id, categories)),
+        areas,
+        undefined,
+        hidden,
+      ),
+    [entities, areas, categories, hidden],
   );
 }
 
@@ -182,7 +195,7 @@ export function useDeviceDiagnostics(entityId: string): HassEntity[] {
     const record = devices.devices[deviceId];
     if (!record) return [];
     return record.entityIds
-      .filter((id) => id !== entityId && id in categories)
+      .filter((id) => id !== entityId && (id in categories || isNoiseEntity(id)))
       .map((id) => entities[id])
       .filter((e): e is HassEntity => e !== undefined);
   }, [entityId, entities, devices, categories]);
