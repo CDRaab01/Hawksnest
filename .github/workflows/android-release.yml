@@ -1,16 +1,17 @@
 name: Android Release
 
-# Manual trigger — build a SIGNED release APK with your own key.
-# Requires four repository secrets (Settings → Secrets and variables → Actions):
-#   HAWKSNEST_KEYSTORE_BASE64    base64 of your release keystore (.jks)
-#   HAWKSNEST_KEYSTORE_PASSWORD  the keystore (store) password
-#   HAWKSNEST_KEY_ALIAS          the key alias
-#   HAWKSNEST_KEY_PASSWORD       the key password
-# The signed APK is uploaded as an artifact and installs as an update over previous signed builds.
+# Build a SIGNED release APK using the committed "stable" key (android/app/hawksnest-debug.keystore),
+# the SAME identity debug / android-ci / local builds use. This is deliberate: it gives one signing
+# identity across every build so new APKs install as in-place UPDATES (no "package appears to be
+# invalid" / INSTALL_FAILED_UPDATE_INCOMPATIBLE) and the saved HA token survives. build.gradle.kts
+# documents this: that key "secures nothing on its own (this is a personal, sideloaded app); its only
+# job is install continuity." We intentionally do NOT pass KEYSTORE_PATH, so the release buildType
+# falls back to the stable signingConfig (see build.gradle.kts). The owner-held HAWKSNEST_KEYSTORE_*
+# secrets are therefore no longer used — leaving them set is harmless.
 #
 # Triggers: the manual "Run workflow" button (once this file is on the default branch), and a push
-# that changes this workflow or the `android/.release-trigger` sentinel. To cut a new signed build,
-# bump `android/.release-trigger` and push.
+# that changes this workflow or the `android/.release-trigger` sentinel. To cut a new build, bump
+# `android/.release-trigger` and push.
 on:
   workflow_dispatch:
   push:
@@ -34,24 +35,13 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Decode keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.HAWKSNEST_KEYSTORE_BASE64 }}
-        run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::HAWKSNEST_KEYSTORE_BASE64 secret is not set. Add the four signing secrets first."
-            exit 1
-          fi
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-
       - run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Assemble signed release APK
+      - name: Assemble signed release APK (committed stable key)
+        # No KEYSTORE_PATH on purpose: build.gradle.kts only creates the CI "release"
+        # signingConfig when KEYSTORE_PATH is set, otherwise the release buildType falls
+        # back to the committed "stable" key — the shared install-continuity identity.
         env:
-          KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
-          KEYSTORE_PASSWORD: ${{ secrets.HAWKSNEST_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.HAWKSNEST_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.HAWKSNEST_KEY_PASSWORD }}
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: "0.1.${{ github.run_number }}"
         run: ./gradlew :app:assembleRelease --no-daemon
