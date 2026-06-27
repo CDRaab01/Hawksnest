@@ -12,6 +12,7 @@ import { domainOf } from "../lib/ha";
 import { zwaveHealth, isZWaveDiagnostic } from "../lib/deviceHealth";
 import { relativeTime } from "../lib/relativeTime";
 import { ZWaveMaintenance } from "../components/devices/ZWaveMaintenance";
+import { LockCodes } from "../components/devices/LockCodes";
 import {
   useEntity,
   useDeviceDiagnostics,
@@ -159,6 +160,13 @@ export function EntityScreen() {
         <SectionHeader label="Control" channel={channel} />
         <EntityCard entity={entity} overrides={overrides} density="comfortable" />
       </section>
+
+      {domainOf(decoded) === "lock" && (
+        <section className="space-y-md">
+          <SectionHeader label="Keypad codes" channel={channel} />
+          <LockCodes lockEntityId={decoded} />
+        </section>
+      )}
 
       <section className="space-y-md">
         <SectionHeader

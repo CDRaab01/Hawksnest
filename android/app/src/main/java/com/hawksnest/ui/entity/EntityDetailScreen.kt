@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.ha.domainOf
+import com.hawksnest.core.logic.isLockEntity
 import com.hawksnest.core.logic.isZWaveDiagnostic
 import com.hawksnest.core.logic.relativeTime
 import com.hawksnest.core.logic.zwaveHealth
@@ -138,6 +139,11 @@ fun EntityDetailScreen(
         ) {
             SectionHeader("Control", channel = channel)
             DeviceControlCard(current, onCall = { service, extra -> viewModel.call(service, extra) })
+
+            if (isLockEntity(viewModel.entityId)) {
+                SectionHeader("Keypad codes", channel = channel)
+                LockCodes()
+            }
 
             SectionHeader(
                 "History",
