@@ -1,45 +1,83 @@
 package com.hawksnest.ui.cameras
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.hawksnest.core.logic.HOUR_MS
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.TimeWindow
+import com.hawksnest.core.logic.Viewport
+import com.hawksnest.core.logic.pan
+import com.hawksnest.core.logic.ticks
+import com.hawksnest.core.logic.timeToX
+import com.hawksnest.core.logic.viewportForSpan
+import com.hawksnest.core.logic.visibleSpanMs
+import com.hawksnest.core.logic.xToTime
+import com.hawksnest.core.logic.zoom
 import com.hawksnest.ui.theme.HawksnestTheme
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 
 private val TIME_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a")
 
 private fun clockTime(ms: Long): String =
     TIME_FMT.format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
 
+/** Opening zoom: ~3h visible, clamped into the [10min, 24h] range. */
+private const val DEFAULT_SPAN_MS = 3 * HOUR_MS
+private const val TAP_SLOP_PX = 8f
+
+/** Compact span label for the zoom indicator ("45m", "3h", "1h 30m"). */
+private fun formatSpan(ms: Long): String {
+    val totalMin = (ms / 60_000L).coerceAtLeast(1L)
+    if (totalMin < 60) return "${totalMin}m"
+    val h = totalMin / 60
+    val m = totalMin % 60
+    return if (m == 0L) "${h}h" else "${h}h ${m}m"
+}
+
 /**
- * The Ring-style scrubbable timeline. Recorded-event markers sit along a fixed `[startMs, endMs]`
- * track (a rolling 24h window); the playhead (right edge = live) shows where we are. Tapping the
- * track seeks; tapping a marker jumps to that event. Colors follow the detected object's PULSE
- * channel. Mirrors the web `Timeline24h`.
+ * Ring-style scrubbable timeline: a center-anchored, zoomable + pannable strip drawn on a Canvas.
+ * Drag left/right to move through time; pinch to zoom (≈10 min → 24 h). The playhead marks the
+ * current time — pinned at center while scrubbing, at the right edge while live. A clean tap seeks
+ * to the tapped time (CameraPlayer's seek() snaps ring to the nearest event). All the mapping/clamp
+ * math lives in `core/logic/TimelineViewport`. Mirrors the web `Timeline24h`.
  */
 @Composable
 fun Timeline24h(
@@ -50,8 +88,13 @@ fun Timeline24h(
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val span = (endMs - startMs).coerceAtLeast(1L)
     val pulse = HawksnestTheme.pulse
+    val measurer = rememberTextMeasurer()
+    val window = TimeWindow(startMs, endMs)
+    val scrubTime = playhead ?: endMs
+
+    var trackWidth by remember { mutableStateOf(0f) }
+    var vp by remember { mutableStateOf<Viewport?>(null) }
 
     fun colorFor(label: String): Color = when (label) {
         "person" -> pulse.strength
@@ -60,10 +103,18 @@ fun Timeline24h(
         else -> pulse.streak
     }
 
+    // Re-center on external seeks (Live / prev / next) and width changes, preserving zoom.
+    LaunchedEffect(playhead, trackWidth, startMs, endMs) {
+        if (trackWidth > 0f) {
+            val span = vp?.let { visibleSpanMs(it, trackWidth).toLong() } ?: DEFAULT_SPAN_MS
+            vp = viewportForSpan(scrubTime, span, trackWidth, window)
+        }
+    }
+
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
             Text(
-                "Last 24 hours",
+                if (playhead == null) "Live" else clockTime(scrubTime),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -75,55 +126,89 @@ fun Timeline24h(
             )
         }
 
-        BoxWithConstraints(
+        Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(48.dp)
+                .height(56.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .pointerInput(startMs, endMs) {
-                    detectTapGestures { offset ->
-                        val frac = (offset.x / size.width).coerceIn(0f, 1f)
-                        onSeek(startMs + (frac * span).toLong())
+                .onSizeChanged { trackWidth = it.width.toFloat() }
+                .pointerInput(startMs, endMs, trackWidth) {
+                    if (trackWidth <= 0f) return@pointerInput
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        var moved = false
+                        var totalDx = 0f
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.changes.none { it.pressed }) break
+                            val zoomChange = event.calculateZoom()
+                            val panChange = event.calculatePan()
+                            vp?.let { cur ->
+                                var nv = cur
+                                if (zoomChange != 1f) {
+                                    nv = zoom(nv, zoomChange, trackWidth, window)
+                                    moved = true
+                                }
+                                if (panChange.x != 0f) {
+                                    nv = pan(nv, panChange.x, trackWidth, window)
+                                    totalDx += panChange.x
+                                    if (abs(totalDx) > TAP_SLOP_PX) moved = true
+                                }
+                                if (nv != cur) vp = nv
+                            }
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        }
+                        val v = vp
+                        if (v != null) {
+                            if (moved) onSeek(v.centerMs) else onSeek(xToTime(down.position.x, v, trackWidth))
+                        }
                     }
                 },
         ) {
-            val full = maxWidth
-            events.forEach { ev ->
-                val leftFrac = ((ev.startMs - startMs).toFloat() / span).coerceIn(0f, 1f)
-                val endT = ev.endMs ?: (ev.startMs + 30_000L)
-                val wFrac = ((endT - ev.startMs).toFloat() / span).coerceAtLeast(0.006f)
-                Box(
-                    Modifier
-                        .offset(x = full * leftFrac)
-                        .width(full * wFrac)
-                        .fillMaxHeight(0.6f)
-                        .align(Alignment.CenterStart)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(colorFor(ev.label))
-                        .clickable { onSeek(ev.startMs) },
+            val v = vp ?: return@Canvas
+            val wpx = size.width
+
+            // Ticks + labels.
+            for (t in ticks(v, wpx)) {
+                val x = timeToX(t, v, wpx)
+                drawLine(Color.White.copy(alpha = 0.10f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+                drawText(
+                    measurer,
+                    clockTime(t),
+                    topLeft = Offset(x + 4f, 4f),
+                    style = TextStyle(color = Color.White.copy(alpha = 0.45f), fontSize = 9.sp),
                 )
             }
 
-            val headFrac = if (playhead == null) 1f else ((playhead - startMs).toFloat() / span).coerceIn(0f, 1f)
-            Box(
-                Modifier
-                    .offset(x = full * headFrac - 1.dp)
-                    .width(2.dp)
-                    .fillMaxHeight()
-                    .background(Color.White),
-            )
+            // Event chips.
+            for (ev in events) {
+                val x1 = timeToX(ev.startMs, v, wpx)
+                val endT = ev.endMs ?: (ev.startMs + 30_000L)
+                val w = (timeToX(endT, v, wpx) - x1).coerceAtLeast(3f)
+                if (x1 + w < 0f || x1 > wpx) continue // off-screen
+                drawRoundRect(
+                    color = colorFor(ev.label),
+                    topLeft = Offset(x1, size.height * 0.45f),
+                    size = Size(w, size.height * 0.4f),
+                    cornerRadius = CornerRadius(3f, 3f),
+                )
+            }
+
+            // Playhead — at center while scrubbing, at the right edge while live.
+            val px = timeToX(scrubTime, v, wpx)
+            drawLine(Color.White, Offset(px, 0f), Offset(px, size.height), strokeWidth = 3f)
         }
 
         Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
             Text(
-                clockTime(startMs),
+                "Drag to scrub · pinch to zoom",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.weight(1f))
             Text(
-                "Live",
+                vp?.let { "${formatSpan(visibleSpanMs(it, trackWidth).toLong())} view" } ?: "",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
