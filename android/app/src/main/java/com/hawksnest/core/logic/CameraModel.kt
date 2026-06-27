@@ -19,6 +19,8 @@ data class LogicalCamera(
     val eventSelectId: String?,
     val dingId: String?,
     val motionId: String?,
+    /** ring-mqtt siren switch (`switch.<base>_siren`) on siren-capable cameras, else null. */
+    val sirenSwitchId: String? = null,
 )
 
 private fun objectIdOf(entityId: String): String =
@@ -70,6 +72,7 @@ fun resolveCameras(
                 eventSelectId = has("select.${base}_event_select"),
                 dingId = has("binary_sensor.${base}_ding"),
                 motionId = has("binary_sensor.${base}_motion"),
+                sirenSwitchId = has("switch.${base}_siren"),
             ),
         )
     }

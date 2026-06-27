@@ -9,6 +9,8 @@ import com.hawksnest.core.ha.WebRtcSignal
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.CameraEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
 /**
@@ -36,8 +38,13 @@ class CameraPlayerViewModel @Inject constructor(
     ): WebRtcHandle? = connection.webrtcOffer(entityId, offerSdp, onSignal)
 
     /** Push a local trickle ICE candidate for an in-flight session. */
-    suspend fun webrtcCandidate(sessionId: String, candidate: String, sdpMid: String?, sdpMLineIndex: Int) =
-        connection.webrtcCandidate(sessionId, candidate, sdpMid, sdpMLineIndex)
+    suspend fun webrtcCandidate(
+        entityId: String,
+        sessionId: String,
+        candidate: String,
+        sdpMid: String?,
+        sdpMLineIndex: Int,
+    ) = connection.webrtcCandidate(entityId, sessionId, candidate, sdpMid, sdpMLineIndex)
 
     suspend fun events(camera: String, startMs: Long, endMs: Long): List<CameraEvent> =
         connection.fetchCameraEvents(camera, startMs, endMs)
@@ -47,6 +54,22 @@ class CameraPlayerViewModel @Inject constructor(
 
     /** Read a (live) entity from the store — used to pull a ring-mqtt event selector's options. */
     fun entity(id: String): HassEntity? = connection.state.entities.value[id]
+
+    /** The connected origin (HA / Hawksnest nginx) — the talk feature derives the go2rtc WS URL from it. */
+    fun baseUrl(): String = connection.state.baseUrl.value
+
+    /** Reactive on/off for a ring-mqtt siren switch (false when absent/off). */
+    fun sirenOn(entityId: String): Flow<Boolean> =
+        connection.state.entities.map { it[entityId]?.state == "on" }
+
+    /** Sound or silence a camera's siren (ring-mqtt `switch.<base>_siren`). */
+    suspend fun setSiren(entityId: String, on: Boolean) {
+        connection.callService(
+            "switch",
+            if (on) "turn_on" else "turn_off",
+            ServiceData(entityId = entityId),
+        )
+    }
 
     /** Select which ring-mqtt event plays, then resolve the `_event` stream URL. */
     suspend fun playRingEvent(eventSelectId: String, option: String, eventStreamId: String): String? {

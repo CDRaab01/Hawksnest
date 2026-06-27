@@ -29,6 +29,8 @@ export interface LogicalCamera {
   dingId: string | null;
   /** Motion sensor (`binary_sensor.<base>_motion`), if present. */
   motionId: string | null;
+  /** ring-mqtt siren switch (`switch.<base>_siren`) on siren-capable cameras, else null. */
+  sirenSwitchId: string | null;
 }
 
 /** The object id (after the domain dot), e.g. `camera.front_door_live` → `front_door_live`. */
@@ -97,6 +99,7 @@ export function resolveCameras(
       eventSelectId: has(`select.${g.base}_event_select`),
       dingId: has(`binary_sensor.${g.base}_ding`),
       motionId: has(`binary_sensor.${g.base}_motion`),
+      sirenSwitchId: has(`switch.${g.base}_siren`),
     });
   }
 

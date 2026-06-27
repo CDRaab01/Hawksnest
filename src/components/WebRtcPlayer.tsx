@@ -49,7 +49,7 @@ export function WebRtcPlayer({
     pc.onicecandidate = (e) => {
       if (!e.candidate) return;
       const cand = e.candidate.toJSON();
-      if (sessionId) void webrtcCandidate(sessionId, cand).catch(() => {});
+      if (sessionId) void webrtcCandidate(entityId, sessionId, cand).catch(() => {});
       else pendingCandidates.push(cand); // hold until HA gives us the session id
     };
     pc.onconnectionstatechange = () => {
@@ -66,7 +66,7 @@ export function WebRtcPlayer({
           if (sig.type === "session" && sig.session_id) {
             sessionId = sig.session_id;
             for (const c of pendingCandidates.splice(0)) {
-              void webrtcCandidate(sessionId, c).catch(() => {});
+              void webrtcCandidate(entityId, sessionId, c).catch(() => {});
             }
           } else if (sig.type === "answer" && sig.answer) {
             void pc.setRemoteDescription({ type: "answer", sdp: sig.answer }).catch(fail);

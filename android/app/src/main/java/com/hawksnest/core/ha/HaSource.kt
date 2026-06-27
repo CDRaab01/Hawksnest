@@ -215,6 +215,7 @@ class HaSource(
     }
 
     override suspend fun webrtcCandidate(
+        entityId: String,
         sessionId: String,
         candidate: String,
         sdpMid: String?,
@@ -222,6 +223,9 @@ class HaSource(
     ) {
         val c = conn ?: return
         c.request("camera/webrtc/candidate") {
+            // `entity_id` is required by HA alongside the session id; without it HA
+            // rejects the candidate and ICE never completes (live view goes stale).
+            put("entity_id", entityId)
             put("session_id", sessionId)
             putJsonObject("candidate") {
                 put("candidate", candidate)

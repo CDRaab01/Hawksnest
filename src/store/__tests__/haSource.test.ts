@@ -264,9 +264,15 @@ describe("createHaSource", () => {
       offer: "v=0...",
     });
 
-    await source.webrtcCandidate!("sess-1", { candidate: "candidate:..." });
+    await source.webrtcCandidate!("camera.front_door", "sess-1", {
+      candidate: "candidate:...",
+    });
     const cand = sent.find((m) => m.type === "camera/webrtc/candidate");
-    expect(cand).toMatchObject({ type: "camera/webrtc/candidate", session_id: "sess-1" });
+    expect(cand).toMatchObject({
+      type: "camera/webrtc/candidate",
+      entity_id: "camera.front_door",
+      session_id: "sess-1",
+    });
   });
 
   it("flags reconnecting when the connection drops", async () => {

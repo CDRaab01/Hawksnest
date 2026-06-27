@@ -12,6 +12,8 @@ import { ringEventsFromSelect } from "../../lib/ringEvents";
 import { LivePlayer } from "../LivePlayer";
 import { HlsPlayer } from "../HlsPlayer";
 import { CameraSwitcher } from "./CameraSwitcher";
+import { SirenButton } from "./SirenButton";
+import { TalkButton } from "./TalkButton";
 import { Timeline24h } from "./Timeline24h";
 import { TransportBar } from "./TransportBar";
 
@@ -138,20 +140,24 @@ export function CameraPlayer({
     <div className="space-y-md">
       <div className="flex items-center justify-between gap-md">
         <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
-        <span
-          className={[
-            "flex items-center gap-xs rounded-sm px-sm py-xs caption-label",
-            isLive ? "text-recovery" : "text-ink-dim",
-          ].join(" ")}
-        >
+        <div className="flex items-center gap-sm">
+          {isRing && isLive && <TalkButton src={cameraName} />}
+          {camera.sirenSwitchId && <SirenButton entityId={camera.sirenSwitchId} />}
           <span
             className={[
-              "h-2 w-2 rounded-full",
-              isLive ? "bg-recovery" : "bg-ink-faint",
+              "flex items-center gap-xs rounded-sm px-sm py-xs caption-label",
+              isLive ? "text-recovery" : "text-ink-dim",
             ].join(" ")}
-          />
-          {isLive ? "Live" : "Recorded"}
-        </span>
+          >
+            <span
+              className={[
+                "h-2 w-2 rounded-full",
+                isLive ? "bg-recovery" : "bg-ink-faint",
+              ].join(" ")}
+            />
+            {isLive ? "Live" : "Recorded"}
+          </span>
+        </div>
       </div>
 
       {isLive || !recordingSrc ? (
