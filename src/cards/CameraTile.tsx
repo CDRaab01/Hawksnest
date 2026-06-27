@@ -5,14 +5,8 @@ import { useSnapshotBucket } from "../components/snapshotBucket";
 import { useHaBaseUrl } from "../store/entityStore";
 import { resolveName } from "../lib/resolve";
 import { snapshotUrlAt, isCameraLive } from "../lib/cameraUrl";
-import { relativeTime } from "../lib/relativeTime";
+import { relativeTime, parseHaTime } from "../lib/relativeTime";
 import type { CardProps } from "./types";
-
-function lastChangedMs(lastChanged?: string): number | null {
-  if (!lastChanged) return null;
-  const t = new Date(lastChanged).getTime();
-  return Number.isFinite(t) ? t : null;
-}
 
 /**
  * Camera tile. Renders Home Assistant's signed `entity_picture` snapshot, kept
@@ -31,10 +25,16 @@ export function CameraTile({
   const bucket = useSnapshotBucket();
   const baseUrl = useHaBaseUrl();
   const [failed, setFailed] = useState(false);
+  // The last snapshot URL that actually decoded. We keep showing it while the next
+  // bucket's frame loads so the tile never blanks to black on the ~10s refresh.
+  const [loaded, setLoaded] = useState<string | null>(null);
 
   const live = isCameraLive(entity) && !failed;
   const src = live ? snapshotUrlAt(entity, bucket, baseUrl) : null;
-  const changedMs = lastChangedMs(entity.last_changed);
+  const changedMs = parseHaTime(entity.last_changed);
+  // Show the freshest frame we've successfully decoded; the placeholder only wins
+  // when we've never loaded one (first paint, offline, or a fetch error before any frame).
+  const visible = loaded ?? (failed ? null : src);
 
   return (
     <PanelCard className="overflow-hidden">
@@ -44,13 +44,10 @@ export function CameraTile({
           "relative w-full bg-[radial-gradient(120%_120%_at_20%_0%,#2a2f37_0%,#0e1116_70%)]",
         ].join(" ")}
       >
-        {src ? (
+        {visible ? (
           <img
-            key={src}
-            src={src}
+            src={visible}
             alt={`${name} live snapshot`}
-            loading="lazy"
-            onError={() => setFailed(true)}
             className="absolute inset-0 h-full w-full object-cover"
           />
         ) : (
@@ -64,6 +61,26 @@ export function CameraTile({
               {failed ? "No signal" : "Offline"}
             </span>
           </div>
+        )}
+
+        {/* Hidden preloader: fetch the next frame off-screen and only promote it to the
+            visible <img> once it has decoded (so the swap is seamless). A refresh that
+            fails leaves the last good frame in place — we only surface "No signal" if we
+            never had a frame to begin with. */}
+        {src && src !== loaded && (
+          <img
+            src={src}
+            alt=""
+            aria-hidden="true"
+            className="hidden"
+            onLoad={() => {
+              setFailed(false);
+              setLoaded(src);
+            }}
+            onError={() => {
+              if (!loaded) setFailed(true);
+            }}
+          />
         )}
 
         {/* Ring-style freshness badge: a status dot + the snapshot's age. The tile

@@ -43,15 +43,19 @@ type Role = "live" | "snapshot" | "event" | "standalone";
 
 /** Split a camera object id into its ring-mqtt role + base name. */
 function classify(objectId: string): { base: string; role: Role } {
+  // HA's official Ring integration adds a dedicated live-view entity
+  // (`camera.<base>_live_view`, "X Live view") alongside the snapshot camera — treat it as the
+  // live feed so it folds into the base camera instead of becoming a second tile.
+  if (objectId.endsWith("_live_view")) return { base: objectId.slice(0, -10), role: "live" };
   if (objectId.endsWith("_live")) return { base: objectId.slice(0, -5), role: "live" };
   if (objectId.endsWith("_snapshot")) return { base: objectId.slice(0, -9), role: "snapshot" };
   if (objectId.endsWith("_event")) return { base: objectId.slice(0, -6), role: "event" };
   return { base: objectId, role: "standalone" };
 }
 
-/** Strip a trailing role word ring-mqtt appends to friendly names ("Front Door Live"). */
+/** Strip a trailing role word ring-mqtt / Ring append to friendly names ("Front Door Live view"). */
 function cleanName(name: string): string {
-  return name.replace(/\s+(Live|Snapshot|Event)$/i, "");
+  return name.replace(/\s+(Live view|Live|Snapshot|Event)$/i, "");
 }
 
 interface Group {

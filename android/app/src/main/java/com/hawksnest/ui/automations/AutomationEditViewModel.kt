@@ -11,6 +11,7 @@ import com.hawksnest.core.automations.newRule
 import com.hawksnest.core.automations.ruleToConfig
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.logic.primaryEntities
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.util.CredentialStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,8 +19,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
@@ -73,11 +74,16 @@ class AutomationEditViewModel @Inject constructor(
     var haUrl: String? = null
         private set
 
-    /** Every entity, friendly-named and sorted — the source for the builder's pickers. */
+    /**
+     * Every primary entity, friendly-named and sorted — the source for the builder's pickers.
+     * Drops HA config/diagnostic + ring-mqtt housekeeping entities so the picker lists real
+     * controls/signals, not "Back Battery / Back Door Info / Back Event Stream / …" noise.
+     */
     val entities: StateFlow<List<HassEntity>> =
-        connection.state.entities
-            .map { map -> map.values.sortedBy { resolveName(it, overrides).lowercase() } }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        combine(connection.state.entities, connection.state.entityCategories) { map, categories ->
+            primaryEntities(map.values.toList(), categories)
+                .sortedBy { resolveName(it, overrides).lowercase() }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         viewModelScope.launch { haUrl = credentialStore.haUrl.firstOrNull() }

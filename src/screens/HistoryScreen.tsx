@@ -8,6 +8,7 @@ import {
 } from "../components/history/HistoryFilterBar";
 import { fetchLogbook } from "../store/connection";
 import { useConnection, useEntityCategories } from "../store/entityStore";
+import { isPrimaryEntity } from "../lib/entityVisibility";
 import type { LogEvent } from "../lib/logbook";
 
 const RANGE_HOURS: Record<HistoryRange, number> = {
@@ -71,10 +72,11 @@ export function HistoryScreen() {
     // Refetch on range change and once the source is live/ready.
   }, [range, status]);
 
-  // Drop config/diagnostic entities (the `sensor.*_last_activity`, `*_battery`, … spam) so the
-  // timeline shows meaningful state changes, not housekeeping noise.
+  // Drop config/diagnostic + ring-mqtt housekeeping entities (the `sensor.*_last_activity`,
+  // `*_info`, `*_battery`, … spam) so the timeline shows meaningful state changes, not noise.
+  // `*_last_activity` is untagged by ring-mqtt, so a category-only check isn't enough.
   const meaningful = useMemo(
-    () => events.filter((e) => !e.entityId || !(e.entityId in categories)),
+    () => events.filter((e) => !e.entityId || isPrimaryEntity(e.entityId, categories)),
     [events, categories],
   );
   const domains = useMemo(() => presentDomains(meaningful), [meaningful]);

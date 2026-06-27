@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.logic.RoomHighlight
 import com.hawksnest.core.logic.groupByArea
+import com.hawksnest.core.logic.isPrimaryEntity
 import com.hawksnest.core.logic.roomHighlights
 import com.hawksnest.core.logic.roomIconKey
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -32,7 +33,7 @@ class RoomsViewModel @Inject constructor(
         combine(state.entities, state.areas, state.entityCategories) { entities, areas, categories ->
             // Hide config/diagnostic entities (battery, last-activity, volume…) so the device counts
             // and highlights reflect real controls, not housekeeping noise.
-            val primary = entities.values.filter { it.entityId !in categories }
+            val primary = entities.values.filter { isPrimaryEntity(it.entityId, categories) }
             groupByArea(primary, areas).map { g ->
                 RoomUi(
                     area = g.area,

@@ -30,6 +30,8 @@ fun VideoPlayer(
     modifier: Modifier = Modifier,
     loop: Boolean = false,
     paused: Boolean = false,
+    /** Scrub position (ms into the media). Seeks the prepared player — no re-prepare/reload. */
+    seekToMs: Long? = null,
 ) {
     val context = LocalContext.current
     val uri: Uri = if (url == DEMO_CLIP_URI) {
@@ -46,11 +48,18 @@ fun VideoPlayer(
         onDispose { player.release() }
     }
 
+    // Prepare only when the media (or loop mode) actually changes. Scrubbing keeps the same VOD
+    // loaded and seeks within it (below) instead of re-preparing per move, which re-buffered
+    // (stutter) and could crash ExoPlayer on a backwards seek.
     LaunchedEffect(uri, loop) {
         player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         player.setMediaItem(MediaItem.fromUri(uri))
         player.prepare()
         player.playWhenReady = !paused
+    }
+
+    LaunchedEffect(uri, seekToMs) {
+        if (seekToMs != null) player.seekTo(seekToMs.coerceAtLeast(0L))
     }
 
     LaunchedEffect(paused) {

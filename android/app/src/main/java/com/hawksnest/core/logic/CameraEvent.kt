@@ -45,6 +45,15 @@ private fun secondsToMs(p: JsonPrimitive?): Long? = p?.doubleOrNull?.let { (it *
 fun recordingUrlAt(camera: String, startMs: Long, endMs: Long, base: String = FRIGATE_BASE): String =
     "$base/vod/$camera/start/${startMs / 1000}/end/${endMs / 1000}/master.m3u8"
 
+/**
+ * In-media playback position (ms) for a scrub to [headMs] within a VOD that spans `[windowStartMs, …]`.
+ * Clamped to ≥ 0 so scrubbing *before* the window start can't address a negative offset (the kind of
+ * out-of-range seek that crashes some players). Pairing this with a single window-spanning VOD lets
+ * the player `seekTo()` instead of reloading a new playlist per scrub — the fix for scrub stutter.
+ * Ported from `src/lib/cameraEvents.ts`.
+ */
+fun vodPositionMs(headMs: Long, windowStartMs: Long): Long = (headMs - windowStartMs).coerceAtLeast(0L)
+
 /** The downloadable clip (mp4) for a single recorded event. Pure builder. */
 fun eventClipUrl(eventId: String, base: String = FRIGATE_BASE): String =
     "$base/notifications/$eventId/clip.mp4"

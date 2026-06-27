@@ -9,6 +9,7 @@ import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.logic.NON_DEVICE_DOMAINS
 import com.hawksnest.core.logic.domainToCard
 import com.hawksnest.core.logic.groupByArea
+import com.hawksnest.core.logic.isPrimaryEntity
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.ui.components.DeviceUi
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,7 +36,7 @@ class DevicesViewModel @Inject constructor(
             // toggles…) from the main list — they live under each device's detail view instead. Also
             // drop non-device domains (automations have their own tab; people/zones/sun are infra).
             val primary = entities.values.filter {
-                it.entityId !in categories && domainOf(it.entityId) !in NON_DEVICE_DOMAINS
+                isPrimaryEntity(it.entityId, categories) && domainOf(it.entityId) !in NON_DEVICE_DOMAINS
             }
             groupByArea(primary, areas).map { g ->
                 DeviceGroup(

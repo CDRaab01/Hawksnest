@@ -8,6 +8,7 @@ import {
 } from "../../store/connection";
 import { useEntity } from "../../store/entityStore";
 import type { CameraEvent } from "../../lib/cameraEvents";
+import { vodPositionSeconds } from "../../lib/cameraEvents";
 import { ringEventsFromSelect } from "../../lib/ringEvents";
 import { LivePlayer } from "../LivePlayer";
 import { HlsPlayer } from "../HlsPlayer";
@@ -130,11 +131,17 @@ export function CameraPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRing, isLive, selected?.id, camera.eventSelectId, camera.eventStreamId]);
 
+  // Continuous (Frigate) VOD spans the WHOLE window and is built once — scrubbing seeks within it
+  // (see `seekSeconds`) rather than rebuilding a new playlist per seek, which used to tear down and
+  // re-init the player on every scrub (the stutter, and the backwards-seek crash).
   const recordingSrc = isLive
     ? null
     : isRing
       ? ringSrc
-      : recordingUrlAt(cameraName, headTime, window.end);
+      : recordingUrlAt(cameraName, window.start, window.end);
+  // In-media seek position for the continuous VOD (ring snaps to discrete event streams instead).
+  const seekSeconds =
+    isLive || isRing ? undefined : vodPositionSeconds(headTime, window.start);
 
   return (
     <div className="space-y-md">
@@ -163,7 +170,12 @@ export function CameraPlayer({
       {isLive || !recordingSrc ? (
         <LivePlayer entity={camera.liveEntity} />
       ) : (
-        <HlsPlayer src={recordingSrc} paused={paused} loop={!isRing} />
+        <HlsPlayer
+          src={recordingSrc}
+          paused={paused}
+          loop={!isRing}
+          seekSeconds={seekSeconds}
+        />
       )}
 
       <Timeline24h

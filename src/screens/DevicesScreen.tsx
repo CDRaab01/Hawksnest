@@ -9,6 +9,7 @@ import { resolveName, resolveIcon } from "../lib/resolve";
 import { entityHealth } from "../lib/deviceHealth";
 import { relativeTime } from "../lib/relativeTime";
 import { groupByArea } from "../lib/areas";
+import { isPrimaryEntity } from "../lib/entityVisibility";
 import { NON_DEVICE_DOMAINS, domainOf } from "../lib/ha";
 import type { HassEntity } from "../lib/ha";
 import { useEntityStore, useEntityDevice } from "../store/entityStore";
@@ -110,13 +111,16 @@ export function DevicesScreen() {
   const categories = useEntityStore((s) => s.categories);
   const [query, setQuery] = useState("");
 
-  // Hide HA config/diagnostic entities (battery, last-activity, volume, motion-detection toggles…)
-  // from the main list — they live under each device's detail view instead. Also drop non-device
-  // domains (automations/scripts/scenes have their own surfaces; people/zones/sun are infra).
+  // Hide HA config/diagnostic + ring-mqtt housekeeping entities (battery, last-activity, volume,
+  // info, event-stream…) from the main list — they live under each device's detail view instead.
+  // Also drop non-device domains (automations/scripts/scenes have their own surfaces; people/zones/
+  // sun are infra).
   const all = useMemo(
     () =>
       Object.values(entities).filter(
-        (e) => !(e.entity_id in categories) && !NON_DEVICE_DOMAINS.has(domainOf(e.entity_id)),
+        (e) =>
+          isPrimaryEntity(e.entity_id, categories) &&
+          !NON_DEVICE_DOMAINS.has(domainOf(e.entity_id)),
       ),
     [entities, categories],
   );

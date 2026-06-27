@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { relativeTime } from "../relativeTime";
+import { relativeTime, parseHaTime } from "../relativeTime";
 
 const NOW = 1_700_000_000_000;
 
@@ -18,5 +18,22 @@ describe("relativeTime", () => {
 
   it("clamps future timestamps to 'now'", () => {
     expect(relativeTime(NOW + 10_000, NOW)).toBe("now");
+  });
+});
+
+describe("parseHaTime", () => {
+  it("parses an ISO-8601 string", () => {
+    expect(parseHaTime("2023-11-14T22:13:20.000Z")).toBe(Date.parse("2023-11-14T22:13:20.000Z"));
+  });
+
+  it("parses HA's compressed epoch-seconds form (numeric string and number)", () => {
+    expect(parseHaTime("1700000000")).toBe(1_700_000_000_000);
+    expect(parseHaTime(1_700_000_000)).toBe(1_700_000_000_000);
+  });
+
+  it("returns null for empty / unparseable input", () => {
+    expect(parseHaTime(undefined)).toBeNull();
+    expect(parseHaTime("")).toBeNull();
+    expect(parseHaTime("not-a-date")).toBeNull();
   });
 });

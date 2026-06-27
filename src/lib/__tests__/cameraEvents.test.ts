@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   normalizeFrigateEvents,
   recordingUrlAt,
+  vodPositionSeconds,
   eventClipUrl,
   eventSnapshotUrl,
   FRIGATE_BASE,
@@ -68,5 +69,27 @@ describe("cameraEvents", () => {
     expect(recordingUrlAt("front", 1_700_000_000_000, 1_700_000_600_000, base)).toBe(
       `${base}/vod/front/start/1700000000/end/1700000600/master.m3u8`,
     );
+  });
+
+  describe("vodPositionSeconds (scrub seek, not reload)", () => {
+    const winStart = 1_700_000_000_000;
+
+    it("maps a scrub time to its in-media offset in seconds", () => {
+      expect(vodPositionSeconds(winStart + 90_000, winStart)).toBe(90);
+      expect(vodPositionSeconds(winStart, winStart)).toBe(0);
+    });
+
+    it("clamps a seek before the window start to 0 (no negative/out-of-range seek crash)", () => {
+      expect(vodPositionSeconds(winStart - 5_000, winStart)).toBe(0);
+    });
+
+    it("is independent of the VOD URL: the window URL stays the same as the playhead moves, so scrubbing seeks instead of reloading", () => {
+      const url = recordingUrlAt("front", winStart, winStart + 86_400_000);
+      // Two different scrub positions → same source URL, different seek offsets.
+      expect(recordingUrlAt("front", winStart, winStart + 86_400_000)).toBe(url);
+      expect(vodPositionSeconds(winStart + 10_000, winStart)).not.toBe(
+        vodPositionSeconds(winStart + 20_000, winStart),
+      );
+    });
   });
 });

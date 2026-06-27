@@ -46,7 +46,6 @@ interface MjpegEntryPoint {
 fun MjpegView(
     streamUrl: String,
     snapshotUrl: String?,
-    bucket: Long,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -68,8 +67,8 @@ fun MjpegView(
             contentScale = ContentScale.Fit,
         )
     } else {
-        // No frame yet — hold the snapshot so the view is never blank.
-        CameraSnapshot(model = bustCache(snapshotUrl, bucket), modifier = modifier)
+        // No frame yet — hold the (self-refreshing) snapshot so the view is never blank.
+        RefreshingSnapshot(url = snapshotUrl, modifier = modifier)
     }
 }
 
