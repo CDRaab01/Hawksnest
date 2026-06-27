@@ -122,6 +122,10 @@ fun CameraPlayer(
         Row(verticalAlignment = Alignment.CenterVertically) {
             CameraSwitcher(cameras = cameras, current = cam, onSelect = onSelectCamera)
             Spacer(Modifier.weight(1f))
+            if (isRing && isLive) {
+                TalkButton(cameraName, viewModel)
+                Spacer(Modifier.size(8.dp))
+            }
             cam.sirenSwitchId?.let { sirenId ->
                 SirenButton(sirenId, viewModel)
                 Spacer(Modifier.size(8.dp))

@@ -55,6 +55,9 @@ class CameraPlayerViewModel @Inject constructor(
     /** Read a (live) entity from the store — used to pull a ring-mqtt event selector's options. */
     fun entity(id: String): HassEntity? = connection.state.entities.value[id]
 
+    /** The connected origin (HA / Hawksnest nginx) — the talk feature derives the go2rtc WS URL from it. */
+    fun baseUrl(): String = connection.state.baseUrl.value
+
     /** Reactive on/off for a ring-mqtt siren switch (false when absent/off). */
     fun sirenOn(entityId: String): Flow<Boolean> =
         connection.state.entities.map { it[entityId]?.state == "on" }

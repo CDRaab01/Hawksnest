@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Push (Phase 4); declared early, used later. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Two-way audio ("talk"): captures the mic to stream to the camera back-channel. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Package visibility (Android 11+): the Settings → Tailscale panel checks whether the official
          Tailscale app is installed (to "Open" it vs. send the user to install it). -->
