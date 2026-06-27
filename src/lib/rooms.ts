@@ -43,9 +43,11 @@ export function roomHighlights(entities: HassEntity[]): RoomHighlight[] {
   ).length;
   if (lightsOn > 0) out.push({ stat: "lights", label: `${lightsOn} on`, channel: "strength" });
 
-  // resolveCameras collapses ring-mqtt's split entities so the count is per physical camera.
+  // resolveCameras collapses ring-mqtt's split entities so the count is per physical camera. Camera
+  // count is independent of naming overrides, so pass an empty map (the web signature requires it).
   const cameras = resolveCameras(
     Object.fromEntries(entities.map((e) => [e.entity_id, e])),
+    {},
   ).length;
   if (cameras > 0) out.push({ stat: "cameras", label: String(cameras), channel: "effort" });
 
