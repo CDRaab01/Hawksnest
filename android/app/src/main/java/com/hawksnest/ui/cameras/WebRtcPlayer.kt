@@ -187,7 +187,7 @@ private class WebRtcSession(
     private fun sendLocalCandidate(c: IceCandidate) {
         val sid = synchronized(lock) { sessionId } ?: return
         scope.launch {
-            runCatching { viewModel.webrtcCandidate(sid, c.sdp, c.sdpMid, c.sdpMLineIndex) }
+            runCatching { viewModel.webrtcCandidate(entityId, sid, c.sdp, c.sdpMid, c.sdpMLineIndex) }
         }
     }
 

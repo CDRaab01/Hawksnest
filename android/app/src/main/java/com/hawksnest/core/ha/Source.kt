@@ -111,8 +111,14 @@ interface Source {
         onSignal: (WebRtcSignal) -> Unit,
     ): WebRtcHandle? = null
 
-    /** Push a local trickle ICE candidate up to HA for an in-flight WebRTC session. */
+    /**
+     * Push a local trickle ICE candidate up to HA for an in-flight WebRTC session.
+     * HA's `camera/webrtc/candidate` requires `entityId` alongside the session id —
+     * without it HA rejects every candidate, ICE never completes, and the live view
+     * silently falls back to the last snapshot.
+     */
     suspend fun webrtcCandidate(
+        entityId: String,
         sessionId: String,
         candidate: String,
         sdpMid: String?,

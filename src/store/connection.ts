@@ -162,9 +162,10 @@ export function webrtcOffer(
 
 /** Push a local trickle ICE candidate up for an in-flight WebRTC session. */
 export function webrtcCandidate(
+  entityId: string,
   sessionId: string,
   candidate: RTCIceCandidateInit,
 ): Promise<void> {
   if (!current?.webrtcCandidate) return Promise.resolve();
-  return current.webrtcCandidate(sessionId, candidate);
+  return current.webrtcCandidate(entityId, sessionId, candidate);
 }

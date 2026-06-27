@@ -101,8 +101,14 @@ export interface Source {
     offerSdp: string,
     onSignal: (signal: WebRtcSignal) => void,
   ) => Promise<{ unsubscribe: () => void }>;
-  /** Push a local trickle ICE candidate up to HA for an in-flight WebRTC session. */
+  /**
+   * Push a local trickle ICE candidate up to HA for an in-flight WebRTC session.
+   * HA's `camera/webrtc/candidate` requires the `entityId` as well as the
+   * `sessionId` — omitting it makes HA reject every candidate, so ICE never
+   * completes and the live view silently falls back to the last snapshot.
+   */
   webrtcCandidate?: (
+    entityId: string,
     sessionId: string,
     candidate: RTCIceCandidateInit,
   ) => Promise<void>;

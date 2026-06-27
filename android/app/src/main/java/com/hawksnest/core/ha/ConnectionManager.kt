@@ -101,7 +101,13 @@ class ConnectionManager @Inject constructor(
     ): WebRtcHandle? = current?.webrtcOffer(entityId, offerSdp, onSignal)
 
     /** Push a local trickle ICE candidate for an in-flight WebRTC session. */
-    suspend fun webrtcCandidate(sessionId: String, candidate: String, sdpMid: String?, sdpMLineIndex: Int) {
-        current?.webrtcCandidate(sessionId, candidate, sdpMid, sdpMLineIndex)
+    suspend fun webrtcCandidate(
+        entityId: String,
+        sessionId: String,
+        candidate: String,
+        sdpMid: String?,
+        sdpMLineIndex: Int,
+    ) {
+        current?.webrtcCandidate(entityId, sessionId, candidate, sdpMid, sdpMLineIndex)
     }
 }

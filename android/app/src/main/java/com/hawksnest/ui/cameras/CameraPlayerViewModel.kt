@@ -36,8 +36,13 @@ class CameraPlayerViewModel @Inject constructor(
     ): WebRtcHandle? = connection.webrtcOffer(entityId, offerSdp, onSignal)
 
     /** Push a local trickle ICE candidate for an in-flight session. */
-    suspend fun webrtcCandidate(sessionId: String, candidate: String, sdpMid: String?, sdpMLineIndex: Int) =
-        connection.webrtcCandidate(sessionId, candidate, sdpMid, sdpMLineIndex)
+    suspend fun webrtcCandidate(
+        entityId: String,
+        sessionId: String,
+        candidate: String,
+        sdpMid: String?,
+        sdpMLineIndex: Int,
+    ) = connection.webrtcCandidate(entityId, sessionId, candidate, sdpMid, sdpMLineIndex)
 
     suspend fun events(camera: String, startMs: Long, endMs: Long): List<CameraEvent> =
         connection.fetchCameraEvents(camera, startMs, endMs)

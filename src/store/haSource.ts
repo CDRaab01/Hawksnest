@@ -346,10 +346,13 @@ export function createHaSource(
       );
       return { unsubscribe };
     },
-    async webrtcCandidate(sessionId, candidate) {
+    async webrtcCandidate(entityId, sessionId, candidate) {
       if (!conn) throw new Error("Not connected to Home Assistant.");
+      // `entity_id` is required by HA alongside the session id; without it HA
+      // rejects the candidate and ICE never completes (live view goes stale).
       await conn.sendMessagePromise({
         type: "camera/webrtc/candidate",
+        entity_id: entityId,
         session_id: sessionId,
         candidate,
       });
