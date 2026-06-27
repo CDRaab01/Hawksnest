@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,6 +29,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.ha.domainOf
+import com.hawksnest.core.logic.isZWaveDiagnostic
+import com.hawksnest.core.logic.relativeTime
+import com.hawksnest.core.logic.zwaveHealth
 import com.hawksnest.ui.components.DeviceControlCard
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.SectionHeader
@@ -62,6 +66,15 @@ fun EntityDetailScreen(
     val diagnostics by viewModel.diagnostics.collectAsState()
     val pulse = HawksnestTheme.pulse
     val channel = domainChannel(domainOf(viewModel.entityId), pulse)
+    // Z-Wave node diagnostics read from the device's diagnostic siblings, shown as
+    // a structured panel and removed from the raw Diagnostics dump below.
+    val zwave = remember(diagnostics) {
+        zwaveHealth(diagnostics.map { it.entityId to it.rawState })
+    }
+    val otherDiagnostics = remember(diagnostics) {
+        diagnostics.filterNot { isZWaveDiagnostic(it.entityId) }
+    }
+    val hasZWave = zwave.nodeStatus != null || zwave.lastSeenMs != null || zwave.rttMs != null
 
     Column(
         modifier = Modifier
@@ -137,10 +150,37 @@ fun EntityDetailScreen(
                 }
             }
 
-            if (diagnostics.isNotEmpty()) {
+            if (hasZWave) {
+                SectionHeader("Z-Wave", channel = if (zwave.dead) pulse.streak else channel)
+                PanelCard {
+                    if (zwave.dead) {
+                        Text(
+                            "This device has dropped off the Z-Wave mesh — it isn't responding to the controller.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = pulse.streak,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = HawksnestTheme.spacing.xs),
+                        )
+                    }
+                    zwave.nodeStatus?.let { status ->
+                        ZWaveRow(
+                            "Node status",
+                            status.replaceFirstChar { c -> c.uppercaseChar() },
+                            valueColor = when {
+                                zwave.dead -> pulse.streak
+                                status == "alive" -> pulse.recovery
+                                else -> MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                    zwave.lastSeenMs?.let { ZWaveRow("Last seen", relativeTime(it)) }
+                    zwave.rttMs?.let { ZWaveRow("Signal (round-trip)", "$it ms") }
+                }
+            }
+
+            if (otherDiagnostics.isNotEmpty()) {
                 SectionHeader("Diagnostics", channel = channel)
                 PanelCard {
-                    diagnostics.forEach { d ->
+                    otherDiagnostics.forEach { d ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = HawksnestTheme.spacing.xs),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -189,6 +229,23 @@ fun EntityDetailScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ZWaveRow(label: String, value: String, valueColor: Color = MaterialTheme.colorScheme.onSurface) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = HawksnestTheme.spacing.xs),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = valueColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

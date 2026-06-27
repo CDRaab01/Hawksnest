@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { entityHealth, summarizeHealth } from "../deviceHealth";
+import {
+  entityHealth,
+  summarizeHealth,
+  zwaveHealth,
+  isZWaveDiagnostic,
+} from "../deviceHealth";
 import type { HassEntity } from "../ha";
 
 const e = (over: Partial<HassEntity> & { entity_id: string }): HassEntity => ({
@@ -41,6 +46,47 @@ describe("entityHealth", () => {
       e({ entity_id: "light.a", last_changed: "2023-11-14T22:13:20.000Z" }),
     );
     expect(h.lastChangedMs).toBe(Date.parse("2023-11-14T22:13:20.000Z"));
+  });
+});
+
+describe("zwaveHealth", () => {
+  it("returns all-null for a device with no Z-Wave diagnostics", () => {
+    expect(zwaveHealth([e({ entity_id: "sensor.front_door_battery", state: "80" })])).toEqual({
+      nodeStatus: null,
+      dead: false,
+      lastSeenMs: null,
+      rttMs: null,
+    });
+  });
+
+  it("reads node status, last-seen, and round-trip time from siblings", () => {
+    const h = zwaveHealth([
+      e({ entity_id: "sensor.front_door_node_status", state: "alive" }),
+      e({ entity_id: "sensor.front_door_last_seen", state: "2023-11-14T22:13:20.000Z" }),
+      e({ entity_id: "sensor.front_door_round_trip_time", state: "42" }),
+    ]);
+    expect(h.nodeStatus).toBe("alive");
+    expect(h.dead).toBe(false);
+    expect(h.lastSeenMs).toBe(Date.parse("2023-11-14T22:13:20.000Z"));
+    expect(h.rttMs).toBe(42);
+  });
+
+  it("flags a dead node", () => {
+    const h = zwaveHealth([e({ entity_id: "sensor.back_door_node_status", state: "Dead" })]);
+    expect(h.nodeStatus).toBe("dead");
+    expect(h.dead).toBe(true);
+  });
+
+  it("ignores an unavailable node-status sensor", () => {
+    const h = zwaveHealth([e({ entity_id: "sensor.x_node_status", state: "unavailable" })]);
+    expect(h.nodeStatus).toBeNull();
+  });
+
+  it("identifies the diagnostic entity ids it consumes", () => {
+    expect(isZWaveDiagnostic("sensor.front_door_node_status")).toBe(true);
+    expect(isZWaveDiagnostic("sensor.front_door_last_seen")).toBe(true);
+    expect(isZWaveDiagnostic("sensor.front_door_round_trip_time")).toBe(true);
+    expect(isZWaveDiagnostic("sensor.front_door_battery")).toBe(false);
   });
 });
 
