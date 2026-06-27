@@ -1,5 +1,6 @@
 package com.hawksnest.core.logic
 
+import com.hawksnest.core.ha.AreaRegistry
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.ha.stringAttr
@@ -39,26 +40,39 @@ data class SecurityReadout(
 fun securityReadout(
     entities: Collection<HassEntity>,
     overrides: OverrideMap = emptyMap(),
+    areas: AreaRegistry = emptyMap(),
+    deviceByEntity: Map<String, String> = emptyMap(),
 ): SecurityReadout {
     val all = entities.toList()
+
+    // A door's name: its area ("Front Door") reads better than the raw Z-Wave friendly_name
+    // ("Lock Current status of the door"); fall back to the normal resolution chain.
+    fun label(e: HassEntity): String = areas[e.entityId] ?: resolveName(e, overrides)
 
     val unlocked = all.filter {
         domainOf(it.entityId) == "lock" && it.state != "locked" && it.state != "locking"
     }
+    // Devices that own a lock — their companion door/bolt contact (the Schlage
+    // `binary_sensor.*_current_status`) is redundant with the lock state, so don't double-count it.
+    val lockDevices = all.asSequence()
+        .filter { domainOf(it.entityId) == "lock" }
+        .mapNotNull { deviceByEntity[it.entityId] }
+        .toSet()
     val openDoors = all.filter {
         domainOf(it.entityId) == "binary_sensor" &&
-            it.stringAttr("device_class") in DOOR_CLASSES && it.state == "on"
+            it.stringAttr("device_class") in DOOR_CLASSES && it.state == "on" &&
+            deviceByEntity[it.entityId] !in lockDevices
     }
-    val parts = unlocked.map { "${resolveName(it, overrides)} unlocked" } +
-        openDoors.map { "${resolveName(it, overrides)} open" }
+    val parts = unlocked.map { "${label(it)} unlocked" } +
+        openDoors.map { "${label(it)} open" }
     val allClear = parts.isEmpty()
     val summary = if (allClear) "All doors locked" else parts.joinToString(" · ")
 
     val offline = all.filter { it.state == "unavailable" }
     val offlineLabel = when {
         offline.isEmpty() -> null
-        offline.size == 1 -> "${resolveName(offline[0], overrides)} is offline"
-        else -> "${resolveName(offline[0], overrides)} +${offline.size - 1} more offline"
+        offline.size == 1 -> "${label(offline[0])} is offline"
+        else -> "${label(offline[0])} +${offline.size - 1} more offline"
     }
 
     val lifeSafety = all.filter {

@@ -106,9 +106,15 @@ function DeviceRow({ entity }: { entity: HassEntity }) {
 export function DevicesScreen() {
   const entities = useEntityStore((s) => s.entities);
   const areas = useEntityStore((s) => s.areas);
+  const categories = useEntityStore((s) => s.categories);
   const [query, setQuery] = useState("");
 
-  const all = useMemo(() => Object.values(entities), [entities]);
+  // Hide HA config/diagnostic entities (battery, last-activity, volume, motion-detection toggles…)
+  // from the main list — they live under each device's detail view instead.
+  const all = useMemo(
+    () => Object.values(entities).filter((e) => !(e.entity_id in categories)),
+    [entities, categories],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

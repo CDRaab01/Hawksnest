@@ -29,8 +29,11 @@ class DevicesViewModel @Inject constructor(
     private val state = connection.state
 
     val groups: StateFlow<List<DeviceGroup>> =
-        combine(state.entities, state.areas) { entities, areas ->
-            groupByArea(entities.values.toList(), areas).map { g ->
+        combine(state.entities, state.areas, state.entityCategories) { entities, areas, categories ->
+            // Hide HA config/diagnostic entities (battery, last-activity, volume, motion-detection
+            // toggles…) from the main list — they live under each device's detail view instead.
+            val primary = entities.values.filter { it.entityId !in categories }
+            groupByArea(primary, areas).map { g ->
                 DeviceGroup(
                     area = g.area,
                     devices = g.entities.map { e ->

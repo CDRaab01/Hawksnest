@@ -23,6 +23,7 @@ import {
 import {
   buildAreaRegistry,
   buildDeviceIndex,
+  buildEntityCategories,
   toEntityRecord,
   type AreaRegistryEntry,
   type DeviceIndex,
@@ -54,9 +55,11 @@ const defaultDeps: HaSourceDeps = {
  * the richer device index (manufacturer/model/firmware + entity ownership) the
  * Devices hub needs.
  */
-async function fetchRegistry(
-  conn: Connection,
-): Promise<{ areas: ReturnType<typeof buildAreaRegistry>; devices: DeviceIndex }> {
+async function fetchRegistry(conn: Connection): Promise<{
+  areas: ReturnType<typeof buildAreaRegistry>;
+  devices: DeviceIndex;
+  categories: Record<string, string>;
+}> {
   const [areas, entities, devices] = await Promise.all([
     conn.sendMessagePromise<AreaRegistryEntry[]>({
       type: "config/area_registry/list",
@@ -71,6 +74,7 @@ async function fetchRegistry(
   return {
     areas: buildAreaRegistry(areas, entities, devices),
     devices: buildDeviceIndex(areas, entities, devices),
+    categories: buildEntityCategories(entities),
   };
 }
 
@@ -242,9 +246,10 @@ export function createHaSource(
   async function loadAreas() {
     if (!conn) return;
     try {
-      const { areas, devices } = await fetchRegistry(conn);
+      const { areas, devices, categories } = await fetchRegistry(conn);
       store().setAreas(areas);
       store().setDevices(devices);
+      store().setCategories(categories);
     } catch {
       // Registry unavailable (older HA / limited token) — keep entities,
       // they group under "Unassigned" rather than failing the connection.

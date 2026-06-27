@@ -19,11 +19,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.time.Instant
@@ -137,6 +140,71 @@ class HaSource(
     override fun eventClipUrl(eventId: String): String =
         buildEventClipUrl(eventId, withBase(FRIGATE_BASE, baseUrl))
 
+    override fun supportsWebRtc(): Boolean = true
+
+    /**
+     * Negotiate a WebRTC live session over HA's `camera/webrtc/offer` (a subscribe-style command
+     * served by go2rtc — ring-mqtt's streaming backend). HA streams the session id, SDP answer, and
+     * trickle ICE candidates back as `event` frames; we map each to a [WebRtcSignal] for the player.
+     */
+    override suspend fun webrtcOffer(
+        entityId: String,
+        offerSdp: String,
+        onSignal: (WebRtcSignal) -> Unit,
+    ): WebRtcHandle? {
+        val c = conn ?: return null
+        val id = c.subscribe(
+            type = "camera/webrtc/offer",
+            build = {
+                put("entity_id", entityId)
+                put("offer", offerSdp)
+            },
+            onEvent = { event -> parseWebRtcSignal(event)?.let(onSignal) },
+        )
+        return WebRtcHandle { c.unsubscribe(id) }
+    }
+
+    override suspend fun webrtcCandidate(
+        sessionId: String,
+        candidate: String,
+        sdpMid: String?,
+        sdpMLineIndex: Int,
+    ) {
+        val c = conn ?: return
+        c.request("camera/webrtc/candidate") {
+            put("session_id", sessionId)
+            putJsonObject("candidate") {
+                put("candidate", candidate)
+                if (sdpMid != null) put("sdpMid", sdpMid)
+                put("sdpMLineIndex", sdpMLineIndex)
+            }
+        }
+    }
+
+    /** Map one `camera/webrtc/offer` event payload to a [WebRtcSignal] (or null to ignore). */
+    private fun parseWebRtcSignal(event: JsonObject): WebRtcSignal? =
+        when (event["type"]?.jsonPrimitive?.contentOrNull) {
+            "session" -> event["session_id"]?.jsonPrimitive?.contentOrNull?.let { WebRtcSignal.Session(it) }
+            "answer" -> event["answer"]?.jsonPrimitive?.contentOrNull?.let { WebRtcSignal.Answer(it) }
+            "candidate" -> {
+                // HA sends the candidate as an object (`{candidate, sdpMid, sdpMLineIndex}`) or, on
+                // older builds, a bare SDP string.
+                when (val cand = event["candidate"]) {
+                    is JsonObject -> cand["candidate"]?.jsonPrimitive?.contentOrNull?.let {
+                        WebRtcSignal.Candidate(
+                            candidate = it,
+                            sdpMid = cand["sdpMid"]?.jsonPrimitive?.contentOrNull,
+                            sdpMLineIndex = cand["sdpMLineIndex"]?.jsonPrimitive?.intOrNull ?: 0,
+                        )
+                    }
+                    is JsonPrimitive -> cand.contentOrNull?.let { WebRtcSignal.Candidate(it, null, 0) }
+                    else -> null
+                }
+            }
+            "error" -> WebRtcSignal.Error
+            else -> null
+        }
+
     /** Prefix a root-relative HA/Frigate path with the connected origin; absolute/empty left alone. */
     private fun withBase(path: String, base: String): String =
         if (base.isEmpty() || !path.startsWith("/")) path else base.trimEnd('/') + path
@@ -148,7 +216,6 @@ class HaSource(
             state.setStatus(ConnectionStatus.CONNECTING)
             entities = emptyMap()
             val c = HaConnection(client, json, wsUrl(baseUrl), token)
-            conn = c
             val closed = CompletableDeferred<Unit>()
             c.onClosed { if (!closed.isCompleted) closed.complete(Unit) }
             c.onEntitiesEvent { ev ->
@@ -157,6 +224,10 @@ class HaSource(
             }
             try {
                 c.connect() // suspends until auth_ok; throws HaAuthException on bad token
+                // Expose the connection to other callers (History/cameras) only after auth_ok, so a
+                // request issued mid-handshake can't race a raw frame onto the socket. The `finally`
+                // still closes `c` if start/stop cancels us while connecting.
+                conn = c
                 c.subscribeEntities()
                 loadAreas(c)
                 state.setStatus(ConnectionStatus.CONNECTED)
@@ -176,6 +247,9 @@ class HaSource(
                 // unreachable / dropped — fall through to backoff + reconnect
             } finally {
                 c.close()
+                // Stop handing this (now-closed) connection to History/camera callers; until the next
+                // socket authenticates they get a clean "Not connected" instead of awaiting forever.
+                if (conn === c) conn = null
             }
             if (!coroutineContext.isActive) break
             state.setStatus(ConnectionStatus.CONNECTING, "Reconnecting…")
@@ -190,6 +264,8 @@ class HaSource(
             val entitiesReg = c.request("config/entity_registry/list")["result"] as? JsonArray ?: return
             val devices = c.request("config/device_registry/list")["result"] as? JsonArray ?: return
             state.setAreas(buildAreaRegistry(areas, entitiesReg, devices))
+            state.setEntityCategories(buildEntityCategories(entitiesReg))
+            state.setDevices(buildDeviceIndex(areas, entitiesReg, devices))
         } catch (_: Exception) {
             // non-fatal: without a registry, entities just group under "Unassigned"
         }

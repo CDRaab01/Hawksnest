@@ -128,6 +128,10 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.androidx.media3.ui)
 
+    // WebRTC (go2rtc/ring-mqtt low-latency live) — a maintained packaging of Google's libwebrtc that
+    // exposes the standard `org.webrtc.*` API. Negotiated over HA's `camera/webrtc/offer`.
+    implementation(libs.stream.webrtc.android)
+
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 

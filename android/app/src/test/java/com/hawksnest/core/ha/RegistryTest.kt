@@ -28,4 +28,43 @@ class RegistryTest {
         assertEquals("Kitchen", reg["switch.k"]) // resolved via its device's area
         assertNull(reg["sensor.none"]) // no area -> omitted (lands in "Unassigned")
     }
+
+    @Test
+    fun `entity categories keeps only config and diagnostic`() {
+        val entities = arr(
+            """[
+              {"entity_id":"camera.basement","entity_category":null},
+              {"entity_id":"sensor.basement_battery","entity_category":"diagnostic"},
+              {"entity_id":"number.basement_volume","entity_category":"config"},
+              {"entity_id":"switch.basement_siren"}
+            ]""",
+        )
+        val cats = buildEntityCategories(entities)
+        assertEquals("diagnostic", cats["sensor.basement_battery"])
+        assertEquals("config", cats["number.basement_volume"])
+        assertNull(cats["camera.basement"]) // primary entity -> not hidden
+        assertNull(cats["switch.basement_siren"]) // no category -> not hidden
+    }
+
+    @Test
+    fun `device index maps device to its entities and back`() {
+        val areas = arr("""[{"area_id":"a1","name":"Basement"}]""")
+        val devices = arr("""[{"id":"d1","area_id":"a1","name":"Basement Cam","name_by_user":"Basement"}]""")
+        val entities = arr(
+            """[
+              {"entity_id":"camera.basement","device_id":"d1"},
+              {"entity_id":"sensor.basement_battery","device_id":"d1"},
+              {"entity_id":"light.lr","device_id":null}
+            ]""",
+        )
+        val index = buildDeviceIndex(areas, entities, devices)
+        assertEquals("Basement", index.devices["d1"]?.name) // name_by_user wins
+        assertEquals("Basement", index.devices["d1"]?.area)
+        assertEquals(
+            listOf("camera.basement", "sensor.basement_battery"),
+            index.devices["d1"]?.entityIds,
+        )
+        assertEquals("d1", index.deviceByEntity["sensor.basement_battery"])
+        assertNull(index.deviceByEntity["light.lr"]) // no device -> absent
+    }
 }

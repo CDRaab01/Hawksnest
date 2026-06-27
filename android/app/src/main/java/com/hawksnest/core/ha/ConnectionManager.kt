@@ -75,4 +75,19 @@ class ConnectionManager @Inject constructor(
     /** Recorded-footage URL for [camera] over `[startMs, endMs]` (null if unsupported). */
     fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String? =
         current?.recordingUrlAt(camera, startMs, endMs)
+
+    /** True when the active source can negotiate WebRTC (live HA, not demo). */
+    fun supportsWebRtc(): Boolean = current?.supportsWebRtc() ?: false
+
+    /** Begin a WebRTC live session (see [Source.webrtcOffer]). Null when unsupported. */
+    suspend fun webrtcOffer(
+        entityId: String,
+        offerSdp: String,
+        onSignal: (WebRtcSignal) -> Unit,
+    ): WebRtcHandle? = current?.webrtcOffer(entityId, offerSdp, onSignal)
+
+    /** Push a local trickle ICE candidate for an in-flight WebRTC session. */
+    suspend fun webrtcCandidate(sessionId: String, candidate: String, sdpMid: String?, sdpMLineIndex: Int) {
+        current?.webrtcCandidate(sessionId, candidate, sdpMid, sdpMLineIndex)
+    }
 }

@@ -1,6 +1,36 @@
 import { describe, it, expect } from "vitest";
 import type { HassEntities } from "home-assistant-js-websocket";
-import { buildAreaRegistry, buildDeviceIndex, toEntityRecord } from "../registry";
+import {
+  buildAreaRegistry,
+  buildDeviceIndex,
+  buildEntityCategories,
+  toEntityRecord,
+} from "../registry";
+
+describe("buildEntityCategories", () => {
+  it("keeps only config/diagnostic entities", () => {
+    const cats = buildEntityCategories([
+      { entity_id: "camera.basement", area_id: null, device_id: "d1" },
+      {
+        entity_id: "sensor.basement_battery",
+        area_id: null,
+        device_id: "d1",
+        entity_category: "diagnostic",
+      },
+      {
+        entity_id: "number.basement_volume",
+        area_id: null,
+        device_id: "d1",
+        entity_category: "config",
+      },
+    ]);
+    expect(cats).toEqual({
+      "sensor.basement_battery": "diagnostic",
+      "number.basement_volume": "config",
+    });
+    expect(cats["camera.basement"]).toBeUndefined();
+  });
+});
 
 describe("buildAreaRegistry", () => {
   const areas = [

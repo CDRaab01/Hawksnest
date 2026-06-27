@@ -105,12 +105,18 @@ class HomeViewModel @Inject constructor(
     ): HomeUi {
         val all = entities.values.toList()
 
-        val alarmEntity = all.firstOrNull { it.entityId.startsWith("alarm_control_panel.") }
+        // Prefer a panel that's actually reporting over one stuck unavailable/unknown (a Ring Alarm
+        // base station that briefly drops out shouldn't make the hero read "No alarm panel").
+        val panels = all.filter { it.entityId.startsWith("alarm_control_panel.") }
+        val alarmEntity = panels.firstOrNull { it.state != "unavailable" && it.state != "unknown" }
+            ?: panels.firstOrNull()
         val alarm = alarmEntity?.let { alarmView(it.state) }
 
         // Plain-language security read-out (unlocked locks, open contacts, life-safety, offline).
-        // Pure + unit-tested in core/logic/Security.kt.
-        val security = securityReadout(all, overrides)
+        // Pure + unit-tested in core/logic/Security.kt. The device index dedupes each Schlage lock's
+        // companion door sensor; areas give doors human names.
+        val deviceByEntity = state.devices.value.deviceByEntity
+        val security = securityReadout(all, overrides, areas, deviceByEntity)
 
         val resolvedBase = baseUrl.ifEmpty { null }
         // Collapse ring-mqtt's per-device entities into one logical camera each.

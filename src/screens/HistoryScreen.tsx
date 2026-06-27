@@ -7,7 +7,7 @@ import {
   type HistoryRange,
 } from "../components/history/HistoryFilterBar";
 import { fetchLogbook } from "../store/connection";
-import { useConnection } from "../store/entityStore";
+import { useConnection, useEntityCategories } from "../store/entityStore";
 import type { LogEvent } from "../lib/logbook";
 
 const RANGE_HOURS: Record<HistoryRange, number> = { "24h": 24, "7d": 24 * 7 };
@@ -38,6 +38,7 @@ function presentDomains(events: LogEvent[]): string[] {
  */
 export function HistoryScreen() {
   const { status } = useConnection();
+  const categories = useEntityCategories();
   const [range, setRange] = useState<HistoryRange>("24h");
   const [domain, setDomain] = useState("all");
   const [events, setEvents] = useState<LogEvent[]>([]);
@@ -66,10 +67,19 @@ export function HistoryScreen() {
     // Refetch on range change and once the source is live/ready.
   }, [range, status]);
 
-  const domains = useMemo(() => presentDomains(events), [events]);
+  // Drop config/diagnostic entities (the `sensor.*_last_activity`, `*_battery`, … spam) so the
+  // timeline shows meaningful state changes, not housekeeping noise.
+  const meaningful = useMemo(
+    () => events.filter((e) => !e.entityId || !(e.entityId in categories)),
+    [events, categories],
+  );
+  const domains = useMemo(() => presentDomains(meaningful), [meaningful]);
   const shown = useMemo(
-    () => (domain === "all" ? events : events.filter((e) => e.domain === domain)),
-    [events, domain],
+    () =>
+      domain === "all"
+        ? meaningful
+        : meaningful.filter((e) => e.domain === domain),
+    [meaningful, domain],
   );
 
   return (

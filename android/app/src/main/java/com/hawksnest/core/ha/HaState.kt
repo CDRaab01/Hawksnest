@@ -23,6 +23,14 @@ class HaState @Inject constructor() {
     private val _areas = MutableStateFlow<AreaRegistry>(emptyMap())
     val areas: StateFlow<AreaRegistry> = _areas.asStateFlow()
 
+    /** entity_id → "config"/"diagnostic" for entities the main list + History hide (from the registry). */
+    private val _entityCategories = MutableStateFlow<EntityCategories>(emptyMap())
+    val entityCategories: StateFlow<EntityCategories> = _entityCategories.asStateFlow()
+
+    /** Device index (device → entities) backing the per-device diagnostics view + security dedupe. */
+    private val _devices = MutableStateFlow(DeviceIndex())
+    val devices: StateFlow<DeviceIndex> = _devices.asStateFlow()
+
     private val _status = MutableStateFlow(ConnectionStatus.CONNECTING)
     val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
 
@@ -51,6 +59,10 @@ class HaState @Inject constructor() {
     }
 
     fun setAreas(areas: AreaRegistry) { _areas.value = areas }
+
+    fun setEntityCategories(categories: EntityCategories) { _entityCategories.value = categories }
+
+    fun setDevices(devices: DeviceIndex) { _devices.value = devices }
 
     /** Merge a batch of entity updates (live state changes). */
     fun upsertEntities(list: List<HassEntity>) {

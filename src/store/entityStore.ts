@@ -17,6 +17,8 @@ interface EntityState {
   entities: Record<string, HassEntity>;
   areas: AreaRegistry;
   devices: DeviceIndex;
+  /** entity_id → "config"/"diagnostic" for entities the main list + History hide. */
+  categories: Record<string, string>;
   status: ConnectionStatus;
   error?: string;
   /**
@@ -34,6 +36,8 @@ interface EntityState {
   setAreas: (areas: AreaRegistry) => void;
   /** Replace the device index (resolved from the registries on connect). */
   setDevices: (devices: DeviceIndex) => void;
+  /** Replace the entity-category map (resolved from the registry on connect). */
+  setCategories: (categories: Record<string, string>) => void;
   /** Merge a batch of entity updates (live state changes). */
   upsertEntities: (entities: HassEntity[]) => void;
   setStatus: (status: ConnectionStatus, error?: string) => void;
@@ -45,12 +49,14 @@ export const useEntityStore = create<EntityState>((set) => ({
   entities: {},
   areas: {},
   devices: EMPTY_DEVICE_INDEX,
+  categories: {},
   status: "connecting",
   baseUrl: "",
   setSnapshot: (entities, areas) => set({ entities, areas }),
   setEntities: (entities) => set({ entities }),
   setAreas: (areas) => set({ areas }),
   setDevices: (devices) => set({ devices }),
+  setCategories: (categories) => set({ categories }),
   upsertEntities: (list) =>
     set((s) => {
       const entities = { ...s.entities };
@@ -121,15 +127,44 @@ export function useLogicalCameras(): LogicalCamera[] {
 }
 
 /**
- * The home's primary alarm panel (first `alarm_control_panel.*`), or undefined
- * when HA exposes none. Powers the security bar and the nav armed-state pill.
+ * The home's primary alarm panel, or undefined when HA exposes none. Prefers a panel that's actually
+ * reporting over one stuck `unavailable`/`unknown`, so a Ring Alarm base station that briefly drops
+ * out doesn't make the UI read "No alarm panel". Powers the security bar and the nav armed pill.
  */
 export const usePrimaryAlarm = (): HassEntity | undefined =>
-  useEntityStore((s) =>
-    Object.values(s.entities).find((e) =>
+  useEntityStore((s) => {
+    const panels = Object.values(s.entities).filter((e) =>
       e.entity_id.startsWith("alarm_control_panel."),
-    ),
-  );
+    );
+    return (
+      panels.find((e) => e.state !== "unavailable" && e.state !== "unknown") ??
+      panels[0]
+    );
+  });
+
+/** The hidden-category map (entity_id → "config"/"diagnostic"); reference-stable across renders. */
+export const useEntityCategories = (): Record<string, string> =>
+  useEntityStore((s) => s.categories);
+
+/**
+ * The hidden config/diagnostic entities belonging to the same device as `entityId` — surfaced under
+ * the entity detail so they stay reachable after being filtered out of the main Devices list.
+ */
+export function useDeviceDiagnostics(entityId: string): HassEntity[] {
+  const entities = useEntityStore((s) => s.entities);
+  const devices = useEntityStore((s) => s.devices);
+  const categories = useEntityStore((s) => s.categories);
+  return useMemo(() => {
+    const deviceId = devices.entityToDevice[entityId];
+    if (!deviceId) return [];
+    const record = devices.devices[deviceId];
+    if (!record) return [];
+    return record.entityIds
+      .filter((id) => id !== entityId && id in categories)
+      .map((id) => entities[id])
+      .filter((e): e is HassEntity => e !== undefined);
+  }, [entityId, entities, devices, categories]);
+}
 
 /** Device records resolved from the HA registries (Devices hub registry view). */
 export const useDeviceRecords = (): DeviceRecord[] =>
