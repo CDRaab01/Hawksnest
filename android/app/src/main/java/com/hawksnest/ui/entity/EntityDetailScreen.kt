@@ -18,6 +18,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -34,9 +35,11 @@ import com.hawksnest.core.logic.relativeTime
 import com.hawksnest.core.logic.zwaveHealth
 import com.hawksnest.ui.components.DeviceControlCard
 import com.hawksnest.ui.components.PanelCard
+import com.hawksnest.ui.components.PulseButton
 import com.hawksnest.ui.components.SectionHeader
 import com.hawksnest.ui.components.Sparkline
 import com.hawksnest.ui.theme.HawksnestTheme
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
@@ -64,6 +67,8 @@ fun EntityDetailScreen(
     val hours by viewModel.hours.collectAsState()
     val history by viewModel.history.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
+    val isZWave by viewModel.isZWave.collectAsState()
+    val maintenanceMsg by viewModel.maintenanceMsg.collectAsState()
     val pulse = HawksnestTheme.pulse
     val channel = domainChannel(domainOf(viewModel.entityId), pulse)
     // Z-Wave node diagnostics read from the device's diagnostic siblings, shown as
@@ -75,6 +80,14 @@ fun EntityDetailScreen(
         diagnostics.filterNot { isZWaveDiagnostic(it.entityId) }
     }
     val hasZWave = zwave.nodeStatus != null || zwave.lastSeenMs != null || zwave.rttMs != null
+
+    // Auto-clear the maintenance result a few seconds after it lands.
+    LaunchedEffect(maintenanceMsg) {
+        if (maintenanceMsg != null) {
+            delay(4000)
+            viewModel.clearMaintenanceMsg()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -174,6 +187,24 @@ fun EntityDetailScreen(
                     }
                     zwave.lastSeenMs?.let { ZWaveRow("Last seen", relativeTime(it)) }
                     zwave.rttMs?.let { ZWaveRow("Signal (round-trip)", "$it ms") }
+                }
+            }
+
+            if (isZWave) {
+                SectionHeader("Maintenance", channel = channel)
+                PanelCard {
+                    Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
+                        PulseButton("Ping", onClick = { viewModel.ping() }, tonal = true, modifier = Modifier.weight(1f))
+                        PulseButton("Refresh", onClick = { viewModel.refresh() }, tonal = true, modifier = Modifier.weight(1f))
+                    }
+                    maintenanceMsg?.let { msg ->
+                        Text(
+                            msg,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
+                        )
+                    }
                 }
             }
 

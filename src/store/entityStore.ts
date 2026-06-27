@@ -206,6 +206,10 @@ export const useZWaveControllerOffline = (): boolean =>
     return zwaveControllerOffline(zwave);
   });
 
+/** True when the entity is owned by the Z-Wave JS integration (enables node maintenance actions). */
+export const useIsZWaveEntity = (entityId: string): boolean =>
+  useEntityStore((s) => s.zwaveEntityIds.includes(entityId));
+
 /** The device that owns an entity, if the registry placed it on one. */
 export const useEntityDevice = (entityId: string): DeviceRecord | undefined =>
   useEntityStore((s) => {

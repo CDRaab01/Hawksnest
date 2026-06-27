@@ -11,7 +11,12 @@ import { resolveIcon, resolveName } from "../lib/resolve";
 import { domainOf } from "../lib/ha";
 import { zwaveHealth, isZWaveDiagnostic } from "../lib/deviceHealth";
 import { relativeTime } from "../lib/relativeTime";
-import { useEntity, useDeviceDiagnostics } from "../store/entityStore";
+import { ZWaveMaintenance } from "../components/devices/ZWaveMaintenance";
+import {
+  useEntity,
+  useDeviceDiagnostics,
+  useIsZWaveEntity,
+} from "../store/entityStore";
 import { fetchHistory } from "../store/connection";
 import type { HistoryPoint } from "../store/source";
 
@@ -64,6 +69,8 @@ export function EntityScreen() {
   const entity = useEntity(decoded);
   // Diagnostics for this device, filtered out of the main Devices list but kept reachable here.
   const diagnostics = useDeviceDiagnostics(decoded);
+  // Z-Wave entities get node-maintenance actions (ping / refresh).
+  const isZWave = useIsZWaveEntity(decoded);
 
   const [hours, setHours] = useState(24);
   const [points, setPoints] = useState<HistoryPoint[]>([]);
@@ -231,6 +238,13 @@ export function EntityScreen() {
               </div>
             )}
           </PanelCard>
+        </section>
+      )}
+
+      {isZWave && (
+        <section className="space-y-md">
+          <SectionHeader label="Maintenance" channel="effort" />
+          <ZWaveMaintenance entityId={decoded} />
         </section>
       )}
 
