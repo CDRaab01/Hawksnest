@@ -76,11 +76,12 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.uiState.collectAsState()
-    // One ticking bucket shared by every tile so all snapshots refresh on the same ~5s beat.
+    // One ticking bucket shared by every tile so all snapshots refresh on the same ~10s beat
+    // (matches the web SnapshotBucketProvider; Ring rate-limits the proxy, so fewer fetches help).
     val bucket by produceState(0L) {
         while (true) {
-            value = System.currentTimeMillis() / 5000
-            delay(5000)
+            value = System.currentTimeMillis() / 10_000
+            delay(10_000)
         }
     }
     var lightbox by remember { mutableStateOf<CameraUi?>(null) }
