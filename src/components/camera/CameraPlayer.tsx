@@ -13,6 +13,7 @@ import { LivePlayer } from "../LivePlayer";
 import { HlsPlayer } from "../HlsPlayer";
 import { CameraSwitcher } from "./CameraSwitcher";
 import { SirenButton } from "./SirenButton";
+import { TalkButton } from "./TalkButton";
 import { Timeline24h } from "./Timeline24h";
 import { TransportBar } from "./TransportBar";
 
@@ -140,6 +141,7 @@ export function CameraPlayer({
       <div className="flex items-center justify-between gap-md">
         <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
         <div className="flex items-center gap-sm">
+          {isRing && isLive && <TalkButton src={cameraName} />}
           {camera.sirenSwitchId && <SirenButton entityId={camera.sirenSwitchId} />}
           <span
             className={[
