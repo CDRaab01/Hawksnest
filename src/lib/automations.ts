@@ -21,8 +21,9 @@ import { domainOf } from "./ha";
 /** A raw HA state string, e.g. "armed_home", "on", "locked". */
 export type StateValue = string;
 
-/** The single state trigger that fires the rule. */
-export interface RuleTrigger {
+/** A device/state trigger: fire when an entity reaches a state. */
+export interface StateTrigger {
+  kind: "state";
   entityId: string;
   /** Fire when the entity reaches this state. */
   to: StateValue;
@@ -31,6 +32,38 @@ export interface RuleTrigger {
   /** Optional debounce: state must hold for this many seconds (`for:`). */
   forSeconds?: number;
 }
+
+/** A time-of-day trigger: fire at a wall-clock time (`HH:MM`, 24h). */
+export interface TimeTrigger {
+  kind: "time";
+  at: string;
+}
+
+/** A sun trigger: fire at sunrise/sunset, optionally offset by minutes (±). */
+export interface SunTrigger {
+  kind: "sun";
+  event: "sunrise" | "sunset";
+  /** Minutes relative to the event; negative = before, positive = after. */
+  offsetMinutes?: number;
+}
+
+/** A presence trigger: fire when a person enters or leaves the home zone. */
+export interface PresenceTrigger {
+  kind: "presence";
+  personEntityId: string;
+  event: "enter" | "leave";
+  /** HA zone name without the `zone.` prefix; defaults to "home". */
+  zone?: string;
+}
+
+/**
+ * The single trigger that fires the rule (IFTTT-style "if this"). A discriminated
+ * union on `kind`: a device state change, a time of day, a sun event, or presence.
+ */
+export type RuleTrigger = StateTrigger | TimeTrigger | SunTrigger | PresenceTrigger;
+
+/** The trigger discriminant, e.g. for the builder's type picker. */
+export type TriggerKind = RuleTrigger["kind"];
 
 /** An optional guard. Either an entity-state check or a time-of-day window. */
 export interface RuleCondition {
@@ -191,6 +224,70 @@ export const DOMAIN_LABEL: Record<string, string> = {
 /** Domains that can be targeted by an action, in picker order. */
 export const ACTION_DOMAINS = Object.keys(ACTION_VERBS);
 
+// --- trigger vocab ----------------------------------------------------------
+
+export interface TriggerTypeOption {
+  kind: TriggerKind;
+  label: string;
+  hint: string;
+}
+
+/** The trigger types offered by the builder, in picker order. */
+export const TRIGGER_TYPES: TriggerTypeOption[] = [
+  { kind: "state", label: "A device changes", hint: "When a device reaches a state" },
+  { kind: "time", label: "At a time", hint: "At a specific time of day" },
+  { kind: "sun", label: "Sun", hint: "At sunrise or sunset, with an offset" },
+  { kind: "presence", label: "Someone comes/goes", hint: "When a person arrives or leaves" },
+];
+
+/** Sun events for the sun-trigger picker. */
+export const SUN_EVENTS: StateOption[] = [
+  { value: "sunrise", label: "Sunrise" },
+  { value: "sunset", label: "Sunset" },
+];
+
+/** Enter/leave options for the presence-trigger picker. */
+export const PRESENCE_EVENTS: StateOption[] = [
+  { value: "enter", label: "Arrives home" },
+  { value: "leave", label: "Leaves home" },
+];
+
+/** Domains whose entities can drive a presence trigger, best first. */
+export const PRESENCE_DOMAINS = ["person", "device_tracker"];
+
+// --- sun offset helpers -----------------------------------------------------
+
+/** Signed minutes → HA offset string `±HH:MM:SS`. */
+export function minutesToOffset(minutes: number): string {
+  const sign = minutes < 0 ? "-" : "+";
+  const abs = Math.abs(Math.trunc(minutes));
+  const hh = Math.floor(abs / 60);
+  const mm = abs % 60;
+  const p = (n: number) => n.toString().padStart(2, "0");
+  return `${sign}${p(hh)}:${p(mm)}:00`;
+}
+
+/** HA offset (`±HH:MM:SS`, or bare integer seconds) → signed minutes. */
+export function offsetToMinutes(offset: unknown): number {
+  if (typeof offset === "number") return Math.round(offset / 60);
+  if (typeof offset !== "string" || offset.trim() === "") return 0;
+  const m = offset.trim().match(/^([+-]?)(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return 0;
+  const sign = m[1] === "-" ? -1 : 1;
+  return sign * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10));
+}
+
+/** Pad a wall-clock `HH:MM` to HA's `HH:MM:SS`. */
+function padTime(at: string): string {
+  return at.split(":").length === 2 ? `${at}:00` : at;
+}
+
+/** Strip trailing `:SS` from an `HH:MM:SS` so it round-trips to the `HH:MM` input. */
+function stripTimeSeconds(at: string): string {
+  const m = at.match(/^(\d{1,2}:\d{2})(?::\d{2})?$/);
+  return m ? m[1] : at;
+}
+
 export function stateOptionsFor(domain: string): StateOption[] {
   return STATE_OPTIONS[domain] ?? [];
 }
@@ -239,24 +336,56 @@ export function newRule(): Rule {
   return {
     id: newRuleId(),
     alias: "",
-    trigger: { entityId: "", to: "" },
+    trigger: { kind: "state", entityId: "", to: "" },
     conditions: [],
     actions: [{ domain: "lock", verb: "lock", targetEntityIds: [] }],
     mode: "single",
   };
 }
 
+/** A blank trigger of a given kind, used when the builder switches trigger type. */
+export function newTriggerOfKind(kind: TriggerKind): RuleTrigger {
+  switch (kind) {
+    case "state":
+      return { kind: "state", entityId: "", to: "" };
+    case "time":
+      return { kind: "time", at: "" };
+    case "sun":
+      return { kind: "sun", event: "sunset", offsetMinutes: 0 };
+    case "presence":
+      return { kind: "presence", personEntityId: "", event: "enter", zone: "home" };
+  }
+}
+
 // --- Rule <-> HA config mapping ---------------------------------------------
 
 function triggerToHa(t: RuleTrigger): Record<string, unknown> {
-  const out: Record<string, unknown> = {
-    platform: "state",
-    entity_id: t.entityId,
-    to: t.to,
-  };
-  if (t.from) out.from = t.from;
-  if (t.forSeconds && t.forSeconds > 0) out.for = { seconds: t.forSeconds };
-  return out;
+  switch (t.kind) {
+    case "state": {
+      const out: Record<string, unknown> = {
+        platform: "state",
+        entity_id: t.entityId,
+        to: t.to,
+      };
+      if (t.from) out.from = t.from;
+      if (t.forSeconds && t.forSeconds > 0) out.for = { seconds: t.forSeconds };
+      return out;
+    }
+    case "time":
+      return { platform: "time", at: padTime(t.at) };
+    case "sun": {
+      const out: Record<string, unknown> = { platform: "sun", event: t.event };
+      if (t.offsetMinutes && t.offsetMinutes !== 0) out.offset = minutesToOffset(t.offsetMinutes);
+      return out;
+    }
+    case "presence":
+      return {
+        platform: "zone",
+        entity_id: t.personEntityId,
+        zone: `zone.${t.zone ?? "home"}`,
+        event: t.event,
+      };
+  }
 }
 
 function conditionToHa(c: RuleCondition): Record<string, unknown> {
@@ -317,17 +446,47 @@ function parseTrigger(raw: unknown): RuleTrigger | null {
   if (!isRecord(raw)) return null;
   // Accept classic `platform` and modern `trigger` keys.
   const platform = str(raw.platform) ?? str(raw.trigger);
-  if (platform !== "state") return null;
-  const entityId = singleEntityId(raw.entity_id);
-  const to = str(raw.to);
-  if (!entityId || !to) return null;
-  const trigger: RuleTrigger = { entityId, to };
-  const from = str(raw.from);
-  if (from) trigger.from = from;
-  if (isRecord(raw.for) && typeof raw.for.seconds === "number") {
-    trigger.forSeconds = raw.for.seconds;
+  switch (platform) {
+    case "state": {
+      const entityId = singleEntityId(raw.entity_id);
+      const to = str(raw.to);
+      if (!entityId || !to) return null;
+      const trigger: StateTrigger = { kind: "state", entityId, to };
+      const from = str(raw.from);
+      if (from) trigger.from = from;
+      if (isRecord(raw.for) && typeof raw.for.seconds === "number") {
+        trigger.forSeconds = raw.for.seconds;
+      }
+      return trigger;
+    }
+    case "time": {
+      // Only a single wall-clock time; an array of times or an input_datetime
+      // entity falls outside the V1 subset.
+      const at = str(raw.at);
+      if (!at) return null;
+      return { kind: "time", at: stripTimeSeconds(at) };
+    }
+    case "sun": {
+      const event = str(raw.event);
+      if (event !== "sunrise" && event !== "sunset") return null;
+      const trigger: SunTrigger = { kind: "sun", event };
+      const minutes = offsetToMinutes(raw.offset);
+      if (minutes !== 0) trigger.offsetMinutes = minutes;
+      return trigger;
+    }
+    case "zone": {
+      const personEntityId = singleEntityId(raw.entity_id);
+      const event = str(raw.event);
+      const zone = str(raw.zone);
+      if (!personEntityId) return null;
+      if (event !== "enter" && event !== "leave") return null;
+      // V1 only models the built-in home zone.
+      if (zone !== "zone.home" && zone !== "home") return null;
+      return { kind: "presence", personEntityId, event, zone: "home" };
+    }
+    default:
+      return null;
   }
-  return trigger;
 }
 
 function parseCondition(raw: unknown): RuleCondition | null {
@@ -412,7 +571,30 @@ export function configToRule(config: AutomationConfig): Rule | null {
   };
 }
 
-/** Domain of the trigger entity (for choosing its state options). */
+/** Domain of a state trigger's entity (for choosing its state options); "" otherwise. */
 export function triggerDomain(rule: Rule): string {
-  return rule.trigger.entityId ? domainOf(rule.trigger.entityId) : "";
+  const t = rule.trigger;
+  return t.kind === "state" && t.entityId ? domainOf(t.entityId) : "";
+}
+
+/** A one-line, human-readable summary of a rule's trigger, for the list. */
+export function describeTrigger(rule: Rule): string {
+  const t = rule.trigger;
+  switch (t.kind) {
+    case "state":
+      return t.entityId ? `When ${t.entityId} → ${t.to}` : "When a device changes";
+    case "time":
+      return t.at ? `At ${t.at}` : "At a time of day";
+    case "sun": {
+      const base = t.event === "sunrise" ? "At sunrise" : "At sunset";
+      const off = t.offsetMinutes ?? 0;
+      if (off === 0) return base;
+      const mins = Math.abs(off);
+      return `${base} (${off < 0 ? `${mins}m before` : `${mins}m after`})`;
+    }
+    case "presence":
+      return t.personEntityId
+        ? `When ${t.personEntityId} ${t.event === "enter" ? "arrives home" : "leaves home"}`
+        : "When someone arrives or leaves";
+  }
 }

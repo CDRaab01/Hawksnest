@@ -93,6 +93,21 @@ export const useAutomationEntities = (): HassEntity[] =>
     ),
   );
 
+/**
+ * Entities that can drive a presence trigger — every `person.*`, or all
+ * `device_tracker.*` as a fallback when no `person` entities exist. Powers the
+ * automation builder's "who arrives/leaves" picker.
+ */
+export const usePresenceEntities = (): HassEntity[] =>
+  useEntityStore(
+    useShallow((s) => {
+      const all = Object.values(s.entities);
+      const people = all.filter((e) => domainOf(e.entity_id) === "person");
+      if (people.length > 0) return people;
+      return all.filter((e) => domainOf(e.entity_id) === "device_tracker");
+    }),
+  );
+
 /** All entities grouped by area, memoized on the underlying refs. */
 export function useEntitiesByArea(): AreaGroup[] {
   const entities = useEntityStore((s) => s.entities);

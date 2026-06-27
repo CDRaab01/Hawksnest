@@ -161,6 +161,30 @@ export const entities: HassEntity[] = [
     attributes: { friendly_name: "Garage Light" },
     last_changed: ago(180),
   },
+  // People + the sun: not "devices" (filtered from the Devices hub), but they
+  // populate the automation builder's presence and sunrise/sunset pickers.
+  {
+    entity_id: "person.alex",
+    state: "home",
+    attributes: { friendly_name: "Alex" },
+    last_changed: ago(95),
+  },
+  {
+    entity_id: "person.sam",
+    state: "not_home",
+    attributes: { friendly_name: "Sam" },
+    last_changed: ago(220),
+  },
+  {
+    entity_id: "sun.sun",
+    state: "above_horizon",
+    attributes: {
+      friendly_name: "Sun",
+      next_rising: ago(-540),
+      next_setting: ago(-180),
+    },
+    last_changed: ago(300),
+  },
 ];
 
 /** Area assignment — a registry concern, kept separate from state (see ha.ts). */

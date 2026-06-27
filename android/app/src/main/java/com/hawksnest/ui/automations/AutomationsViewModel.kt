@@ -28,6 +28,8 @@ data class AutomationUi(
     val name: String,
     val enabled: Boolean,
     val lastTriggered: String,
+    /** HA Config-API id (from the entity's `id` attribute); null → not editable in Hawksnest. */
+    val configId: String?,
 )
 
 /**
@@ -53,6 +55,7 @@ class AutomationsViewModel @Inject constructor(
                         name = resolveName(e, overrides),
                         enabled = e.state == "on",
                         lastTriggered = lastTriggeredLabel(e),
+                        configId = e.stringAttr("id"),
                     )
                 }
                 .sortedBy { it.name.lowercase() }
@@ -77,6 +80,13 @@ class AutomationsViewModel @Inject constructor(
     fun run(entityId: String) {
         viewModelScope.launch {
             connection.callService("automation", "trigger", ServiceData(entityId = entityId))
+        }
+    }
+
+    /** Delete an automation via the Config API (live HA REST; in-memory in demo). */
+    fun delete(configId: String) {
+        viewModelScope.launch {
+            runCatching { connection.deleteAutomationConfig(configId) }
         }
     }
 }

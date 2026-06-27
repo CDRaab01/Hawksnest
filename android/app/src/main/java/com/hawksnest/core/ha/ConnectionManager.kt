@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import okhttp3.OkHttpClient
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -55,6 +56,19 @@ class ConnectionManager @Inject constructor(
     /** Perform a service call through the active source (non-optimistic — the echo reconciles). */
     suspend fun callService(domain: String, service: String, data: ServiceData) {
         current?.callService(domain, service, data)
+    }
+
+    /** Read one automation's Config-API config (live HA REST; in-memory in demo). Null if absent. */
+    suspend fun getAutomationConfig(id: String): JsonObject? = current?.getAutomationConfig(id)
+
+    /** Create/update an automation via the Config API (live HA REST; in-memory in demo). */
+    suspend fun saveAutomationConfig(config: JsonObject) {
+        current?.saveAutomationConfig(config)
+    }
+
+    /** Delete an automation via the Config API (live HA REST; in-memory in demo). */
+    suspend fun deleteAutomationConfig(id: String) {
+        current?.deleteAutomationConfig(id)
     }
 
     /** Recent state history for one entity (live HA over WS; synthesized in demo). */

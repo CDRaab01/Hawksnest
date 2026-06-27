@@ -1,5 +1,5 @@
-import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Pencil, Play, Plus, Power, Workflow } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Pencil, Play, Plus, Power, Workflow } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
 import { SectionHeader } from "../components/SectionHeader";
@@ -116,13 +116,6 @@ export function AutomationsScreen() {
 
   return (
     <div className="space-y-xl">
-      <Link
-        to="/"
-        className="inline-flex items-center gap-xs text-body text-ink-dim transition-colors duration-fast hover:text-ink"
-      >
-        <ArrowLeft size={16} /> Home
-      </Link>
-
       <section className="space-y-md">
         <SectionHeader
           label="Automations"

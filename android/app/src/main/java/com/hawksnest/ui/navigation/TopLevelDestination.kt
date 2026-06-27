@@ -1,22 +1,23 @@
 package com.hawksnest.ui.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ToggleOn
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ToggleOn
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * The bottom-bar destinations, in on-screen order: Devices · Rooms · HOME (large center circle) ·
- * History · Settings. Cameras fold into Home, so there's no Cameras tab. [center] marks the
- * prominent raised Home circle.
+ * History · Automations. Cameras fold into Home, so there's no Cameras tab; Settings moved to the
+ * gear on the Home header so Automations could take a primary tab. [center] marks the prominent
+ * raised Home circle.
  */
 enum class TopLevelDestination(
     val route: String,
@@ -55,11 +56,11 @@ enum class TopLevelDestination(
         icon = Icons.Filled.History,
         iconOutlined = Icons.Outlined.History,
     ),
-    SETTINGS(
-        route = Screen.Settings.route,
-        navRoute = Screen.Settings.route,
-        label = "Settings",
-        icon = Icons.Filled.Settings,
-        iconOutlined = Icons.Outlined.Settings,
+    AUTOMATIONS(
+        route = Screen.Automations.route,
+        navRoute = Screen.Automations.route,
+        label = "Automations",
+        icon = Icons.Filled.Bolt,
+        iconOutlined = Icons.Outlined.Bolt,
     ),
 }

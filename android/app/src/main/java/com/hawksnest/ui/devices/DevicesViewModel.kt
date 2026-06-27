@@ -6,6 +6,7 @@ import com.hawksnest.config.overrides
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.ha.domainOf
+import com.hawksnest.core.logic.NON_DEVICE_DOMAINS
 import com.hawksnest.core.logic.domainToCard
 import com.hawksnest.core.logic.groupByArea
 import com.hawksnest.core.logic.resolveName
@@ -31,8 +32,11 @@ class DevicesViewModel @Inject constructor(
     val groups: StateFlow<List<DeviceGroup>> =
         combine(state.entities, state.areas, state.entityCategories) { entities, areas, categories ->
             // Hide HA config/diagnostic entities (battery, last-activity, volume, motion-detection
-            // toggles…) from the main list — they live under each device's detail view instead.
-            val primary = entities.values.filter { it.entityId !in categories }
+            // toggles…) from the main list — they live under each device's detail view instead. Also
+            // drop non-device domains (automations have their own tab; people/zones/sun are infra).
+            val primary = entities.values.filter {
+                it.entityId !in categories && domainOf(it.entityId) !in NON_DEVICE_DOMAINS
+            }
             groupByArea(primary, areas).map { g ->
                 DeviceGroup(
                     area = g.area,

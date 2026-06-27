@@ -2,6 +2,7 @@ package com.hawksnest.core.ha
 
 import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.LogEvent
+import kotlinx.serialization.json.JsonObject
 
 /** One historical sample for an entity. [t] is epoch milliseconds; [state] is the raw HA state. */
 data class HistoryPoint(val t: Long, val state: String)
@@ -55,6 +56,23 @@ interface Source {
     /** Fetch the logbook over `[startMs, endMs]`, optionally narrowed to specific entities. */
     suspend fun fetchLogbook(startMs: Long, endMs: Long, entityIds: List<String>? = null): List<LogEvent> {
         throw UnsupportedOperationException("This source cannot provide a logbook.")
+    }
+
+    /**
+     * Automation CRUD against HA's Config API (`/api/config/automation/config`). The live source uses
+     * authenticated REST; the fixture source simulates it in memory. Hawksnest only *edits*
+     * automations here — HA itself runs them. Throw if the source can't manage automations.
+     */
+    suspend fun getAutomationConfig(id: String): JsonObject? {
+        throw UnsupportedOperationException("This source cannot manage automations.")
+    }
+
+    suspend fun saveAutomationConfig(config: JsonObject) {
+        throw UnsupportedOperationException("This source cannot manage automations.")
+    }
+
+    suspend fun deleteAutomationConfig(id: String) {
+        throw UnsupportedOperationException("This source cannot manage automations.")
     }
 
     /**

@@ -11,8 +11,13 @@ import { domainOf } from "../lib/ha";
 import {
   ACTION_DOMAINS,
   DOMAIN_LABEL,
+  PRESENCE_DOMAINS,
+  PRESENCE_EVENTS,
+  SUN_EVENTS,
+  TRIGGER_TYPES,
   configToRule,
   newRule,
+  newTriggerOfKind,
   ruleToConfig,
   stateOptionsFor,
   verbsFor,
@@ -20,8 +25,10 @@ import {
   type RuleAction,
   type RuleCondition,
   type RuleTrigger,
+  type TriggerKind,
 } from "../lib/automations";
-import { useEntityStore } from "../store/entityStore";
+import type { HassEntity } from "../lib/ha";
+import { useEntityStore, usePresenceEntities } from "../store/entityStore";
 import {
   deleteAutomationConfig,
   getAutomationConfig,
@@ -38,11 +45,13 @@ function EntitySelect({
   onChange,
   ariaLabel,
   filterDomain,
+  filterDomains,
 }: {
   value: string;
   onChange: (id: string) => void;
   ariaLabel: string;
   filterDomain?: string;
+  filterDomains?: string[];
 }) {
   const entities = useEntityStore((s) => s.entities);
   const areas = useEntityStore((s) => s.areas);
@@ -50,6 +59,7 @@ function EntitySelect({
     () => groupByArea(Object.values(entities), areas),
     [entities, areas],
   );
+  const allow = filterDomains ?? (filterDomain ? [filterDomain] : null);
   return (
     <select
       aria-label={ariaLabel}
@@ -59,8 +69,8 @@ function EntitySelect({
     >
       <option value="">Select a device…</option>
       {groups.map((group) => {
-        const opts = filterDomain
-          ? group.entities.filter((e) => domainOf(e.entity_id) === filterDomain)
+        const opts = allow
+          ? group.entities.filter((e) => allow.includes(domainOf(e.entity_id)))
           : group.entities;
         if (opts.length === 0) return null;
         return (
@@ -118,6 +128,125 @@ function StateInput({
   );
 }
 
+/** Per-type trigger fields — the "if this" half of the IFTTT-style builder. */
+function TriggerFields({
+  trigger,
+  onChange,
+  presenceEntities,
+}: {
+  trigger: RuleTrigger;
+  onChange: (t: RuleTrigger) => void;
+  presenceEntities: HassEntity[];
+}) {
+  switch (trigger.kind) {
+    case "state":
+      return (
+        <>
+          <label className="block">
+            <span className="caption-label">Device</span>
+            <EntitySelect
+              ariaLabel="Trigger device"
+              value={trigger.entityId}
+              onChange={(entityId) => onChange({ kind: "state", entityId, to: "" })}
+            />
+          </label>
+          <label className="block">
+            <span className="caption-label">Reaches state</span>
+            <StateInput
+              ariaLabel="Trigger state"
+              domain={trigger.entityId ? domainOf(trigger.entityId) : ""}
+              value={trigger.to}
+              onChange={(to) => onChange({ ...trigger, to })}
+            />
+          </label>
+        </>
+      );
+    case "time":
+      return (
+        <label className="block">
+          <span className="caption-label">At time</span>
+          <input
+            type="time"
+            aria-label="Trigger time"
+            value={trigger.at}
+            onChange={(e) => onChange({ kind: "time", at: e.target.value })}
+            className={FIELD}
+          />
+        </label>
+      );
+    case "sun":
+      return (
+        <div className="flex flex-wrap gap-md">
+          <label className="min-w-0 flex-1">
+            <span className="caption-label">Event</span>
+            <select
+              aria-label="Sun event"
+              value={trigger.event}
+              onChange={(e) =>
+                onChange({ ...trigger, event: e.target.value as "sunrise" | "sunset" })
+              }
+              className={FIELD}
+            >
+              {SUN_EVENTS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-0 flex-1">
+            <span className="caption-label">Offset (min, − before / + after)</span>
+            <input
+              type="number"
+              aria-label="Sun offset minutes"
+              value={trigger.offsetMinutes ?? 0}
+              onChange={(e) =>
+                onChange({ ...trigger, offsetMinutes: Math.trunc(Number(e.target.value)) || 0 })
+              }
+              className={FIELD}
+            />
+          </label>
+        </div>
+      );
+    case "presence":
+      return (
+        <>
+          <label className="block">
+            <span className="caption-label">Person</span>
+            <EntitySelect
+              ariaLabel="Trigger person"
+              value={trigger.personEntityId}
+              onChange={(personEntityId) => onChange({ ...trigger, personEntityId })}
+              filterDomains={PRESENCE_DOMAINS}
+            />
+            {presenceEntities.length === 0 && (
+              <p className="mt-xs font-body text-caption text-ink-faint">
+                No people or device trackers found in Home Assistant.
+              </p>
+            )}
+          </label>
+          <label className="block">
+            <span className="caption-label">When they</span>
+            <select
+              aria-label="Presence event"
+              value={trigger.event}
+              onChange={(e) =>
+                onChange({ ...trigger, event: e.target.value as "enter" | "leave" })
+              }
+              className={FIELD}
+            >
+              {PRESENCE_EVENTS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      );
+  }
+}
+
 /**
  * Automation editor — turns the friendly Rule form into a real HA automation
  * (`ruleToConfig`) and writes it via the Config API. Opening an existing one
@@ -131,6 +260,7 @@ export function AutomationEditScreen() {
 
   // Live entity map (used for the per-action target lists).
   const allEntities = useEntityStore((s) => s.entities);
+  const presenceEntities = usePresenceEntities();
 
   const [draft, setDraft] = useState<Rule>(() => newRule());
   const [load, setLoad] = useState<"loading" | "ready" | "unsupported" | "error">(
@@ -172,8 +302,9 @@ export function AutomationEditScreen() {
   }, [id, isNew]);
 
   // --- draft mutators -------------------------------------------------------
-  const patchTrigger = (p: Partial<RuleTrigger>) =>
-    setDraft((d) => ({ ...d, trigger: { ...d.trigger, ...p } }));
+  const setTrigger = (trigger: RuleTrigger) => setDraft((d) => ({ ...d, trigger }));
+  const setTriggerKind = (kind: TriggerKind) =>
+    setDraft((d) => (d.trigger.kind === kind ? d : { ...d, trigger: newTriggerOfKind(kind) }));
 
   const addCondition = () =>
     setDraft((d) => ({
@@ -225,8 +356,15 @@ export function AutomationEditScreen() {
   async function save() {
     setSaveError(null);
     if (!draft.alias.trim()) return setSaveError("Give the automation a name.");
-    if (!draft.trigger.entityId || !draft.trigger.to) {
+    const t = draft.trigger;
+    if (t.kind === "state" && (!t.entityId || !t.to)) {
       return setSaveError("Pick a trigger device and the state that should fire it.");
+    }
+    if (t.kind === "time" && !t.at) {
+      return setSaveError("Pick the time the automation should fire.");
+    }
+    if (t.kind === "presence" && !t.personEntityId) {
+      return setSaveError("Pick the person whose arrival or departure fires this.");
     }
     if (draft.actions.length === 0 || draft.actions.some((a) => a.targetEntityIds.length === 0)) {
       return setSaveError("Every action needs at least one target device.");
@@ -314,7 +452,7 @@ export function AutomationEditScreen() {
     );
   }
 
-  const triggerDomainName = draft.trigger.entityId ? domainOf(draft.trigger.entityId) : "";
+  const triggerHint = TRIGGER_TYPES.find((t) => t.kind === draft.trigger.kind)?.hint;
 
   return (
     <div className="space-y-xl">
@@ -340,23 +478,40 @@ export function AutomationEditScreen() {
       <section className="space-y-md">
         <SectionHeader label="When this happens" channel="effort" />
         <PanelCard className="space-y-md p-lg">
-          <label className="block">
-            <span className="caption-label">Device</span>
-            <EntitySelect
-              ariaLabel="Trigger device"
-              value={draft.trigger.entityId}
-              onChange={(entityId) => patchTrigger({ entityId, to: "" })}
-            />
-          </label>
-          <label className="block">
-            <span className="caption-label">Reaches state</span>
-            <StateInput
-              ariaLabel="Trigger state"
-              domain={triggerDomainName}
-              value={draft.trigger.to}
-              onChange={(to) => patchTrigger({ to })}
-            />
-          </label>
+          <div>
+            <span className="caption-label">Trigger type</span>
+            <div className="mt-xs flex flex-wrap gap-xs">
+              {TRIGGER_TYPES.map((tt) => {
+                const active = draft.trigger.kind === tt.kind;
+                return (
+                  <button
+                    key={tt.kind}
+                    type="button"
+                    aria-pressed={active}
+                    aria-label={`Trigger type ${tt.label}`}
+                    onClick={() => setTriggerKind(tt.kind)}
+                    className={[
+                      "rounded-sm border px-md py-sm font-body text-body transition-colors duration-fast",
+                      active
+                        ? "border-effort bg-effort/10 text-effort"
+                        : "border-hairline text-ink-dim hover:text-ink",
+                    ].join(" ")}
+                  >
+                    {tt.label}
+                  </button>
+                );
+              })}
+            </div>
+            {triggerHint && (
+              <p className="mt-xs font-body text-caption text-ink-faint">{triggerHint}</p>
+            )}
+          </div>
+
+          <TriggerFields
+            trigger={draft.trigger}
+            onChange={setTrigger}
+            presenceEntities={presenceEntities}
+          />
         </PanelCard>
       </section>
 

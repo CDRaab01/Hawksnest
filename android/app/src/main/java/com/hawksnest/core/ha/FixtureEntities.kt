@@ -1,8 +1,12 @@
 package com.hawksnest.core.ha
 
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 
 private fun ent(id: String, state: String, attrs: JsonObjectBuilder.() -> Unit = {}): HassEntity =
     HassEntity(entityId = id, state = state, attributes = buildJsonObject(attrs))
@@ -83,6 +87,63 @@ val fixtureEntities: List<HassEntity> = listOf(
     },
     ent("automation.motion_porch_light", "off") {
         put("friendly_name", "Porch light on motion after sunset"); put("id", "1700000002")
+    },
+    // People + the sun: not "devices" (filtered from the Devices hub), but they populate the
+    // automation builder's presence and sunrise/sunset pickers.
+    ent("person.alex", "home") { put("friendly_name", "Alex") },
+    ent("person.sam", "not_home") { put("friendly_name", "Sam") },
+    ent("sun.sun", "above_horizon") {
+        put("friendly_name", "Sun")
+        put("next_rising", "2026-06-28T09:41:00+00:00")
+        put("next_setting", "2026-06-28T00:18:00+00:00")
+    },
+)
+
+/**
+ * The editable configs behind the two demo `automation.*` entities, so the builder can open and
+ * round-trip them in demo mode (the live source reads these from HA's Config API instead). Mirrors
+ * the web fixture source's in-memory automation map.
+ */
+val fixtureAutomationConfigs: Map<String, JsonObject> = mapOf(
+    "1700000001" to buildJsonObject {
+        put("id", "1700000001")
+        put("alias", "When armed away, lock all doors")
+        put("mode", "single")
+        putJsonArray("trigger") {
+            add(buildJsonObject {
+                put("platform", "state")
+                put("entity_id", "alarm_control_panel.home")
+                put("to", "armed_away")
+            })
+        }
+        putJsonArray("condition") {}
+        putJsonArray("action") {
+            add(buildJsonObject {
+                put("service", "lock.lock")
+                putJsonObject("target") {
+                    putJsonArray("entity_id") { add("lock.front_door_lock"); add("lock.back_door_lock") }
+                }
+            })
+        }
+    },
+    "1700000002" to buildJsonObject {
+        put("id", "1700000002")
+        put("alias", "Porch light on motion after sunset")
+        put("mode", "single")
+        putJsonArray("trigger") {
+            add(buildJsonObject {
+                put("platform", "state")
+                put("entity_id", "binary_sensor.backyard_motion")
+                put("to", "on")
+            })
+        }
+        putJsonArray("condition") {}
+        putJsonArray("action") {
+            add(buildJsonObject {
+                put("service", "light.turn_on")
+                putJsonObject("target") { putJsonArray("entity_id") { add("light.basement") } }
+            })
+        }
     },
 )
 

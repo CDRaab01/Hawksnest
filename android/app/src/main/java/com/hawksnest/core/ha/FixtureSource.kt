@@ -1,9 +1,14 @@
 package com.hawksnest.core.ha
 
+import com.hawksnest.core.automations.slugify
 import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.DEMO_CLIP_URI
 import com.hawksnest.core.logic.LogEvent
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
 import javax.inject.Inject
 import kotlin.math.roundToInt
 
@@ -14,9 +19,20 @@ import kotlin.math.roundToInt
  */
 class FixtureSource @Inject constructor(private val state: HaState) : Source {
 
+    /** In-memory automation configs (id → config) + their synthetic entity ids, mirroring HA. */
+    private val automationConfigs = mutableMapOf<String, JsonObject>()
+    private val automationEntityIds = mutableMapOf<String, String>()
+
     override suspend fun start() {
         state.setBaseUrl("")
         state.setSnapshot(fixtureEntities.associateBy { it.entityId }, fixtureAreaRegistry)
+        // Seed the editable configs behind the demo automation entities so the builder round-trips.
+        automationConfigs.clear()
+        automationConfigs.putAll(fixtureAutomationConfigs)
+        automationEntityIds.clear()
+        fixtureEntities.filter { domainOf(it.entityId) == "automation" }.forEach { e ->
+            e.stringAttr("id")?.let { automationEntityIds[it] = e.entityId }
+        }
         state.setStatus(ConnectionStatus.DEMO)
     }
 
@@ -87,6 +103,35 @@ class FixtureSource @Inject constructor(private val state: HaState) : Source {
                 state = e.state,
             )
         }
+    }
+
+    override suspend fun getAutomationConfig(id: String): JsonObject? = automationConfigs[id]
+
+    /** Save in memory and upsert a synthetic `automation.<slug>` entity, as HA would after a reload. */
+    override suspend fun saveAutomationConfig(config: JsonObject) {
+        val id = (config["id"] as? JsonPrimitive)?.contentOrNull ?: return
+        automationConfigs[id] = config
+        val alias = (config["alias"] as? JsonPrimitive)?.contentOrNull ?: id
+        // Reuse the existing entity id on edit so an alias change doesn't orphan the old entity.
+        val entityId = automationEntityIds.getOrPut(id) { "automation.${slugify(alias)}" }
+        state.upsertEntities(
+            listOf(
+                HassEntity(
+                    entityId = entityId,
+                    state = "on",
+                    attributes = buildJsonObject {
+                        put("friendly_name", alias)
+                        put("id", id)
+                    },
+                ),
+            ),
+        )
+    }
+
+    override suspend fun deleteAutomationConfig(id: String) {
+        automationConfigs.remove(id)
+        val entityId = automationEntityIds.remove(id) ?: return
+        state.setEntities(state.entities.value.toMutableMap().apply { remove(entityId) })
     }
 
     /** Demo "live" feed: loop the bundled clip for any camera entity. */

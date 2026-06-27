@@ -14,6 +14,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.hawksnest.ui.area.AreaDetailScreen
+import com.hawksnest.ui.automations.AutomationEditScreen
 import com.hawksnest.ui.automations.AutomationsScreen
 import com.hawksnest.ui.devices.DevicesScreen
 import com.hawksnest.ui.entity.EntityDetailScreen
@@ -69,6 +70,7 @@ fun AppNavGraph(startDestination: String = Screen.Home.route) {
                             restoreState = true
                         }
                     },
+                    onOpenSettings = { navController.navigate(Screen.Settings.route) },
                 )
             }
             composable(Screen.Devices.route) {
@@ -81,10 +83,19 @@ fun AppNavGraph(startDestination: String = Screen.Home.route) {
                 HistoryScreen(onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) })
             }
             composable(Screen.Settings.route) {
-                SettingsScreen(onOpenAutomations = { navController.navigate(Screen.Automations.route) })
+                SettingsScreen()
             }
             composable(Screen.Automations.route) {
-                AutomationsScreen(onBack = { navController.popBackStack() })
+                AutomationsScreen(
+                    onNew = { navController.navigate(Screen.AutomationEdit.createRoute("new")) },
+                    onEdit = { id -> navController.navigate(Screen.AutomationEdit.createRoute(id)) },
+                )
+            }
+            composable(
+                route = Screen.AutomationEdit.route,
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) {
+                AutomationEditScreen(onBack = { navController.popBackStack() })
             }
             composable(
                 route = Screen.Area.route,
