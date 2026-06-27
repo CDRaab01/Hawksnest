@@ -46,6 +46,18 @@ android {
     }
 
     signingConfigs {
+        // A stable, committed key so every build — on any machine, debug or local release — shares
+        // one signing identity. That makes new APKs install *over the top* of the existing one (an
+        // in-place update) instead of failing with INSTALL_FAILED_UPDATE_INCOMPATIBLE, so the saved
+        // HA token survives the update. It secures nothing on its own (this is a personal,
+        // sideloaded app); its only job is install continuity. Password is intentionally not secret.
+        create("stable") {
+            storeFile = file("hawksnest-debug.keystore")
+            storePassword = "hawksnest"
+            keyAlias = "hawksnest"
+            keyPassword = "hawksnest"
+        }
+        // CI's real release key, only when KEYSTORE_PATH is supplied in the environment.
         if (keystorePath != null) {
             create("release") {
                 storeFile = file(keystorePath)
@@ -57,8 +69,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("stable")
+        }
         release {
+            // Prefer CI's release key; fall back to the stable committed key for local releases so
+            // they stay installable and identity-stable too.
             signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("stable")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -115,9 +133,6 @@ dependencies {
 
     // DataStore (HA URL + long-lived token)
     implementation(libs.datastore.preferences)
-
-    // Biometric gate (Class-3 strong biometric on unlock/disarm)
-    implementation(libs.androidx.biometric)
 
     // Coil — camera snapshot images (live MJPEG is hand-rolled on OkHttp)
     implementation(libs.coil.compose)

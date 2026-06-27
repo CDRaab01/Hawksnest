@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Data extraction rules (used on API 31+). cloud-backup = Auto Backup to Google Drive;
+  device-transfer = direct device-to-device migration. Both include ONLY the DataStore file holding
+  the HA base URL + long-lived token, so a reinstall / new phone restores the connection.
+
+  TRADE-OFF: the long-lived token is a full HA credential being included in cloud backup — see
+  backup_rules.xml.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="datastore/hawksnest_prefs.preferences_pb" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="datastore/hawksnest_prefs.preferences_pb" />
+    </device-transfer>
+</data-extraction-rules>

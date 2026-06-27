@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android Auto Backup rules (used on API <= 30). We back up ONLY the DataStore prefs that hold the
+  HA base URL + long-lived token, so a clean uninstall -> reinstall restores the connection without
+  re-entering the token. Nothing else (image/player caches) is backed up.
+
+  TRADE-OFF: the long-lived token is a full HA credential, and Auto Backup ships this file to the
+  user's Google cloud backup. That is an accepted trade-off for this personal app; it only applies
+  when device backup + a Google account are enabled.
+-->
+<full-backup-content>
+    <include domain="file" path="datastore/hawksnest_prefs.preferences_pb" />
+</full-backup-content>

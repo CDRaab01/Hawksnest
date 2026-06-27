@@ -7,7 +7,6 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.ServiceData
-import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.AlarmView
 import com.hawksnest.core.logic.DoorbellPress
 import com.hawksnest.core.logic.activeDoorbellPress
@@ -65,8 +64,6 @@ data class HomeUi(
     /** Triggered life-safety sensors (smoke/CO/gas/leak), surfaced regardless of armed state. */
     val lifeSafetyAlerts: List<String> = emptyList(),
     val lifeSafetyMonitored: Int = 0,
-    /** The alarm panel enforces a disarm code (HA `code_format`) → show the PIN keypad. */
-    val alarmRequiresCode: Boolean = false,
 )
 
 @HiltViewModel
@@ -86,13 +83,13 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { connection.start() }
     }
 
-    /** Arm/disarm. Non-optimistic — the store reconciles from the source echo. A [code] (from the
-     *  PIN keypad) is forwarded to HA as service data when the panel requires one. */
-    fun arm(service: String, code: String? = null) {
+    /** Arm/disarm. Non-optimistic — the store reconciles from the source echo. Disarm sends no
+     *  code: the in-app PIN keypad was removed, so a panel that enforces `code_format` must allow
+     *  codeless disarm from a trusted device (HA `code_arm_required: false` / no code on disarm). */
+    fun arm(service: String) {
         val id = uiState.value.alarmEntityId ?: return
-        val extra = if (code.isNullOrEmpty()) emptyMap() else mapOf("code" to code)
         viewModelScope.launch {
-            connection.callService("alarm_control_panel", service, ServiceData(entityId = id, extra = extra))
+            connection.callService("alarm_control_panel", service, ServiceData(entityId = id))
         }
     }
 
@@ -154,7 +151,6 @@ class HomeViewModel @Inject constructor(
             roomsPreview = rooms.take(4).joinToString(" · ") { it.area },
             lifeSafetyAlerts = security.lifeSafetyAlerts,
             lifeSafetyMonitored = security.lifeSafetyMonitored,
-            alarmRequiresCode = alarmEntity?.stringAttr("code_format") != null,
         )
     }
 }

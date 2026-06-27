@@ -18,13 +18,14 @@ components (`ui/components/`) are in place, plus:
   hero. Demo/fixture mode (`FixtureSource`) runs with no token.
 - **Phase 2** ✅ — control (`call_service`, non-optimistic) + domain cards + entity detail/history +
   logbook timeline + customize.
-- **Phase 3** ✅ — biometric gate (unlock/disarm, `security/`), camera snapshots + live MJPEG
-  (`ui/cameras/`), alarm PIN keypad (`ui/home/AlarmKeypad.kt`).
+- **Phase 3** ✅ — camera snapshots + live MJPEG (`ui/cameras/`). (An earlier biometric gate + alarm
+  PIN keypad on unlock/disarm were removed — the home owner found the friction unwanted; disarm/unlock
+  now fire directly. A panel that enforces HA `code_format` must allow codeless disarm from the app.)
 - **Phase 4** ⏳ — push notifications (custom FCM pipeline + owner-authored HA automation). Not yet
   built.
 
-> Coverage today is strongest on the pure logic (`core/logic`, `core/ha`) and security gate, which
-> are JVM-unit-tested. The Compose UI also runs through the **Sift design-slop audit** (below).
+> Coverage today is strongest on the pure logic (`core/logic`, `core/ha`), which is JVM-unit-tested.
+> The Compose UI also runs through the **Sift design-slop audit** (below).
 
 ## Build
 

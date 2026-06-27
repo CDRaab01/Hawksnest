@@ -44,7 +44,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.alarmView
-import com.hawksnest.security.LocalBiometricGate
 import com.hawksnest.ui.cameras.CameraLightbox
 import com.hawksnest.ui.cameras.DoorbellBanner
 import com.hawksnest.ui.cameras.CameraSnapshot
@@ -82,7 +81,6 @@ fun HomeScreen(
         }
     }
     var lightbox by remember { mutableStateOf<CameraUi?>(null) }
-    var showKeypad by remember { mutableStateOf(false) }
 
     // Doorbell banner: show the latest ring until dismissed or auto-timeout.
     var doorbellDismissedAt by remember { mutableStateOf(0L) }
@@ -130,7 +128,7 @@ fun HomeScreen(
         SecurityHero(
             ui,
             onArm = viewModel::arm,
-            onDisarm = { if (ui.alarmRequiresCode) showKeypad = true else viewModel.arm("alarm_disarm") },
+            onDisarm = { viewModel.arm("alarm_disarm") },
         )
 
         if (ui.cameras.isNotEmpty()) {
@@ -195,13 +193,6 @@ fun HomeScreen(
             onDismiss = { lightbox = null },
         )
     }
-
-    if (showKeypad) {
-        AlarmKeypadDialog(
-            onSubmit = { code -> viewModel.arm("alarm_disarm", code); showKeypad = false },
-            onDismiss = { showKeypad = false },
-        )
-    }
 }
 
 /**
@@ -235,7 +226,6 @@ private fun LifeSafetyStrip(ui: HomeUi) {
 @Composable
 private fun SecurityHero(ui: HomeUi, onArm: (String) -> Unit, onDisarm: () -> Unit) {
     val pulse = HawksnestTheme.pulse
-    val gate = LocalBiometricGate.current
     PanelCard(channel = ui.alarm?.let { pulse.color(it.channel) }, raised = true) {
         if (ui.alarm != null) {
             Row(
@@ -249,9 +239,7 @@ private fun SecurityHero(ui: HomeUi, onArm: (String) -> Unit, onDisarm: () -> Un
                         active = ui.alarmRawState == b.state,
                         channel = pulse.color(alarmView(b.state).channel),
                         onClick = {
-                            // Disarm is the only "less secure" arm action — gate it, then route
-                            // through the PIN keypad if the panel requires a code.
-                            if (b.service == "alarm_disarm") gate("Disarm alarm") { onDisarm() } else onArm(b.service)
+                            if (b.service == "alarm_disarm") onDisarm() else onArm(b.service)
                         },
                     )
                 }
