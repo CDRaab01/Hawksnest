@@ -18,7 +18,7 @@ class TimelineViewportTest {
         assertTrue(kotlin.math.abs(a - b) <= tol, "expected ~$b but was $a")
 
     @Test
-    fun `center-anchored: centerMs maps to the track middle and back`() {
+    fun `center-anchored centerMs maps to the track middle and back`() {
         val v = vp()
         near(timeToX(v.centerMs, v, w).toDouble(), (w / 2f).toDouble())
         assertEquals(v.centerMs, xToTime(w / 2f, v, w))
@@ -38,7 +38,7 @@ class TimelineViewportTest {
     }
 
     @Test
-    fun `drag right goes back in time; drag left goes forward`() {
+    fun `drag right goes back in time and drag left goes forward`() {
         val v = vp()
         assertTrue(pan(v, 100f, w, window).centerMs < v.centerMs)
         assertTrue(pan(v, -100f, w, window).centerMs > v.centerMs)
