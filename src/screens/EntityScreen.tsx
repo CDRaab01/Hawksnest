@@ -29,6 +29,7 @@ const RANGES: { label: string; hours: number }[] = [
   { label: "6h", hours: 6 },
   { label: "24h", hours: 24 },
   { label: "7d", hours: 24 * 7 },
+  { label: "30d", hours: 24 * 30 },
 ];
 
 // Attributes that are plumbing, not worth surfacing in the detail list.
@@ -51,7 +52,7 @@ function prettyKey(key: string): string {
 /**
  * Entity detail (drill-in). Reachable by tapping any card. Shows the live
  * primary control (the same domain card), a relevant-attributes list, and a
- * state-history chart with a 6h / 24h / 7d range toggle backed by the active
+ * state-history chart with a 6h / 24h / 7d / 30d range toggle backed by the active
  * source's fetchHistory (live HA over WS; synthesized in demo). Degrades to a
  * clear "history unavailable" state instead of crashing.
  */

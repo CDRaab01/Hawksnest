@@ -1,4 +1,12 @@
-export type HistoryRange = "24h" | "7d";
+export type HistoryRange = "24h" | "7d" | "30d";
+
+// Recorder retention is 30 days (MariaDB `purge_keep_days: 30`), so a 30-day
+// window is the deepest the backend can answer — anything older is purged.
+const RANGE_LABEL: Record<HistoryRange, string> = {
+  "24h": "Last 24h",
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
+};
 
 const DOMAIN_LABEL: Record<string, string> = {
   lock: "Locks",
@@ -62,9 +70,9 @@ export function HistoryFilterBar({
   return (
     <div className="flex flex-wrap items-center gap-sm">
       <div className="flex items-center gap-xs">
-        {(["24h", "7d"] as const).map((r) => (
+        {(["24h", "7d", "30d"] as const).map((r) => (
           <Chip key={r} active={range === r} onClick={() => onRange(r)}>
-            {r === "24h" ? "Last 24h" : "Last 7 days"}
+            {RANGE_LABEL[r]}
           </Chip>
         ))}
       </div>

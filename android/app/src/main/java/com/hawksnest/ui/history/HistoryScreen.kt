@@ -38,7 +38,9 @@ import java.time.format.DateTimeFormatter
 
 private data class HistoryRange(val label: String, val hours: Int)
 
-private val RANGES = listOf(HistoryRange("24h", 24), HistoryRange("7d", 24 * 7))
+// 30d matches the backend recorder retention (MariaDB purge_keep_days: 30).
+private val RANGES =
+    listOf(HistoryRange("24h", 24), HistoryRange("7d", 24 * 7), HistoryRange("30d", 24 * 30))
 
 // Float the most useful event domains to the front of the chip row.
 private val DOMAIN_ORDER = listOf("camera", "binary_sensor", "lock", "alarm_control_panel", "light")

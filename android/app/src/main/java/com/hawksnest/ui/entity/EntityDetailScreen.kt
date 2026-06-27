@@ -38,7 +38,8 @@ import kotlinx.serialization.json.contentOrNull
 
 private data class Range(val label: String, val hours: Int)
 
-private val RANGES = listOf(Range("6h", 6), Range("24h", 24), Range("7d", 24 * 7))
+private val RANGES =
+    listOf(Range("6h", 6), Range("24h", 24), Range("7d", 24 * 7), Range("30d", 24 * 30))
 
 private val HIDDEN_ATTRS = setOf(
     "friendly_name", "icon", "supported_features", "supported_color_modes",
@@ -46,7 +47,7 @@ private val HIDDEN_ATTRS = setOf(
 )
 
 /**
- * Entity detail (drill-in): the live control card, a state-history chart with a 6h/24h/7d toggle,
+ * Entity detail (drill-in): the live control card, a state-history chart with a 6h/24h/7d/30d toggle,
  * and a relevant-attributes list. Degrades to clear empty/error states instead of crashing. Ported
  * from the web `EntityScreen`.
  */
