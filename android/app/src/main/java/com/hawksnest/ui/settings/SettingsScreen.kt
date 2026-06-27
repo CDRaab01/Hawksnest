@@ -8,9 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -37,7 +34,6 @@ import com.hawksnest.ui.theme.HawksnestTheme
  */
 @Composable
 fun SettingsScreen(
-    onOpenAutomations: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val status by viewModel.status.collectAsState()
@@ -133,29 +129,6 @@ fun SettingsScreen(
             reachability = reachability,
             onTest = { viewModel.testReachability(url) },
         )
-
-        SectionHeader("Automation")
-        PanelCard(onClick = onOpenAutomations) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Automations",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        "View, enable, and run your Home Assistant automations.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowForward,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
 
         SectionHeader("About")
         PanelCard {

@@ -26,6 +26,21 @@ export function domainOf(entityId: string): string {
 }
 
 /**
+ * Domains that aren't physical "devices" and shouldn't appear in the Devices
+ * hub — automations/scripts/scenes have their own surfaces, and people/zones/the
+ * sun are infrastructure entities the automation builder consumes. Shared so web
+ * and Android filter the device list the same way.
+ */
+export const NON_DEVICE_DOMAINS = new Set<string>([
+  "automation",
+  "script",
+  "scene",
+  "person",
+  "zone",
+  "sun",
+]);
+
+/**
  * Area assignment is a runtime concern in real HA — it comes from the area +
  * entity registries (WS), never from the state stream. In Phase 0 we model it as
  * a separate map (see fixtures) to keep that seam honest for Phase 1.

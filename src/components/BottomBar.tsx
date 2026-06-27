@@ -4,7 +4,7 @@ import {
   ToggleRight,
   LayoutGrid,
   History as HistoryIcon,
-  Settings as SettingsIcon,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 
@@ -17,12 +17,13 @@ interface Tab {
 }
 
 // Order is the on-screen order — Home sits in the middle as the large circle.
+// Settings lives in the TopNav (gear) so Automations can take a primary tab.
 const TABS: Tab[] = [
   { to: "/devices", label: "Devices", icon: ToggleRight },
   { to: "/rooms", label: "Rooms", icon: LayoutGrid },
   { to: "/", label: "Home", icon: House, end: true, center: true },
   { to: "/history", label: "History", icon: HistoryIcon },
-  { to: "/settings", label: "Settings", icon: SettingsIcon },
+  { to: "/automations", label: "Automations", icon: Workflow },
 ];
 
 /**

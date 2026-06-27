@@ -120,7 +120,7 @@ describe("groupByArea", () => {
     const groups = groupByArea(Object.values(entities), areas);
     expect(groups.map((g) => g.area)).toEqual([
       // Known areas float to the top in DEFAULT_ORDER; the rest follow
-      // alphabetically.
+      // alphabetically. People + the sun have no area → "Unassigned" trails.
       "Front Door",
       "Back Door",
       "Basement",
@@ -129,6 +129,7 @@ describe("groupByArea", () => {
       "Bedroom",
       "Garage",
       "Living Room",
+      "Unassigned",
     ]);
     const frontDoor = groups.find((g) => g.area === "Front Door")!;
     expect(frontDoor.entities.length).toBe(6); // incl. the doorbell ding sensor

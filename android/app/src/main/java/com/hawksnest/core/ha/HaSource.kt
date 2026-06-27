@@ -27,8 +27,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.Instant
 import kotlin.coroutines.coroutineContext
 
@@ -132,6 +134,54 @@ class HaSource(
                 emptyList()
             }
         }
+    }
+
+    /**
+     * Automation CRUD over HA's REST Config API (`/api/config/automation/config/<id>`). Mirrors the
+     * web `haSource.ts`: GET (404 → null), POST the config body, DELETE. HA reloads automations on
+     * write, so the changed `automation.*` entity flows back over the WebSocket and the list updates.
+     * Writes need an admin token — a 401/403 surfaces as a friendly message.
+     */
+    override suspend fun getAutomationConfig(id: String): JsonObject? = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(automationConfigUrl(id))
+            .header("Authorization", "Bearer $token").build()
+        client.newCall(req).execute().use { res ->
+            if (res.code == 404) return@use null
+            if (!res.isSuccessful) throw configApiError(res.code)
+            val body = res.body?.string() ?: return@use null
+            json.parseToJsonElement(body) as? JsonObject
+        }
+    }
+
+    override suspend fun saveAutomationConfig(config: JsonObject) {
+        val id = (config["id"] as? JsonPrimitive)?.contentOrNull
+            ?: throw IllegalArgumentException("Automation has no id.")
+        withContext(Dispatchers.IO) {
+            val body = config.toString().toRequestBody("application/json".toMediaType())
+            val req = Request.Builder().url(automationConfigUrl(id)).post(body)
+                .header("Authorization", "Bearer $token").build()
+            client.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) throw configApiError(res.code)
+            }
+        }
+    }
+
+    override suspend fun deleteAutomationConfig(id: String) {
+        withContext(Dispatchers.IO) {
+            val req = Request.Builder().url(automationConfigUrl(id)).delete()
+                .header("Authorization", "Bearer $token").build()
+            client.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) throw configApiError(res.code)
+            }
+        }
+    }
+
+    private fun automationConfigUrl(id: String): String =
+        "${baseUrl.trimEnd('/')}/api/config/automation/config/$id"
+
+    private fun configApiError(code: Int): Exception = when (code) {
+        401, 403 -> IllegalStateException("Editing automations needs a Home Assistant admin token.")
+        else -> IllegalStateException("Home Assistant couldn't save the automation (HTTP $code).")
     }
 
     override fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String =

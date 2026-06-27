@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,13 +29,14 @@ import com.hawksnest.ui.components.SectionHeader
 import com.hawksnest.ui.theme.HawksnestTheme
 
 /**
- * Automations — a list of HA automations (each an `automation.*` entity) with Run-now and an
- * enable/disable switch. Editing the automation config is deferred to a follow-up. Ported from the
- * web `AutomationsScreen`.
+ * Automations — the top-level tab listing HA automations (each an `automation.*` entity), each with
+ * Run-now, an enable/disable switch, and an Edit affordance into the builder. A "New" button starts
+ * a fresh automation. HA runs them; Hawksnest lists, toggles, runs, and edits via the Config API.
  */
 @Composable
 fun AutomationsScreen(
-    onBack: () -> Unit,
+    onNew: () -> Unit = {},
+    onEdit: (String) -> Unit = {},
     viewModel: AutomationsViewModel = hiltViewModel(),
 ) {
     val automations by viewModel.automations.collectAsState()
@@ -46,84 +47,81 @@ fun AutomationsScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = HawksnestTheme.spacing.lg),
+            .padding(horizontal = HawksnestTheme.spacing.lg, vertical = HawksnestTheme.spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = HawksnestTheme.spacing.sm, vertical = HawksnestTheme.spacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
+        SectionHeader(
+            "Automations",
+            channel = pulse.effort,
+            trailing = {
+                PulseButton(text = "New", onClick = onNew, compact = true)
+            },
+        )
+
+        if (isDemo) {
             Text(
-                "Automations",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                "Demo mode — automations are simulated locally. Connect Home Assistant in Settings " +
+                    "to create ones that actually run.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
-        Column(
-            modifier = Modifier.padding(horizontal = HawksnestTheme.spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
-        ) {
-            SectionHeader("Automations", channel = pulse.effort)
-
-            if (isDemo) {
+        if (automations.isEmpty()) {
+            PanelCard {
                 Text(
-                    "Demo mode — automations are simulated locally. Connect Home Assistant in " +
-                        "Settings to control ones that actually run.",
-                    style = MaterialTheme.typography.bodySmall,
+                    "No automations yet. Tap New to link your devices — e.g. \"when the alarm is " +
+                        "armed, lock every door\" or \"turn on the porch light at sunset.\"",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-
-            if (automations.isEmpty()) {
-                PanelCard {
-                    Text(
-                        "No automations yet. Create them in Home Assistant to link your devices — " +
-                            "e.g. \"when the alarm is armed, lock every door.\"",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                PanelCard {
-                    automations.forEach { a ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = HawksnestTheme.spacing.sm),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm),
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    a.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    "${if (a.enabled) "Enabled" else "Disabled"} · ${a.lastTriggered}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            PulseButton(
-                                text = "Run",
-                                onClick = { viewModel.run(a.entityId) },
-                                tonal = true,
-                                compact = true,
+        } else {
+            PanelCard {
+                automations.forEach { a ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = HawksnestTheme.spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                a.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                            Switch(
-                                checked = a.enabled,
-                                onCheckedChange = { desired -> viewModel.setEnabled(a.entityId, desired) },
-                                colors = SwitchDefaults.colors(checkedTrackColor = pulse.effort),
+                            Text(
+                                "${if (a.enabled) "Enabled" else "Disabled"} · ${a.lastTriggered}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
+                        PulseButton(
+                            text = "Run",
+                            onClick = { viewModel.run(a.entityId) },
+                            tonal = true,
+                            compact = true,
+                        )
+                        if (a.configId != null) {
+                            IconButton(onClick = { onEdit(a.configId) }) {
+                                Icon(
+                                    Icons.Filled.Edit,
+                                    contentDescription = "Edit ${a.name}",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = a.enabled,
+                            onCheckedChange = { desired -> viewModel.setEnabled(a.entityId, desired) },
+                            colors = SwitchDefaults.colors(checkedTrackColor = pulse.effort),
+                        )
                     }
                 }
             }

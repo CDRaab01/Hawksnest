@@ -34,6 +34,11 @@ function seedEntities() {
         state: "locked",
         attributes: { friendly_name: "Back Door" },
       },
+      "person.alex": {
+        entity_id: "person.alex",
+        state: "home",
+        attributes: { friendly_name: "Alex" },
+      },
     },
     areas: {
       "alarm_control_panel.home": "Security",
@@ -129,10 +134,11 @@ describe("Automation editor — existing", () => {
   });
 
   it("shows the edit-in-HA fallback for an unsupported config", async () => {
+    // A template trigger is outside the V1 subset → read-only fallback.
     getAutomationConfig.mockResolvedValue({
       id: "222",
-      alias: "Complex sunrise scene",
-      trigger: [{ platform: "sun", event: "sunset" }],
+      alias: "Templated automation",
+      trigger: [{ platform: "template", value_template: "{{ is_state('x', 'on') }}" }],
       action: [{ service: "scene.turn_on", target: { entity_id: "scene.x" } }],
     });
 
@@ -141,5 +147,59 @@ describe("Automation editor — existing", () => {
     expect(
       await screen.findByText(/features Hawksnest can't edit yet/),
     ).toBeInTheDocument();
+  });
+
+  it("prefills a sun trigger from a parseable config", async () => {
+    getAutomationConfig.mockResolvedValue({
+      id: "333",
+      alias: "Porch light at sunset",
+      trigger: [{ platform: "sun", event: "sunset", offset: "-00:15:00" }],
+      action: [{ service: "light.turn_on", target: { entity_id: ["light.porch"] } }],
+    });
+
+    renderAt("/automations/333");
+
+    expect(await screen.findByDisplayValue("Porch light at sunset")).toBeInTheDocument();
+    // The Sun trigger type is selected and the event preselected.
+    expect(screen.getByLabelText("Trigger type Sun")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("Sun event")).toHaveValue("sunset");
+  });
+});
+
+describe("Automation editor — new trigger types", () => {
+  it("builds a sun trigger via the trigger-type picker", async () => {
+    const user = userEvent.setup();
+    renderAt("/automations/new");
+
+    await user.type(screen.getByLabelText("Name"), "Lights at sunset");
+    await user.click(screen.getByLabelText("Trigger type Sun"));
+    await user.selectOptions(screen.getByLabelText("Sun event"), "sunset");
+    await user.click(screen.getByLabelText("Front Door target for action 1"));
+    await user.click(screen.getByRole("button", { name: "Create automation" }));
+
+    expect(saveAutomationConfig).toHaveBeenCalledTimes(1);
+    const config = saveAutomationConfig.mock.calls[0][0];
+    // Offset 0 omits the offset key.
+    expect(config.trigger).toEqual([{ platform: "sun", event: "sunset" }]);
+  });
+
+  it("builds a presence (zone) trigger via the trigger-type picker", async () => {
+    const user = userEvent.setup();
+    renderAt("/automations/new");
+
+    await user.type(screen.getByLabelText("Name"), "Unlock when Alex arrives");
+    await user.click(screen.getByLabelText("Trigger type Someone comes/goes"));
+    await user.selectOptions(screen.getByLabelText("Trigger person"), "person.alex");
+    await user.selectOptions(screen.getByLabelText("Presence event"), "enter");
+    await user.click(screen.getByLabelText("Front Door target for action 1"));
+    await user.click(screen.getByRole("button", { name: "Create automation" }));
+
+    const config = saveAutomationConfig.mock.calls[0][0];
+    expect(config.trigger).toEqual([
+      { platform: "zone", entity_id: "person.alex", zone: "zone.home", event: "enter" },
+    ]);
   });
 });

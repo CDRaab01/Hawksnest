@@ -31,3 +31,12 @@ private val CARD_BY_DOMAIN: Map<String, CardType> = mapOf(
  */
 fun domainToCard(entityId: String): CardType =
     CARD_BY_DOMAIN[domainOf(entityId)] ?: CardType.GENERIC
+
+/**
+ * Domains that aren't physical "devices" and shouldn't appear in the Devices hub — automations/
+ * scripts/scenes have their own surfaces, and people/zones/the sun are infrastructure entities the
+ * automation builder consumes. Mirrors `NON_DEVICE_DOMAINS` in `src/lib/ha.ts`.
+ */
+val NON_DEVICE_DOMAINS: Set<String> = setOf(
+    "automation", "script", "scene", "person", "zone", "sun",
+)

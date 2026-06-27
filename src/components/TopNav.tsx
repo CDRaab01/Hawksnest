@@ -1,11 +1,12 @@
-import { Link } from "react-router-dom";
-import { Shield } from "lucide-react";
+import { NavLink, Link } from "react-router-dom";
+import { Settings as SettingsIcon, Shield } from "lucide-react";
 import { ConnectionPill } from "./ConnectionPill";
 import { ArmedPill } from "./ArmedPill";
 
 /**
  * Slim header strip — brand on the left, security + connection state on the right so they read on
- * every screen. Primary navigation lives in the {@link BottomBar} (Spotter-style bottom nav).
+ * every screen. Primary navigation lives in the {@link BottomBar} (Spotter-style bottom nav);
+ * Settings is the gear here (Automations took its former bottom-bar slot).
  */
 export function TopNav() {
   return (
@@ -18,6 +19,18 @@ export function TopNav() {
         <div className="ml-auto flex shrink-0 items-center gap-sm">
           <ArmedPill />
           <ConnectionPill />
+          <NavLink
+            to="/settings"
+            aria-label="Settings"
+            className={({ isActive }) =>
+              [
+                "inline-flex h-9 w-9 items-center justify-center rounded-sm border border-hairline transition-colors duration-fast",
+                isActive ? "text-effort" : "text-ink-dim hover:text-ink",
+              ].join(" ")
+            }
+          >
+            <SettingsIcon size={18} />
+          </NavLink>
         </div>
       </div>
     </header>
