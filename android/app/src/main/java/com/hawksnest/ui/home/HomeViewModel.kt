@@ -24,7 +24,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.OffsetDateTime
 import javax.inject.Inject
+
+/**
+ * Parse an entity's `last_changed` to epoch ms for the camera age badge. Over the
+ * compressed websocket HA sends it as epoch seconds (a numeric string); the REST
+ * shape is ISO-8601 — accept both, null when absent/unparseable.
+ */
+private fun lastChangedMs(raw: String?): Long? {
+    if (raw.isNullOrEmpty()) return null
+    raw.toDoubleOrNull()?.let { return (it * 1000).toLong() }
+    return runCatching { Instant.parse(raw).toEpochMilli() }
+        .recoverCatching { OffsetDateTime.parse(raw).toInstant().toEpochMilli() }
+        .getOrNull()
+}
 
 data class CameraUi(
     /** Stable logical id (`camera.<base>`) — ring-mqtt's split entities collapse to one. */
@@ -33,6 +48,8 @@ data class CameraUi(
     val entityId: String,
     val name: String,
     val live: Boolean,
+    /** Snapshot's last-change time (epoch ms) for the Ring-style age badge, or null. */
+    val lastChangedMs: Long? = null,
     /** Signed snapshot URL resolved against the HA origin (null in demo / when down). */
     val snapshotUrl: String? = null,
     /** Derived MJPEG live-stream URL (used as a fallback in the lightbox). */
@@ -124,6 +141,7 @@ class HomeViewModel @Inject constructor(
                 entityId = lc.liveEntity.entityId,
                 name = lc.name,
                 live = isCameraLive(lc.snapshotEntity),
+                lastChangedMs = lastChangedMs(lc.snapshotEntity.lastChanged),
                 snapshotUrl = snapshotUrl(lc.snapshotEntity, resolvedBase),
                 streamUrl = streamUrl(lc.liveEntity, resolvedBase),
                 eventSelectId = lc.eventSelectId,

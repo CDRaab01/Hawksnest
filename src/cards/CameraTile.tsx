@@ -66,7 +66,9 @@ export function CameraTile({
           </div>
         )}
 
-        {/* Freshness badge — LIVE when streaming, else the last-change age. */}
+        {/* Ring-style freshness badge: a status dot + the snapshot's age. The tile
+            is a periodic still (not a live feed), so we stamp how old it is rather
+            than calling it "Live" — tapping the tile is what opens the live view. */}
         <div className="absolute left-md top-md flex items-center gap-xs rounded-sm bg-black/40 px-sm py-xs backdrop-blur">
           <span
             className={[
@@ -75,7 +77,7 @@ export function CameraTile({
             ].join(" ")}
           />
           <span className="caption-label text-white/90">
-            {live ? "Live" : changedMs ? relativeTime(changedMs) : "—"}
+            {changedMs ? relativeTime(changedMs) : live ? "Live" : "—"}
           </span>
         </div>
 

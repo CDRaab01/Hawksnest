@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.alarmView
+import com.hawksnest.core.logic.relativeTime
 import com.hawksnest.ui.cameras.CameraLightbox
 import com.hawksnest.ui.cameras.DoorbellBanner
 import com.hawksnest.ui.cameras.CameraSnapshot
@@ -350,8 +351,10 @@ private fun CameraTile(
                 horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
             ) {
                 Box(Modifier.size(8.dp).clip(CircleShape).background(if (live) pulse.recovery else Color.White.copy(alpha = 0.4f)))
+                // Ring-style: stamp the snapshot's age (the tile is a still, not a live
+                // feed — tapping it opens live), falling back to LIVE/— if we have no time.
                 Text(
-                    if (live) "LIVE" else "—",
+                    cam.lastChangedMs?.let { relativeTime(it) } ?: if (live) "LIVE" else "—",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White.copy(alpha = 0.9f),
                 )
