@@ -17,6 +17,10 @@ interface PanelCardProps {
   raised?: boolean;
   className?: string;
   onClick?: () => void;
+  /** Optional test hook (rendered as `data-testid`). */
+  testId?: string;
+  /** Optional machine-readable state (rendered as `data-state`) for E2E assertions. */
+  dataState?: string;
 }
 
 /**
@@ -29,6 +33,8 @@ export function PanelCard({
   raised,
   className = "",
   onClick,
+  testId,
+  dataState,
 }: PanelCardProps) {
   const interactive = onClick
     ? "cursor-pointer transition-transform duration-fast ease-ease active:scale-[0.98]"
@@ -36,6 +42,8 @@ export function PanelCard({
   return (
     <div
       onClick={onClick}
+      data-testid={testId}
+      data-state={dataState}
       className={[
         raised ? "bg-panel-high" : "bg-panel",
         "rounded-lg border",

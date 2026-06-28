@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "mock-ha": "tsx mock-ha/server.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -28,12 +31,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.7.0",
+    "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.4.6",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.2",
     "@types/node": "^22.20.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
     "eslint": "^9.7.0",
@@ -43,10 +48,12 @@
     "jsdom": "^24.1.0",
     "postcss": "^8.4.39",
     "tailwindcss": "^3.4.6",
+    "tsx": "^4.22.4",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.0.0",
     "vite": "^5.3.4",
     "vite-plugin-pwa": "^1.3.0",
-    "vitest": "^2.0.3"
+    "vitest": "^2.0.3",
+    "ws": "^8.21.0"
   }
 }
