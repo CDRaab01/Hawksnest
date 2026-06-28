@@ -7,7 +7,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Thin client for the mock Home Assistant `/__scenario/*` control API — the same scriptable backend
+ * Thin client for the mock Home Assistant `/__scenario/…` control API — the same scriptable backend
  * the web Playwright E2E suite drives (see `mock-ha/README.md`). The instrumented tests run *on the
  * emulator*, so the host's mock server is reached through the standard host-loopback alias
  * `10.0.2.2`. Pure JDK + `org.json` (bundled in Android) so it pulls in no extra test dependencies.
