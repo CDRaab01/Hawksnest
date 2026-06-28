@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { SnapshotBucketContext } from "./snapshotBucket";
+import { SnapshotBucketContext } from "./snapshotBucketContext";
 
 interface ProviderProps {
   children: ReactNode;

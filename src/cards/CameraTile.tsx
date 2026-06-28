@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Camera, VideoOff } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
-import { useSnapshotBucket } from "../components/snapshotBucket";
+import { useSnapshotBucket } from "../components/snapshotBucketContext";
 import { useHaBaseUrl } from "../store/entityStore";
 import { resolveName } from "../lib/resolve";
 import { snapshotUrlAt, isCameraLive } from "../lib/cameraUrl";
