@@ -56,19 +56,39 @@ already allowed (`res/xml/network_security_config.xml`), so no app changes are n
 - **JVM unit tests (here, no device):** drive `core/ha/HaConnection` with a faked WebSocket and the
   mock's frame shapes (see `HaConnectionTest` for the pattern). The pure lock/label logic
   (`core/logic/LockState.kt`, `Security.kt`) is unit-tested directly.
-- **Instrumented tests (needs a KVM-accelerated emulator — run on the host via Remote Control):**
-  the committed suite is `app/src/androidTest/java/com/hawksnest/MockHaInstrumentedTest.kt`
-  (connect, arm-away outbound `call_service`, inbound state push), driving the real app through a
-  small `/__scenario` client (`MockControl.kt`).
-  1. Start the mock on the host: `PORT=8799 npm run mock-ha` (from the repo root). The suite uses its
-     own port so it doesn't collide with a web E2E mock running on the default `8765`.
-  2. Boot an emulator, then run `./gradlew :app:connectedDebugAndroidTest`. The tests reach the
-     host's mock through the loopback alias `http://10.0.2.2:8799`, entering it via the Settings UI —
-     no `local.properties` prefill needed (for manual runs you can still set
-     `ha.url=http://10.0.2.2:8765` or `SettingsViewModel.connect(...)`).
-  3. Scenarios are driven over the **same `/__scenario` control API** the web E2E uses
-     (`reset`, `state`, `service-outcome`, `disconnect`, `calls`) — see
-     [`mock-ha/README.md`](../mock-ha/README.md). This is the one fake backend both clients share.
+- **Instrumented tests (need a KVM-accelerated emulator):** the committed suite is
+  `app/src/androidTest/java/com/hawksnest/MockHaInstrumentedTest.kt` (launch, connect, arm-away
+  outbound `call_service`, inbound state push), driving the real app through a small `/__scenario`
+  client (`MockControl.kt`). One-shot runner — boots a headless emulator, builds + installs, runs the
+  suite, tears down:
+
+  ```bash
+  bash scripts/android-emulator-test.sh            # instrumented suite
+  bash scripts/android-emulator-test.sh --monkey   # + Monkey crash-fuzz (demo mode)
+  ```
+
+  It needs a one-time emulator image + AVD (commands in the script header) and Node for the mock.
+  What it does, and why:
+  1. `./gradlew --stop`, then builds the app + androidTest APKs **with the emulator off** — a Gradle
+     daemon plus the emulator starves a low-RAM host, and the software-GL emulator SIGSEGVs under
+     memory pressure when the app renders.
+  2. Boots the AVD headless (`-gpu swiftshader_indirect -no-window -memory 2048`), starts the mock on
+     `PORT=8799` (tests reach it via the loopback alias `http://10.0.2.2:8799`, entered through the
+     Settings UI), installs both APKs, and runs the suite with `adb shell am instrument` — lighter and
+     more reliable on a fragile headless emulator than `:app:connectedDebugAndroidTest` (the simpler
+     one-liner if your emulator is robust).
+  3. `--monkey` adds a demo-mode Monkey crash-fuzz (1200 events) and prints the `adb logcat -b crash`
+     buffer.
+
+  Scenarios are driven over the **same `/__scenario` control API** the web E2E uses (`reset`, `state`,
+  `service-outcome`, `disconnect`, `calls`) — see [`mock-ha/README.md`](../mock-ha/README.md). This is
+  the one fake backend both clients share.
+
+  > Caveats: `/dev/kvm` must be usable. On a minimal/headless box the emulator's qemu may be missing
+  > system libs (`libpulse0`, `libnss3`, `libnspr4`, `libxkbfile1`, …) and Java/Node may be off PATH —
+  > put those fixes in `scripts/android-local-env.sh` (git-ignored; the runner sources it if present).
+  > The WebRTC live-camera path isn't exercised against the mock (it serves no `web_rtc` camera), so
+  > the camera timeline scrubber is only reachable with a real ring/go2rtc camera or device.
 
 ## Design audit (Sift)
 

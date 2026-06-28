@@ -114,7 +114,9 @@ Playwright drives the real app in Chromium against two backends:
   the integration seam an emulator can't: connect/auth, live state reconcile, reconnect, the
   doorbell banner, and the **security-critical lock** flow — pending→confirmed, a jam, and a
   rejected call — all **without touching a real lock**. The mock is a separate process so Android
-  instrumented tests can point at the same server (see [`mock-ha/README.md`](mock-ha/README.md)).
+  instrumented tests can point at the same server (see [`mock-ha/README.md`](mock-ha/README.md)) —
+  run them on a headless emulator with `bash scripts/android-emulator-test.sh` (details in
+  [`android/README.md`](android/README.md)).
 
 `npm run test:e2e` starts both servers automatically. In the cloud sandbox it uses the
 pre-installed Chromium; in CI the advisory `e2e` job installs Playwright's managed browser.

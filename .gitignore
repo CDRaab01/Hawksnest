@@ -13,3 +13,6 @@ test-results
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Machine-specific Android emulator env (lib paths, JAVA_HOME) — not portable
+scripts/android-local-env.sh
