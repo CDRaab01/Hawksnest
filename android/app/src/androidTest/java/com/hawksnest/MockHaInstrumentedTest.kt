@@ -69,8 +69,7 @@ class MockHaInstrumentedTest {
     @Test
     fun armAway_sendsServiceCallToMockHa() {
         connectToMock()
-        Espresso.pressBack() // Settings -> Home
-        waitForNode { compose.onAllNodesWithContentDescription("Away") }
+        goHome()
         compose.onNodeWithContentDescription("Away").performClick()
 
         compose.waitUntil(timeoutMillis = 10_000) {
@@ -84,8 +83,7 @@ class MockHaInstrumentedTest {
     @Test
     fun lockStatePush_updatesSecurityReadout() {
         connectToMock()
-        Espresso.pressBack() // Settings -> Home
-        waitForText("All doors locked")
+        goHome()
 
         mock.pushState("lock.front_door_lock", "unlocked")
 
@@ -105,6 +103,17 @@ class MockHaInstrumentedTest {
         compose.onNodeWithTag("settingsTokenField").performTextInput(token)
         compose.onNodeWithText("Connect").performClick()
         waitForText("Connected")
+    }
+
+    /**
+     * Leave Settings for Home. The token field raises the soft keyboard, and a bare back press just
+     * dismisses the keyboard instead of popping Settings off the nav stack — so close the keyboard
+     * first, then go back, and confirm Home rendered (the "Away" arm circle).
+     */
+    private fun goHome() {
+        Espresso.closeSoftKeyboard()
+        Espresso.pressBack()
+        waitForNode { compose.onAllNodesWithContentDescription("Away") }
     }
 
     private fun waitForText(text: String) = compose.waitUntil(timeoutMillis = 15_000) {
