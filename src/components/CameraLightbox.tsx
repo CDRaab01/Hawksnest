@@ -19,7 +19,8 @@ interface Props {
  */
 export function CameraLightbox({ camera, onClose }: Props) {
   const cameras = useLogicalCameras();
-  const [active, setActive] = useState<LogicalCamera>(camera);
+  const [activeId, setActiveId] = useState(camera.id);
+  const active = cameras.find((c) => c.id === activeId) ?? camera;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -58,7 +59,7 @@ export function CameraLightbox({ camera, onClose }: Props) {
         <CameraPlayer
           camera={active}
           cameras={cameras.length > 0 ? cameras : [active]}
-          onSelectCamera={setActive}
+          onSelectCamera={(c) => setActiveId(c.id)}
         />
       </div>
     </div>

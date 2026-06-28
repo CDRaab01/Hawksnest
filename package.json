@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b --noEmit && tsc --noEmit -p mock-ha/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json",
     "test": "vitest run",
     "mock-ha": "tsx mock-ha/server.ts",
     "test:e2e": "playwright test",

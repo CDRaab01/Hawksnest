@@ -55,9 +55,9 @@ class HaConnection(
             val frame = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
             handle(frame)
         }
-        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = fail()
-        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) = fail()
-        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = fail()
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { ws = null; fail() }
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { ws = null; fail() }
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { ws = null; fail() }
     }
 
     private fun handle(frame: JsonObject) {
@@ -87,7 +87,17 @@ class HaConnection(
         val id = nextId.getAndIncrement()
         val def = CompletableDeferred<JsonObject>()
         pending[id] = def
-        ws?.send(HaMessages.command(id, type, build).toString())
+        val sock = ws
+        // If the socket is gone or the send fails, unblock the caller instead of suspending forever.
+        if (sock == null || !sock.send(HaMessages.command(id, type, build).toString())) {
+            pending.remove(id)?.completeExceptionally(HaClosedException())
+            throw HaClosedException()
+        }
+        // Close the race where fail() ran between authGate.await() and the insert above.
+        if (ws == null) {
+            pending.remove(id)?.completeExceptionally(HaClosedException())
+            throw HaClosedException()
+        }
         return def.await()
     }
 
@@ -106,7 +116,19 @@ class HaConnection(
         subscriptions[id] = onEvent
         val def = CompletableDeferred<JsonObject>()
         pending[id] = def
-        ws?.send(HaMessages.command(id, type, build).toString())
+        val sock = ws
+        // If the socket is gone or the send fails, unblock the caller instead of suspending forever.
+        if (sock == null || !sock.send(HaMessages.command(id, type, build).toString())) {
+            pending.remove(id)?.completeExceptionally(HaClosedException())
+            subscriptions.remove(id)
+            throw HaClosedException()
+        }
+        // Close the race where fail() ran between authGate.await() and the insert above.
+        if (ws == null) {
+            pending.remove(id)?.completeExceptionally(HaClosedException())
+            subscriptions.remove(id)
+            throw HaClosedException()
+        }
         def.await() // subscription acknowledged
         return id
     }
@@ -137,7 +159,17 @@ class HaConnection(
         val id = nextId.getAndIncrement()
         val def = CompletableDeferred<JsonObject>()
         pending[id] = def
-        ws?.send(HaMessages.callService(id, domain, service, entityId, serviceData).toString())
+        val sock = ws
+        // If the socket is gone or the send fails, unblock the caller instead of suspending forever.
+        if (sock == null || !sock.send(HaMessages.callService(id, domain, service, entityId, serviceData).toString())) {
+            pending.remove(id)?.completeExceptionally(HaClosedException())
+            throw HaClosedException()
+        }
+        // Close the race where fail() ran between authGate.await() and the insert above.
+        if (ws == null) {
+            pending.remove(id)?.completeExceptionally(HaClosedException())
+            throw HaClosedException()
+        }
         def.await()
     }
 

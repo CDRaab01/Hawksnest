@@ -5,6 +5,8 @@ import com.hawksnest.util.CredentialStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import okhttp3.OkHttpClient
@@ -26,8 +28,10 @@ class ConnectionManager @Inject constructor(
     private val json: Json,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
+    @Volatile
     private var current: Source? = null
     private var started = false
+    private val selectMutex = Mutex()
 
     /** Start the active source once (called from the app onCreate). */
     fun start() {
@@ -41,7 +45,7 @@ class ConnectionManager @Inject constructor(
         scope.launch { select() }
     }
 
-    private suspend fun select() {
+    private suspend fun select() = selectMutex.withLock {
         val url = credentialStore.haUrl.firstOrNull()
         val token = credentialStore.haToken.firstOrNull()
         current?.stop()

@@ -73,6 +73,16 @@ describe("toggleHidden", () => {
     usePrefsStore.getState().toggleHidden("binary_sensor.front_door_intrusion");
     expect(usePrefsStore.getState().hidden).toEqual([]);
   });
+
+  it("does not snapshot the seed into favorites (hides persist, favorites stay null)", () => {
+    // Regression: hiding a device must not freeze the current seed into storage,
+    // or a user who never pins anything is permanently pinned to the old default.
+    usePrefsStore.getState().toggleHidden("camera.front_door");
+    expect(usePrefsStore.getState().favorites).toBeNull();
+    const reloaded = loadPreferences();
+    expect(reloaded?.favorites).toBeNull();
+    expect(reloaded?.hidden).toEqual(["camera.front_door"]);
+  });
 });
 
 describe("persistence", () => {

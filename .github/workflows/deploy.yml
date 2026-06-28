@@ -13,6 +13,12 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/deploy.yml"
+      - "index.html"
+      - "public/**"
+      - "vite.config.ts"
+      - "tailwind.config.ts"
+      - "postcss.config.js"
+      - "tsconfig*.json"
 
 jobs:
   deploy:

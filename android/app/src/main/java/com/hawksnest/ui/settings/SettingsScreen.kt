@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.BuildConfig
@@ -80,7 +81,8 @@ fun SettingsScreen(
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = HawksnestTheme.spacing.md),
+                    .padding(top = HawksnestTheme.spacing.md)
+                    .testTag("settingsUrlField"),
             )
             OutlinedTextField(
                 value = token,
@@ -90,7 +92,8 @@ fun SettingsScreen(
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = HawksnestTheme.spacing.sm),
+                    .padding(top = HawksnestTheme.spacing.sm)
+                    .testTag("settingsTokenField"),
             )
             Row(
                 modifier = Modifier.padding(top = HawksnestTheme.spacing.md),

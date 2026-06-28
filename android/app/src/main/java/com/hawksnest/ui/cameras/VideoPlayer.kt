@@ -59,7 +59,13 @@ fun VideoPlayer(
     }
 
     LaunchedEffect(uri, seekToMs) {
-        if (seekToMs != null) player.seekTo(seekToMs.coerceAtLeast(0L))
+        if (seekToMs != null) {
+            // Clamp into the loaded media (duration is UNSET until prepared) and guard the call:
+            // an out-of-range/ill-timed seek must never throw out of this effect and kill the app.
+            val dur = player.duration
+            val target = seekToMs.coerceAtLeast(0L).let { if (dur > 0) it.coerceAtMost(dur) else it }
+            runCatching { player.seekTo(target) }
+        }
     }
 
     LaunchedEffect(paused) {

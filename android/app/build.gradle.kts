@@ -158,7 +158,12 @@ dependencies {
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    // Compose UI tests (instrumented) — drive the real app against the mock-ha server. The
+    // ui-test-manifest (host activity for the Compose rule) ships in the debug variant.
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     // ── Sift design-slop audit (test-only) ──────────────────────────────────────────────────────
     // Wired only when the Sift composite build is present. `sift-compose` exposes Robolectric +
