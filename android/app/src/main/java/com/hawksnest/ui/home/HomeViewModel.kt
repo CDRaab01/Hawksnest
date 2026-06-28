@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.hawksnest.config.overrides
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
+import com.hawksnest.core.ha.DeviceIndex
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.logic.AlarmView
@@ -93,9 +94,17 @@ class HomeViewModel @Inject constructor(
     private val state = connection.state
 
     val uiState: StateFlow<HomeUi> = combine(
-        state.entities, state.areas, state.status, state.error, state.baseUrl,
-    ) { entities, areas, status, error, baseUrl ->
-        buildUi(entities, areas, status, error, baseUrl)
+        state.entities, state.areas, state.status, state.error, state.baseUrl, state.devices,
+    ) { values ->
+        @Suppress("UNCHECKED_CAST")
+        buildUi(
+            values[0] as Map<String, HassEntity>,
+            values[1] as Map<String, String>,
+            values[2] as ConnectionStatus,
+            values[3] as String?,
+            values[4] as String,
+            values[5] as DeviceIndex,
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUi())
 
     init {
@@ -118,6 +127,7 @@ class HomeViewModel @Inject constructor(
         status: ConnectionStatus,
         error: String?,
         baseUrl: String,
+        devices: DeviceIndex,
     ): HomeUi {
         val all = entities.values.toList()
 
@@ -131,7 +141,7 @@ class HomeViewModel @Inject constructor(
         // Plain-language security read-out (unlocked locks, open contacts, life-safety, offline).
         // Pure + unit-tested in core/logic/Security.kt. The device index dedupes each Schlage lock's
         // companion door sensor; areas give doors human names.
-        val deviceByEntity = state.devices.value.deviceByEntity
+        val deviceByEntity = devices.deviceByEntity
         val security = securityReadout(all, overrides, areas, deviceByEntity)
 
         val resolvedBase = baseUrl.ifEmpty { null }
