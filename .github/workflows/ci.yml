@@ -20,6 +20,47 @@ jobs:
       - run: npm run test
       - run: npm run build
 
+  e2e:
+    # Playwright end-to-end: demo-mode UI flows + the live haSource path driven
+    # against the bundled mock HA server (mock-ha/). Advisory while flake is shaken
+    # out; the mock's own protocol logic is unit-tested in the gating `build` job.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+
+      # Cache the managed Chromium (GitHub runners have no /opt/pw-browsers).
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - run: npx playwright install --with-deps chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+      - run: npx playwright install-deps chromium
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+
+      - run: npm run test:e2e
+        env:
+          CI: "true"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
+
   manifests:
     # Schema-validate the k8s deploy manifests so a bad edit fails CI rather than
     # the rollout. (The vitest deploy.test.ts already asserts the nginx/Dockerfile

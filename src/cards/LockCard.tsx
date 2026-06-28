@@ -53,9 +53,11 @@ export function LockCard({ entity, overrides, density = "comfortable" }: CardPro
       ? "Locked"
       : "Unlocked";
 
+  const testId = `lock-card-${entity.entity_id}`;
+
   if (density === "compact") {
     return (
-      <PanelCard tint={channel} className="p-md">
+      <PanelCard tint={channel} className="p-md" testId={testId} dataState={entity.state}>
         <div className="flex items-center gap-md">
           <StatusIcon
             className={[statusColor, pending ? "animate-spin" : ""].join(" ")}
@@ -80,7 +82,7 @@ export function LockCard({ entity, overrides, density = "comfortable" }: CardPro
   }
 
   return (
-    <PanelCard tint={channel} className="p-lg">
+    <PanelCard tint={channel} className="p-lg" testId={testId} dataState={entity.state}>
       <div className="flex items-start gap-md">
         <StatusIcon
           className={[statusColor, pending ? "animate-spin" : ""].join(" ")}

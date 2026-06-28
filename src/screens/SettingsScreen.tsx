@@ -76,7 +76,11 @@ export function SettingsScreen() {
       <section className="space-y-md">
         <SectionHeader label="Connection" channel="effort" />
         <PanelCard className="p-lg">
-          <div className="font-body text-body-lg text-ink">
+          <div
+            data-testid="connection-status"
+            data-status={status}
+            className="font-body text-body-lg text-ink"
+          >
             {STATUS_TEXT[status] ?? status}
           </div>
           {error && (

@@ -92,8 +92,9 @@ npm install
 npm run dev        # http://localhost:5173
 npm run typecheck  # tsc --noEmit (strict)
 npm run lint       # eslint
-npm run test       # vitest (screens, stores, and deploy-artifact checks)
+npm run test       # vitest (screens, stores, mock-ha protocol, deploy-artifact checks)
 npm run build      # tsc -b && vite build
+npm run test:e2e   # Playwright end-to-end (auto-starts the mock HA server + dev server)
 ```
 
 The test suite covers each screen functionally (Home, Area, Entity, Settings, Customize) plus
@@ -101,6 +102,22 @@ the connection/personalization stores, and `src/__tests__/deploy.test.ts` assert
 contract (nginx same-origin `/api` proxy + SPA fallback, Dockerfile, NodePort 30080). CI
 (`.github/workflows/ci.yml`) additionally schema-validates the k8s manifests with
 `kustomize build | kubeconform`.
+
+### End-to-end tests (`e2e/` + `mock-ha/`)
+
+Playwright drives the real app in Chromium against two backends:
+
+- **Demo mode** (`e2e/demo/`) — no backend; navigation, the Customize editor (pin/hide/reorder),
+  and the camera-player transport.
+- **Live `haSource`** (`e2e/ha/`) — the app connects to **`mock-ha/`**, a standalone server that
+  speaks the real `home-assistant-js-websocket` protocol with **scriptable** scenarios. This covers
+  the integration seam an emulator can't: connect/auth, live state reconcile, reconnect, the
+  doorbell banner, and the **security-critical lock** flow — pending→confirmed, a jam, and a
+  rejected call — all **without touching a real lock**. The mock is a separate process so Android
+  instrumented tests can point at the same server (see [`mock-ha/README.md`](mock-ha/README.md)).
+
+`npm run test:e2e` starts both servers automatically. In the cloud sandbox it uses the
+pre-installed Chromium; in CI the advisory `e2e` job installs Playwright's managed browser.
 
 ## Layout
 
