@@ -57,19 +57,25 @@ fun WebRtcPlayer(
         }
     }
 
+    // Declaration order is load-bearing. Compose disposes effects in reverse (LIFO), so the
+    // renderer/EglBase release MUST be declared *before* the session: that way, when this player
+    // leaves composition (e.g. scrubbing from live to recorded, switching cameras, or closing the
+    // lightbox), the PeerConnection is disposed FIRST and stops feeding frames, and only then are the
+    // GL surfaces freed. Releasing the renderer/EglBase while the peer is still rendering into them
+    // crashes the whole process natively (SIGSEGV in libwebrtc), not catchably.
+    DisposableEffect(Unit) {
+        onDispose {
+            renderer.release()
+            eglBase.release()
+        }
+    }
+
     DisposableEffect(entityId) {
         val session = WebRtcSession(scope, viewModel, eglBase, renderer, entityId) {
             currentOnFail.value()
         }
         session.start()
         onDispose { session.close() }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            renderer.release()
-            eglBase.release()
-        }
     }
 
     AndroidView(factory = { renderer }, modifier = modifier)
