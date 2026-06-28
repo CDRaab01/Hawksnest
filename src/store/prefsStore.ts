@@ -38,8 +38,11 @@ function effectiveFavorites(favorites: string[] | null): string[] {
   return favorites ?? favoritesSeed;
 }
 
+// Persist the raw favorites value (null preserved). Pin/move/reorder pass a
+// concrete list so they materialize the seed; toggleHidden passes the unchanged
+// favorites, so hiding a device never freezes the seed snapshot into storage.
 function persist(favorites: string[] | null, hidden: string[]): void {
-  savePreferences({ favorites: effectiveFavorites(favorites), hidden });
+  savePreferences({ favorites, hidden });
 }
 
 export const usePrefsStore = create<PrefsState>((set, get) => ({

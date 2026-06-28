@@ -123,7 +123,7 @@ function describeConfigError(status: number): string {
  * subscription — no manual refresh.
  */
 function automationUrl(creds: HaCredentials, id: string): string {
-  return `${creds.url}/api/config/automation/config/${encodeURIComponent(id)}`;
+  return `${creds.url.replace(/\/+$/, "")}/api/config/automation/config/${encodeURIComponent(id)}`;
 }
 
 /** One raw sample from `history/history_during_period` (compressed or legacy). */
@@ -286,6 +286,9 @@ export function createHaSource(
       });
       conn.addEventListener("disconnected", () => {
         store().setStatus("connecting", "Reconnecting…");
+      });
+      conn.addEventListener("reconnect-error", (_c, err) => {
+        if (!stopped) store().setStatus("error", describeError(err));
       });
 
       unsub = deps.subscribe(conn, (entities) => {
