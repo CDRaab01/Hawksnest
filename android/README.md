@@ -46,6 +46,28 @@ Optionally prefill the HA base URL for debug builds: add `ha.url=http://<tailnet
 `local.properties` (otherwise it's entered in Settings at runtime). CI runs both Gradle tasks
 (`.github/workflows/android-ci.yml`).
 
+## Testing against the mock HA server
+
+The app talks to HA the same way the web client does, so it can run against the repo's scriptable
+fake Home Assistant — [`mock-ha/`](../mock-ha) — instead of a real instance. The HA base URL is
+fully injectable (`util/CredentialStore` → `ConnectionManager`), and cleartext to private hosts is
+already allowed (`res/xml/network_security_config.xml`), so no app changes are needed.
+
+- **JVM unit tests (here, no device):** drive `core/ha/HaConnection` with a faked WebSocket and the
+  mock's frame shapes (see `HaConnectionTest` for the pattern). The pure lock/label logic
+  (`core/logic/LockState.kt`, `Security.kt`) is unit-tested directly.
+- **Instrumented tests (needs a KVM-accelerated emulator — run on the host via Remote Control):**
+  1. Start the mock on the host: `PORT=8765 npm run mock-ha` (from the repo root).
+  2. Point the app at it from the emulator using the host-loopback alias:
+     `ha.url=http://10.0.2.2:8765` in `local.properties` (debug prefill), or set it at runtime via
+     Settings / `SettingsViewModel.connect("http://10.0.2.2:8765", "e2e-token")`.
+  3. Drive scenarios over the **same `/__scenario` control API** the web E2E uses
+     (`reset`, `state`, `service-outcome`, `disconnect`, `calls`) — see
+     [`mock-ha/README.md`](../mock-ha/README.md). This is the one fake backend both clients share.
+
+  > Instrumented specs aren't committed yet: they need a running emulator to author against, which
+  > isn't available in the cloud sandbox. They land in a host session where the emulator can drive them.
+
 ## Design audit (Sift)
 
 The Compose UI is audited by **[Sift](../../Sift)**, the sibling design-slop auditor — it renders

@@ -15,4 +15,16 @@ test.describe("ha doorbell", () => {
     await mockHaPage.getByRole("button", { name: "Dismiss doorbell alert" }).click();
     await expect(mockHaPage.getByText("Doorbell", { exact: true })).toBeHidden();
   });
+
+  test("the banner's View action opens the camera player", async ({ mockHaPage, control }) => {
+    await mockHaPage.goto("/");
+    await expect(mockHaPage.getByRole("button", { name: /^Open .* live view$/ }).first()).toBeVisible();
+
+    await control.pushState("binary_sensor.front_door_ding", "on");
+    await expect(mockHaPage.getByText("Doorbell", { exact: true })).toBeVisible();
+
+    await mockHaPage.getByRole("button", { name: "View", exact: true }).click();
+    await expect(mockHaPage.getByRole("dialog")).toBeVisible();
+  });
 });
+

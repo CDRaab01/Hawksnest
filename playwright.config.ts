@@ -19,6 +19,7 @@ function sandboxChromium(): string | undefined {
 }
 
 const executablePath = sandboxChromium();
+const launch = executablePath ? { launchOptions: { executablePath } } : {};
 
 export default defineConfig({
   testDir: "e2e",
@@ -29,18 +30,26 @@ export default defineConfig({
   retries: CI ? 1 : 0,
   reporter: [["html", { open: "never" }], ["list"]],
   use: {
-    baseURL: "http://localhost:5173",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
   projects: [
     {
+      // Demo + mock-HA specs against the dev server.
       name: "chromium",
-      use: executablePath ? { launchOptions: { executablePath } } : {},
+      testIgnore: "**/pwa/**",
+      use: { baseURL: "http://localhost:5173", ...launch },
+    },
+    {
+      // PWA offline shell needs a real build, so it runs against `vite preview`
+      // (the service worker is unreliable under the dev server).
+      name: "pwa",
+      testMatch: "**/pwa/**",
+      use: { baseURL: "http://localhost:4173", ...launch },
     },
   ],
-  // Both must be ready before specs run; Playwright waits on each url.
+  // All must be ready before specs run; Playwright waits on each url.
   webServer: [
     {
       command: "npm run mock-ha",
@@ -52,6 +61,13 @@ export default defineConfig({
       command: "npm run dev",
       url: "http://localhost:5173",
       reuseExistingServer: !CI,
+      stdout: "ignore",
+    },
+    {
+      command: "npm run build && npm run preview -- --port 4173 --strictPort",
+      url: "http://localhost:4173",
+      reuseExistingServer: !CI,
+      timeout: 180_000,
       stdout: "ignore",
     },
   ],

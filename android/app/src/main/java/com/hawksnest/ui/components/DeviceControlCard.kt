@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.CardType
+import com.hawksnest.core.logic.lockStateLabel
 import com.hawksnest.ui.theme.HawksnestTheme
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -184,6 +185,7 @@ private fun subtitle(d: DeviceUi): String = when (d.card) {
             else -> d.stateText
         }
     }
+    CardType.LOCK -> lockStateLabel(d.rawState)
     CardType.BINARY_SENSOR -> binarySensorText(d.rawState, d.attributes.str("device_class"))
     CardType.GENERIC -> d.attributes.str("unit_of_measurement")?.let { "${d.stateText} $it" } ?: d.stateText
     else -> d.stateText

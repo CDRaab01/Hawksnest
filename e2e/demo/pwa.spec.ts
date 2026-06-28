@@ -13,9 +13,6 @@ test.describe("pwa", () => {
     await expect(demoPage.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#0B0D10");
   });
 
-  // The vite-plugin-pwa service worker is unreliable under the dev server; cover
-  // real install + offline against a `vite preview` build in a follow-up.
-  test.fixme("registers a service worker and serves the shell offline", async () => {
-    // Build + preview, register navigator.serviceWorker, go offline, reload, assert shell.
-  });
+  // Offline shell + service worker are covered against the production build in
+  // e2e/pwa/pwa-offline.spec.ts (the `pwa` Playwright project on `vite preview`).
 });
