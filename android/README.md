@@ -46,6 +46,27 @@ Optionally prefill the HA base URL for debug builds: add `ha.url=http://<tailnet
 `local.properties` (otherwise it's entered in Settings at runtime). CI runs both Gradle tasks
 (`.github/workflows/android-ci.yml`).
 
+## Installing the APK (sideloading)
+
+Every Hawksnest build — local debug, the CI release APK, and the `release.apk` cut by
+`.github/workflows/android-release.yml` — is signed with **one committed key**
+(`app/hawksnest-debug.keystore`, configured in `app/build.gradle.kts`). Because they all share a
+signing certificate, a new APK installs **in place over the previous one**, keeping your saved HA
+token. There is intentionally **no separate secret release key**: a second key would sign the APK
+with a different certificate, and Android would refuse it as *"App not installed as package conflicts
+with an existing package."* To cut a fresh versioned build, bump `android/.release-trigger` and push
+(or run the **Android Release** workflow), then install the uploaded artifact.
+
+> **Migrating off an older build?** If a Hawksnest build signed with a *different* key is already on
+> the device (e.g. an earlier APK that used a separate release key), the first install of the
+> single-key build will still report the package conflict. Uninstall it once
+> (`adb uninstall com.hawksnest`, or long-press the icon → Uninstall — this clears app data, so
+> you'll re-enter your HA URL + token), then install the new APK. Every build after that updates in
+> place.
+>
+> If you later publish to the Play Store, don't reuse this key — switch to **Play App Signing** with
+> a dedicated upload key.
+
 ## Testing against the mock HA server
 
 The app talks to HA the same way the web client does, so it can run against the repo's scriptable

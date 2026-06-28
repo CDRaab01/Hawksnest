@@ -1,12 +1,12 @@
 name: Android Release
 
-# Manual trigger — build a SIGNED release APK with your own key.
-# Requires four repository secrets (Settings → Secrets and variables → Actions):
-#   HAWKSNEST_KEYSTORE_BASE64    base64 of your release keystore (.jks)
-#   HAWKSNEST_KEYSTORE_PASSWORD  the keystore (store) password
-#   HAWKSNEST_KEY_ALIAS          the key alias
-#   HAWKSNEST_KEY_PASSWORD       the key password
-# The signed APK is uploaded as an artifact and installs as an update over previous signed builds.
+# Manual trigger — build a signed release APK for sideloading.
+#
+# It is signed with the ONE committed key in android/app/build.gradle.kts (the same key every debug
+# and CI build uses), NOT a separate secret key. That is deliberate: a different key would sign this
+# APK with a different certificate than the build already on the phone, and Android would reject the
+# install as "App not installed as package conflicts with an existing package". Sharing one key is
+# what lets each release.apk install in place over the previous one. No signing secrets are needed.
 #
 # Triggers: the manual "Run workflow" button (once this file is on the default branch), and a push
 # that changes this workflow or the `android/.release-trigger` sentinel. To cut a new signed build,
@@ -34,24 +34,10 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Decode keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.HAWKSNEST_KEYSTORE_BASE64 }}
-        run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::HAWKSNEST_KEYSTORE_BASE64 secret is not set. Add the four signing secrets first."
-            exit 1
-          fi
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-
       - run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Assemble signed release APK
         env:
-          KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
-          KEYSTORE_PASSWORD: ${{ secrets.HAWKSNEST_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.HAWKSNEST_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.HAWKSNEST_KEY_PASSWORD }}
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: "0.1.${{ github.run_number }}"
         run: ./gradlew :app:assembleRelease --no-daemon

@@ -14,8 +14,6 @@ val localProperties = Properties().apply {
     if (f.exists()) load(f.inputStream())
 }
 
-val keystorePath: String? = System.getenv("KEYSTORE_PATH")
-
 // Is the Sift design-slop auditor available as a composite build (sibling checkout, or -PsiftDir in
 // CI)? Mirrors the guard in settings.gradle.kts. When false (a standalone Hawksnest checkout), the
 // test-only Sift audit source set + deps below are skipped so `:app:testDebugUnitTest` stays green.
@@ -46,25 +44,24 @@ android {
     }
 
     signingConfigs {
-        // A stable, committed key so every build — on any machine, debug or local release — shares
-        // one signing identity. That makes new APKs install *over the top* of the existing one (an
-        // in-place update) instead of failing with INSTALL_FAILED_UPDATE_INCOMPATIBLE, so the saved
-        // HA token survives the update. It secures nothing on its own (this is a personal,
-        // sideloaded app); its only job is install continuity. Password is intentionally not secret.
+        // ONE committed key for *every* build — debug, CI release, and the release.apk cut by the
+        // release workflow all share this single signing identity. That is the whole point: APKs
+        // signed with the same certificate install *over the top* of each other (an in-place
+        // update), so you never hit "App not installed as package conflicts with an existing
+        // package" (INSTALL_FAILED_UPDATE_INCOMPATIBLE) when moving between a debug and a release
+        // build, and the saved HA token survives the update.
+        //
+        // We deliberately do NOT introduce a separate, secret release key. A second key would sign
+        // release.apk with a *different* certificate than the debug build already on the phone, and
+        // Android rejects that as a package conflict — exactly the error this is meant to avoid.
+        // This key secures nothing on its own (a personal, sideloaded app); its only job is install
+        // continuity, so the password is intentionally not secret. If you ever publish to the Play
+        // Store, switch to Play App Signing with a dedicated upload key instead of this one.
         create("stable") {
             storeFile = file("hawksnest-debug.keystore")
             storePassword = "hawksnest"
             keyAlias = "hawksnest"
             keyPassword = "hawksnest"
-        }
-        // CI's real release key, only when KEYSTORE_PATH is supplied in the environment.
-        if (keystorePath != null) {
-            create("release") {
-                storeFile = file(keystorePath)
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD")
-            }
         }
     }
 
@@ -73,10 +70,9 @@ android {
             signingConfig = signingConfigs.getByName("stable")
         }
         release {
-            // Prefer CI's release key; fall back to the stable committed key for local releases so
-            // they stay installable and identity-stable too.
-            signingConfig = signingConfigs.findByName("release")
-                ?: signingConfigs.getByName("stable")
+            // Same committed key as debug — see signingConfigs above. Keeping one identity across
+            // every variant is what lets sideloaded installs update in place.
+            signingConfig = signingConfigs.getByName("stable")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

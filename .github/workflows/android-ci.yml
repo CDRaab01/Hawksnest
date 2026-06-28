@@ -48,10 +48,10 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
 
-  # Build the release application as part of the pipeline. Signs the APK when the keystore secrets
-  # are configured (Settings → Secrets and variables → Actions); otherwise builds an UNSIGNED release
-  # APK so the release variant is still continuously verified. The dedicated `android-release.yml`
-  # remains the path for cutting an explicit, versioned signed build.
+  # Build the release variant as part of the pipeline so it is continuously verified. It is signed
+  # with the single committed key in android/app/build.gradle.kts (the same key as debug), so the
+  # resulting APK installs in place over any other Hawksnest build — no signing secrets involved.
+  # The dedicated `android-release.yml` remains the path for cutting an explicit, versioned build.
   android-release:
     name: "Android — Release APK"
     runs-on: ubuntu-latest
@@ -68,24 +68,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Decode signing keystore (if configured)
-        env:
-          KEYSTORE_BASE64: ${{ secrets.HAWKSNEST_KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-            # Exported only when present → build.gradle.kts skips signing (unsigned) when it's unset.
-            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
-            echo "::notice::Building a SIGNED release APK."
-          else
-            echo "::notice::HAWKSNEST_KEYSTORE_BASE64 not set — building an UNSIGNED release APK."
-          fi
-
       - name: Assemble release APK
         env:
-          KEYSTORE_PASSWORD: ${{ secrets.HAWKSNEST_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.HAWKSNEST_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.HAWKSNEST_KEY_PASSWORD }}
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: "0.1.${{ github.run_number }}"
         run: ./gradlew :app:assembleRelease --no-daemon
