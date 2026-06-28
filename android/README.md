@@ -57,16 +57,18 @@ already allowed (`res/xml/network_security_config.xml`), so no app changes are n
   mock's frame shapes (see `HaConnectionTest` for the pattern). The pure lock/label logic
   (`core/logic/LockState.kt`, `Security.kt`) is unit-tested directly.
 - **Instrumented tests (needs a KVM-accelerated emulator — run on the host via Remote Control):**
-  1. Start the mock on the host: `PORT=8765 npm run mock-ha` (from the repo root).
-  2. Point the app at it from the emulator using the host-loopback alias:
-     `ha.url=http://10.0.2.2:8765` in `local.properties` (debug prefill), or set it at runtime via
-     Settings / `SettingsViewModel.connect("http://10.0.2.2:8765", "e2e-token")`.
-  3. Drive scenarios over the **same `/__scenario` control API** the web E2E uses
+  the committed suite is `app/src/androidTest/java/com/hawksnest/MockHaInstrumentedTest.kt`
+  (connect, arm-away outbound `call_service`, inbound state push), driving the real app through a
+  small `/__scenario` client (`MockControl.kt`).
+  1. Start the mock on the host: `PORT=8799 npm run mock-ha` (from the repo root). The suite uses its
+     own port so it doesn't collide with a web E2E mock running on the default `8765`.
+  2. Boot an emulator, then run `./gradlew :app:connectedDebugAndroidTest`. The tests reach the
+     host's mock through the loopback alias `http://10.0.2.2:8799`, entering it via the Settings UI —
+     no `local.properties` prefill needed (for manual runs you can still set
+     `ha.url=http://10.0.2.2:8765` or `SettingsViewModel.connect(...)`).
+  3. Scenarios are driven over the **same `/__scenario` control API** the web E2E uses
      (`reset`, `state`, `service-outcome`, `disconnect`, `calls`) — see
      [`mock-ha/README.md`](../mock-ha/README.md). This is the one fake backend both clients share.
-
-  > Instrumented specs aren't committed yet: they need a running emulator to author against, which
-  > isn't available in the cloud sandbox. They land in a host session where the emulator can drive them.
 
 ## Design audit (Sift)
 
