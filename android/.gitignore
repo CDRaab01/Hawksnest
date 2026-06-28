@@ -10,3 +10,6 @@
 .kotlin
 **/build/
 app/build/
+
+# Google Play service-account key — provided via CI secret or dropped in locally; never committed.
+/play-service-account.json

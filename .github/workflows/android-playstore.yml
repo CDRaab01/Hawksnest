@@ -1,0 +1,67 @@
+name: Android — Play Internal
+
+# Build the release AAB and publish it to the Google Play **internal testing** track via Gradle
+# Play Publisher (`:app:publishReleaseBundle`).
+#
+# One-time setup before this can run (see android/PLAYSTORE.md for the full walkthrough):
+#   1. Create the app in Play Console and upload one AAB manually (enrolls Play App Signing + records
+#      the upload certificate — this committed key is the upload key). GPP cannot create the app.
+#   2. Create a Google Play service account, grant it release access, download the JSON key, and add
+#      it as the repository secret PLAY_SERVICE_ACCOUNT_JSON.
+#
+# Triggers: the manual "Run workflow" button, and a push to main that bumps the
+# `android/.release-trigger` sentinel (or edits this workflow). To cut a new internal release, bump
+# `android/.release-trigger` and push.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/android-playstore.yml"
+      - "android/.release-trigger"
+
+jobs:
+  publish:
+    name: "Android — Publish to Play internal"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the versionCode (commit count) is monotonic and well above the
+          # versionCode of the manual bootstrap upload.
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Write Play service-account key
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::error::PLAY_SERVICE_ACCOUNT_JSON secret is not set. Add the Play service-account JSON first (see android/PLAYSTORE.md)."
+            exit 1
+          fi
+          printf '%s' "$PLAY_SERVICE_ACCOUNT_JSON" > play-service-account.json
+
+      - run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Compute monotonic versionCode
+        id: ver
+        run: echo "code=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build + publish release bundle to internal track
+        env:
+          VERSION_CODE: ${{ steps.ver.outputs.code }}
+          VERSION_NAME: "0.1.${{ steps.ver.outputs.code }}"
+        run: ./gradlew :app:publishReleaseBundle --no-daemon
+
+      - name: Scrub credentials
+        if: always()
+        run: rm -f play-service-account.json

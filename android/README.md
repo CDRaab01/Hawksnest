@@ -63,9 +63,13 @@ with an existing package."* To cut a fresh versioned build, bump `android/.relea
 > (`adb uninstall com.hawksnest`, or long-press the icon → Uninstall — this clears app data, so
 > you'll re-enter your HA URL + token), then install the new APK. Every build after that updates in
 > place.
->
-> If you later publish to the Play Store, don't reuse this key — switch to **Play App Signing** with
-> a dedicated upload key.
+
+> **Sideload vs. Google Play.** The primary distribution channel is the Play **internal testing**
+> track — see [`PLAYSTORE.md`](PLAYSTORE.md). The committed key doubles as the Play **upload key**
+> (Play App Signing re-signs installs with Google's managed key). Debug builds use applicationId
+> `com.hawksnest.debug` so a sideloaded debug build coexists with the Play-installed release; a
+> sideloaded *release* APK shares `com.hawksnest` with the Play build, so use one channel per device
+> (or uninstall to switch).
 
 ## Testing against the mock HA server
 

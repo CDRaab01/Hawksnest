@@ -26,6 +26,7 @@ mockitoKotlin = "5.4.0"
 konfetti = "2.0.4"
 robolectric = "4.14.1"
 roborazzi = "1.32.0"
+playPublisher = "3.12.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -78,3 +79,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+play-publisher = { id = "com.github.triplet.play", version.ref = "playPublisher" }

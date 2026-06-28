@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.play.publisher)
 }
 
 val localProperties = Properties().apply {
@@ -44,19 +45,22 @@ android {
     }
 
     signingConfigs {
-        // ONE committed key for *every* build — debug, CI release, and the release.apk cut by the
-        // release workflow all share this single signing identity. That is the whole point: APKs
-        // signed with the same certificate install *over the top* of each other (an in-place
-        // update), so you never hit "App not installed as package conflicts with an existing
-        // package" (INSTALL_FAILED_UPDATE_INCOMPATIBLE) when moving between a debug and a release
-        // build, and the saved HA token survives the update.
+        // ONE committed key signs everything. It plays two roles:
         //
-        // We deliberately do NOT introduce a separate, secret release key. A second key would sign
-        // release.apk with a *different* certificate than the debug build already on the phone, and
-        // Android rejects that as a package conflict — exactly the error this is meant to avoid.
-        // This key secures nothing on its own (a personal, sideloaded app); its only job is install
-        // continuity, so the password is intentionally not secret. If you ever publish to the Play
-        // Store, switch to Play App Signing with a dedicated upload key instead of this one.
+        //  1. SIDELOAD identity — debug + the release.apk cut for sideloading all share this
+        //     certificate, so a new APK installs *over the top* of the previous one (an in-place
+        //     update) instead of failing with "App not installed as package conflicts with an
+        //     existing package" (INSTALL_FAILED_UPDATE_INCOMPATIBLE). The saved HA token survives.
+        //
+        //  2. Play UPLOAD key — this same key signs the AAB we upload to Play. With Play App
+        //     Signing, Google holds the real *app signing key* and re-signs every install, so the
+        //     upload key never reaches a device. Reusing this committed key as the upload key is a
+        //     deliberate choice for a personal internal-test app: zero secrets, CI publishes
+        //     unattended. KEEP this key — once Play records it as the upload certificate, losing it
+        //     means registering a replacement upload key with Google support.
+        //
+        // It secures nothing on its own (the password is intentionally not secret); its only jobs
+        // are sideload install-continuity and being a stable Play upload identity.
         create("stable") {
             storeFile = file("hawksnest-debug.keystore")
             storePassword = "hawksnest"
@@ -68,6 +72,13 @@ android {
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("stable")
+            // Distinct package so a sideloaded debug build can coexist on the same device as the
+            // Play-installed release (com.hawksnest). Without this, the two carry different signing
+            // certificates under the same applicationId and Android rejects the second as a package
+            // conflict. (The instrumented-test runner targets com.hawksnest.debug.test — see
+            // scripts/android-emulator-test.sh.)
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
         }
         release {
             // Same committed key as debug — see signingConfigs above. Keeping one identity across
@@ -101,6 +112,23 @@ android {
     if (siftAvailable) {
         sourceSets.getByName("test").java.srcDirs("src/siftAudit/kotlin")
     }
+}
+
+// ── Google Play publishing (Gradle Play Publisher) ──────────────────────────────────────────────
+// Publishes the release AAB straight to the Play **internal testing** track. Authentication is a
+// Google Play service-account JSON: CI writes the PLAY_SERVICE_ACCOUNT_JSON secret to the path
+// below before running `:app:publishReleaseBundle`; locally, drop the same file at
+// android/play-service-account.json (git-ignored) to publish from a workstation.
+//
+// The credentials file is resolved lazily — applying this plugin without it present does not break
+// other Gradle tasks (build, test, assembleDebug); only the publish* tasks require it at run time.
+// NOTE: the Play app must already exist and have had one AAB uploaded manually (to enroll in Play
+// App Signing and record the upload cert) before automated publishing works — GPP cannot create the
+// app. See android/PLAYSTORE.md.
+play {
+    serviceAccountCredentials.set(rootProject.file("play-service-account.json"))
+    track.set("internal")
+    defaultToAppBundles.set(true)
 }
 
 dependencies {

@@ -27,7 +27,9 @@ AVD="${AVD:-hawksnest_test}"
 MOCK_PORT="${MOCK_PORT:-8799}"
 EMU="$ANDROID_HOME/emulator/emulator"
 ADB="$ANDROID_HOME/platform-tools/adb"
-PKG=com.hawksnest
+# Debug builds carry the `.debug` applicationIdSuffix (see android/app/build.gradle.kts) so they
+# coexist with a Play-installed release; the instrumented test + Monkey target that package.
+PKG=com.hawksnest.debug
 APP=app/build/outputs/apk/debug/app-debug.apk
 TEST=app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 
