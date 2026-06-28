@@ -29,14 +29,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Assemble signed release AAB (versionCode 1)
+      - name: Assemble signed release AAB (versionCode 2)
         env:
-          VERSION_CODE: "1"
-          VERSION_NAME: "0.1.0"
+          # Bumped from 1 → 2: Play rejects re-using a versionCode, and 1 was already consumed by
+          # the first bootstrap upload. Still well below the auto-publish codes (git commit count).
+          VERSION_CODE: "2"
+          VERSION_NAME: "0.1.2"
         run: ./gradlew :app:bundleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
-          name: hawksnest-internal-v1
+          name: hawksnest-internal-v2
           path: android/app/build/outputs/bundle/release/app-release.aab
           retention-days: 90
