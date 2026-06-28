@@ -21,11 +21,11 @@ jobs:
       - run: npm run build
 
   e2e:
-    # Playwright end-to-end: demo-mode UI flows + the live haSource path driven
-    # against the bundled mock HA server (mock-ha/). Advisory while flake is shaken
-    # out; the mock's own protocol logic is unit-tested in the gating `build` job.
+    # Playwright end-to-end: demo-mode UI flows, the PWA offline shell (preview
+    # build), and the live haSource path driven against the bundled mock HA server
+    # (mock-ha/). Gating — the mock's own protocol logic is also unit-tested in the
+    # `build` job, so a red e2e job means a real regression.
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

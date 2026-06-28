@@ -28,7 +28,7 @@ test.describe("lock (security-critical)", () => {
     await expect(card).toHaveAttribute("data-state", "locked");
   });
 
-  test("a jam leaves the lock pending and never reaches locked", async ({ mockHaPage, control }) => {
+  test("a jam clears the spinner and surfaces 'Jammed' (never shows Unlocked)", async ({ mockHaPage, control }) => {
     await mockHaPage.goto(`/entity/${LOCK}`);
     const card = mockHaPage.getByTestId(`lock-card-${LOCK}`);
     await expect(card).toHaveAttribute("data-state", "locked");
@@ -39,10 +39,14 @@ test.describe("lock (security-critical)", () => {
 
     await control.setServiceOutcome({ domain: "lock", service: "lock", outcome: "jammed", delayMs: 300 });
     await card.getByRole("button", { name: "Lock", exact: true }).click();
-    await expect(card.getByText("Locking…")).toBeVisible();
+    await expect(card.getByText("Locking…")).toBeVisible(); // pending while in-flight
+
+    // Jam echo settles: spinner clears, "Jammed" is shown (NOT "Unlocked"/"Locked"),
+    // and the buttons re-enable so the user can retry.
     await expect(card).toHaveAttribute("data-state", "jammed");
-    // The spinner persists — pending is only cleared when state === the requested target.
-    await expect(card.getByText("Locking…")).toBeVisible();
+    await expect(card.getByText("Jammed — try again")).toBeVisible();
+    await expect(card.getByText("Locking…")).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Lock", exact: true })).toBeEnabled();
   });
 
   test("a rejected call surfaces an error", async ({ mockHaPage, control }) => {

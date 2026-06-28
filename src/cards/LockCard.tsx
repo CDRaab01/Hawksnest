@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Lock, LockOpen, Loader } from "lucide-react";
+import { Lock, LockOpen, Loader, AlertTriangle } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
 import { resolveName } from "../lib/resolve";
@@ -17,12 +17,18 @@ type Target = "locked" | "unlocked";
 export function LockCard({ entity, overrides, density = "comfortable" }: CardProps) {
   const name = resolveName(entity, overrides);
   const locked = entity.state === "locked";
+  // A jam is a terminal *failure* state HA reports when the bolt can't throw —
+  // surface it explicitly. Never render a jammed lock as "Unlocked".
+  const jammed = entity.state === "jammed";
   const [pending, setPending] = useState<Target | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Clear the pending state once HA reports the requested state.
+  // Clear the pending spinner once HA settles: either it reached the requested
+  // state (success), or it reported `jammed` (failure — stop spinning and show
+  // it, rather than spin forever).
   useEffect(() => {
-    if (pending && entity.state === pending) setPending(null);
+    if (!pending) return;
+    if (entity.state === pending || entity.state === "jammed") setPending(null);
   }, [entity.state, pending]);
 
   async function request(target: Target) {
@@ -38,7 +44,7 @@ export function LockCard({ entity, overrides, density = "comfortable" }: CardPro
     }
   }
 
-  const StatusIcon = pending ? Loader : locked ? Lock : LockOpen;
+  const StatusIcon = pending ? Loader : jammed ? AlertTriangle : locked ? Lock : LockOpen;
   const channel = locked ? "recovery" : "streak";
   const statusColor = pending
     ? "text-ink-dim"
@@ -49,9 +55,11 @@ export function LockCard({ entity, overrides, density = "comfortable" }: CardPro
     ? pending === "locked"
       ? "Locking…"
       : "Unlocking…"
-    : locked
-      ? "Locked"
-      : "Unlocked";
+    : jammed
+      ? "Jammed — try again"
+      : locked
+        ? "Locked"
+        : "Unlocked";
 
   const testId = `lock-card-${entity.entity_id}`;
 
