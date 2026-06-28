@@ -1,0 +1,42 @@
+name: Android — Bootstrap AAB
+
+# Builds the signed release App Bundle (versionCode 1) and uploads it as a downloadable artifact —
+# the one-time "bootstrap" AAB you upload by hand to Play Console → Internal testing to create the
+# app and enroll Play App Signing. After that, the `android-playstore.yml` workflow publishes
+# updates automatically; you won't need this again.
+#
+# Download: open this workflow's run (Actions tab) → Artifacts → hawksnest-internal-v1.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/**", "main"]
+    paths:
+      - ".github/workflows/android-aab.yml"
+
+jobs:
+  bundle:
+    name: "Android — Bootstrap AAB"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Assemble signed release AAB (versionCode 1)
+        env:
+          VERSION_CODE: "1"
+          VERSION_NAME: "0.1.0"
+        run: ./gradlew :app:bundleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hawksnest-internal-v1
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 90
