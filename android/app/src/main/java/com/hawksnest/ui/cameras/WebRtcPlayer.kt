@@ -23,9 +23,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
-import org.webrtc.DefaultVideoDecoderFactory
-import org.webrtc.DefaultVideoEncoderFactory
-import org.webrtc.EglBase
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
@@ -60,29 +57,27 @@ fun WebRtcPlayer(
     val scope = rememberCoroutineScope()
     // Keep the step-down callback current without restarting the negotiation each recomposition.
     val currentOnFail = rememberUpdatedState(onFail)
-    val eglBase = remember { EglBase.create() }
+    // Process-wide EGL context + PeerConnectionFactory, created once and never disposed (WebRtcCore).
+    remember(context) { WebRtcCore.init(context) }
     val renderer = remember {
         SurfaceViewRenderer(context).apply {
-            init(eglBase.eglBaseContext, null)
+            init(WebRtcCore.eglBase.eglBaseContext, null)
             setEnableHardwareScaler(true)
         }
     }
 
-    // Declaration order is load-bearing. Compose disposes effects in reverse (LIFO), so the
-    // renderer/EglBase release MUST be declared *before* the session: that way, when this player
-    // leaves composition (e.g. scrubbing from live to recorded, switching cameras, or closing the
-    // lightbox), the PeerConnection is disposed FIRST and stops feeding frames, and only then are the
-    // GL surfaces freed. Releasing the renderer/EglBase while the peer is still rendering into them
-    // crashes the whole process natively (SIGSEGV in libwebrtc), not catchably.
+    // Declaration order is load-bearing. Compose disposes effects in reverse (LIFO), so the renderer
+    // release MUST be declared *before* the session: that way, when this player leaves composition
+    // (scrubbing live→recorded, switching cameras, closing the lightbox), the PeerConnection is
+    // disposed FIRST and stops feeding frames, and only then is the renderer surface freed. Releasing
+    // the renderer while the peer still renders into it crashes natively. The shared EglBase is NOT
+    // released here — it lives for the process, so there's no EGL-teardown race at all.
     DisposableEffect(Unit) {
-        onDispose {
-            renderer.release()
-            eglBase.release()
-        }
+        onDispose { renderer.release() }
     }
 
     DisposableEffect(entityId) {
-        val session = WebRtcSession(scope, viewModel, eglBase, renderer, entityId) {
+        val session = WebRtcSession(scope, viewModel, WebRtcCore.factory, renderer, entityId) {
             currentOnFail.value()
         }
         session.start()
@@ -151,12 +146,11 @@ private fun Bitmap.isMostlyBlack(): Boolean {
 private class WebRtcSession(
     private val scope: CoroutineScope,
     private val viewModel: CameraPlayerViewModel,
-    eglBase: EglBase,
+    private val factory: PeerConnectionFactory,
     private val renderer: SurfaceViewRenderer,
     private val entityId: String,
     private val onFail: () -> Unit,
 ) {
-    private val factory: PeerConnectionFactory
     private var peer: PeerConnection? = null
     private var handle: WebRtcHandle? = null
     private var watchdog: Job? = null
@@ -169,17 +163,6 @@ private class WebRtcSession(
     private val pendingLocal = mutableListOf<IceCandidate>()
     /** Remote ICE that arrived before the answer was applied (can't be added yet). */
     private val pendingRemote = mutableListOf<IceCandidate>()
-
-    init {
-        PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(renderer.context.applicationContext)
-                .createInitializationOptions(),
-        )
-        factory = PeerConnectionFactory.builder()
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true))
-            .createPeerConnectionFactory()
-    }
 
     fun start() {
         val config = PeerConnection.RTCConfiguration(emptyList()).apply {
@@ -298,12 +281,18 @@ private class WebRtcSession(
         override fun onRenegotiationNeeded() {}
     }
 
-    /** Negotiation failed — report once so the parent steps down to HLS/MJPEG, then tear down. */
+    /**
+     * Negotiation failed — report so the parent steps down to HLS/MJPEG. Deliberately does NOT
+     * dispose the peer here: fail() can fire on libwebrtc's own signaling thread (e.g. from
+     * onConnectionChange), and tearing the PeerConnection down from its callback thread is unsafe.
+     * The parent drops this player from composition, and close() then runs from onDispose on the
+     * main thread.
+     */
     private fun fail() {
         val report = synchronized(lock) { !closed }
         if (!report) return
+        watchdog?.cancel()
         scope.launch { onFail() }
-        close()
     }
 
     fun close() {
@@ -313,8 +302,10 @@ private class WebRtcSession(
         }
         watchdog?.cancel()
         runCatching { handle?.close() }
+        // Dispose only this view's PeerConnection — NEVER the factory (WebRtcCore owns it for the
+        // whole process). Disposing the factory per session is exactly what aborted the app with
+        // "pthread_mutex_lock on a destroyed mutex" on the signaling thread.
         runCatching { peer?.dispose() }
-        runCatching { factory.dispose() }
         peer = null
     }
 }
