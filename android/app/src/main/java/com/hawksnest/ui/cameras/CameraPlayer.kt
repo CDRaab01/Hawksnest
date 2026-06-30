@@ -161,6 +161,7 @@ fun CameraPlayer(
                 VideoPlayer(recordingUrl, frame, paused = paused, seekToMs = seekToMs)
             isLive && canWebRtc && !webRtcFailed -> WebRtcPlayer(
                 entityId = cam.entityId,
+                cameraId = cam.id,
                 viewModel = viewModel,
                 onFail = { webRtcFailed = true },
                 modifier = frame,

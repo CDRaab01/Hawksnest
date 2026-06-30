@@ -1,5 +1,6 @@
 package com.hawksnest.ui.home
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -41,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -50,6 +52,7 @@ import com.hawksnest.core.logic.relativeTime
 import com.hawksnest.ui.cameras.CameraLightbox
 import com.hawksnest.ui.cameras.DoorbellBanner
 import com.hawksnest.ui.cameras.CameraSnapshot
+import com.hawksnest.ui.cameras.LiveFrameStore
 import com.hawksnest.ui.cameras.bustCache
 import com.hawksnest.ui.components.ConnectionPill
 import com.hawksnest.ui.components.PanelCard
@@ -339,7 +342,20 @@ private fun CameraTile(
                 .aspectRatio(16f / 9f)
                 .clickable(onClick = onClick),
         ) {
-            CameraSnapshot(model = snapshotModel, modifier = Modifier.fillMaxSize())
+            // Prefer the frame captured while the user last watched this camera live (LiveFrameStore)
+            // over ring-mqtt's stale interval snapshot — so a tile updates to "what I just saw live"
+            // the moment they return to the grid. Falls back to the refreshing snapshot until then.
+            val liveFrame = LiveFrameStore.get(cam.id)
+            if (liveFrame != null) {
+                Image(
+                    bitmap = liveFrame,
+                    contentDescription = "Camera snapshot",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                CameraSnapshot(model = snapshotModel, modifier = Modifier.fillMaxSize())
+            }
             // A camera HA reports unavailable (a closed/offline Ring camera that can't serve a
             // frame) gets a clear "No signal" over the dimmed last frame. This is HA's reliable
             // state — we deliberately do NOT infer staleness from timestamps, because ring-mqtt
