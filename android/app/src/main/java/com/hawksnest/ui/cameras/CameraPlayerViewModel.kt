@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
+/** Home Assistant `CameraEntityFeature.STREAM` bit (camera supports a live video stream). */
+private const val CAMERA_FEATURE_STREAM = 2
+
 /**
  * Proxies the active [ConnectionManager] for the Ring-style camera player — on-demand live stream
  * URLs, recorded events for the timeline, and recorded-footage URLs. Demo synthesizes everything;
@@ -25,10 +28,21 @@ class CameraPlayerViewModel @Inject constructor(
 
     suspend fun liveStreamUrl(entityId: String): String? = connection.streamUrl(entityId)
 
-    /** True when [entityId] advertises go2rtc WebRTC and the source can negotiate it. */
-    fun canWebRtc(entityId: String): Boolean =
-        connection.supportsWebRtc() &&
-            entity(entityId)?.stringAttr("frontend_stream_type") == "web_rtc"
+    /**
+     * True when the app should attempt a WebRTC live session for [entityId].
+     *
+     * Modern HA (2024+) dropped the `frontend_stream_type` state attribute and serves WebRTC via its
+     * bundled go2rtc for any STREAM-capable camera — verified live: these ring cameras report
+     * `frontend_stream_types: ["web_rtc"]` over `camera/capabilities`. So gate on STREAM support, not
+     * the now-absent attribute. The old `== "web_rtc"` check could never be true on current HA, which
+     * is exactly why live always fell back to HA's 10-min-buffered HLS. The player still steps down to
+     * HLS if a negotiation actually fails (`webRtcFailed`).
+     */
+    fun canWebRtc(entityId: String): Boolean {
+        if (!connection.supportsWebRtc()) return false
+        val features = entity(entityId)?.stringAttr("supported_features")?.toIntOrNull() ?: 0
+        return features and CAMERA_FEATURE_STREAM != 0
+    }
 
     /** Begin a WebRTC negotiation; returns a handle to tear it down (null when unsupported). */
     suspend fun webrtcOffer(
