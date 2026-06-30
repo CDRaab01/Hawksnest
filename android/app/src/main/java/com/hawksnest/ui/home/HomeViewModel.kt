@@ -8,6 +8,7 @@ import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.DeviceIndex
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.ServiceData
+import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.AlarmView
 import com.hawksnest.core.logic.DoorbellPress
 import com.hawksnest.core.logic.activeDoorbellPress
@@ -148,19 +149,23 @@ class HomeViewModel @Inject constructor(
         // Collapse ring-mqtt's per-device entities into one logical camera each.
         val logical = resolveCameras(entities, overrides)
         val cameras = logical.map { lc ->
-            // Thumbnail source: prefer the LIVE entity's camera_proxy when it has a signed picture —
-            // HA grabs a FRESH frame from it, whereas the _snapshot still is ring-mqtt's last
-            // passively-published image (stale, never re-captured by re-requesting). Fall back to the
-            // snapshot entity when the live one has no picture. (Costs a periodic stream wake; fine
-            // for these mains-powered cameras.)
-            val thumbEntity = lc.liveEntity.takeIf { snapshotUrl(it) != null } ?: lc.snapshotEntity
             CameraUi(
                 id = lc.id,
                 entityId = lc.liveEntity.entityId,
                 name = lc.name,
                 live = isCameraLive(lc.snapshotEntity),
-                lastChangedMs = lastChangedMs(lc.snapshotEntity.lastChanged),
-                snapshotUrl = snapshotUrl(thumbEntity, resolvedBase),
+                // Age badge: last_changed is useless here — a camera's state rarely transitions, so
+                // it reads hours-stale even on a live feed (the "15h ago" bug). Try a "timestamp"
+                // attr first IF the snapshot capture time is ever exposed on the entity (today it
+                // isn't — ring-mqtt sets no json_attributes_topic), then fall back to last_updated,
+                // which DOES bump on each ~30s snapshot republish for an open camera.
+                lastChangedMs = lastChangedMs(lc.snapshotEntity.stringAttr("timestamp"))
+                    ?: lastChangedMs(lc.snapshotEntity.lastUpdated)
+                    ?: lastChangedMs(lc.snapshotEntity.lastChanged),
+                // The _snapshot still IS ring-mqtt's freshest frame (republished ~every 30s for an
+                // open camera); cache-busting re-fetches it. Do NOT source from the live entity —
+                // camera_proxy on an idle go2rtc stream returns stale/black or errors.
+                snapshotUrl = snapshotUrl(lc.snapshotEntity, resolvedBase),
                 streamUrl = streamUrl(lc.liveEntity, resolvedBase),
                 eventSelectId = lc.eventSelectId,
                 eventStreamId = lc.eventStreamId,

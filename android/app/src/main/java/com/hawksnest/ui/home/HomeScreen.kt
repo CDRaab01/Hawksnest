@@ -340,6 +340,23 @@ private fun CameraTile(
                 .clickable(onClick = onClick),
         ) {
             CameraSnapshot(model = snapshotModel, modifier = Modifier.fillMaxSize())
+            // A camera HA reports unavailable (a closed/offline Ring camera that can't serve a
+            // frame) gets a clear "No signal" over the dimmed last frame. This is HA's reliable
+            // state — we deliberately do NOT infer staleness from timestamps, because ring-mqtt
+            // doesn't expose a capture time and HA's entity_picture token rotation makes
+            // last_updated read "fresh" even on a stale camera.
+            if (!live) {
+                Box(
+                    Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "No signal",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White.copy(alpha = 0.85f),
+                    )
+                }
+            }
             Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
