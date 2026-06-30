@@ -171,13 +171,20 @@ fun Timeline24h(
             // Ticks + labels.
             for (t in ticks(v, wpx)) {
                 val x = timeToX(t, v, wpx)
+                if (x < 0f || x > wpx) continue // off-screen tick
                 drawLine(Color.White.copy(alpha = 0.10f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
-                drawText(
-                    measurer,
-                    clockTime(t),
-                    topLeft = Offset(x + 4f, 4f),
-                    style = TextStyle(color = Color.White.copy(alpha = 0.45f), fontSize = 9.sp),
-                )
+                // Only label when there's room to its right. drawText sizes its layout from
+                // (canvasWidth - topLeft.x); a label whose x sits at/past the right edge makes that
+                // negative → IllegalArgumentException("maxWidth(-1) …") and crashes the whole player
+                // while scrubbing. Guarding the label x keeps the tick line but drops the doomed text.
+                if (x + 4f < wpx) {
+                    drawText(
+                        measurer,
+                        clockTime(t),
+                        topLeft = Offset(x + 4f, 4f),
+                        style = TextStyle(color = Color.White.copy(alpha = 0.45f), fontSize = 9.sp),
+                    )
+                }
             }
 
             // Event chips.
