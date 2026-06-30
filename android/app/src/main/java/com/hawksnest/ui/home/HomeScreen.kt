@@ -81,8 +81,8 @@ fun HomeScreen(
     // (matches the web SnapshotBucketProvider; Ring rate-limits the proxy, so fewer fetches help).
     val bucket by produceState(0L) {
         while (true) {
-            value = System.currentTimeMillis() / 10_000
             delay(10_000)
+            value += 1   // monotonic — a backward clock jump can't repeat a bucket
         }
     }
     var lightbox by remember { mutableStateOf<CameraUi?>(null) }

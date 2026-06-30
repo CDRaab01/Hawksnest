@@ -11,6 +11,7 @@ import com.hawksnest.core.automations.newRule
 import com.hawksnest.core.automations.ruleToConfig
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.primaryEntities
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.util.CredentialStore
@@ -20,9 +21,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import javax.inject.Inject
@@ -127,6 +130,16 @@ class AutomationEditViewModel @Inject constructor(
                 connection.saveAutomationConfig(ruleToConfig(rule.copy(alias = rule.alias.trim())))
             }
             if (result.isSuccess) {
+                // The Config REST POST returns on 2xx, but the new automation.* entity only
+                // reaches state.entities later, over the subscribe_entities WebSocket. Wait for
+                // that echo (staying busy) so the list shows the new row on return instead of
+                // looking like nothing happened. Times out gracefully so a slow/edge-case HA
+                // can never trap the user (worst case: pops after 5s, today's behaviour).
+                withTimeoutOrNull(5_000) {
+                    connection.state.entities.first { entities ->
+                        entities.values.any { it.stringAttr("id") == rule.id }
+                    }
+                }
                 _done.value = true
             } else {
                 _saveError.value = result.exceptionOrNull()?.message ?: "Couldn't save the automation."

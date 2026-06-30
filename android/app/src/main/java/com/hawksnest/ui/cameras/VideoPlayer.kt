@@ -30,6 +30,8 @@ fun VideoPlayer(
     modifier: Modifier = Modifier,
     loop: Boolean = false,
     paused: Boolean = false,
+    /** True for a live HLS feed — join near the live edge instead of racing the buffer to catch up. */
+    live: Boolean = false,
     /** Scrub position (ms into the media). Seeks the prepared player — no re-prepare/reload. */
     seekToMs: Long? = null,
 ) {
@@ -39,6 +41,9 @@ fun VideoPlayer(
     } else {
         Uri.parse(url)
     }
+    // The bundled demo clip is a finite raw resource used as a fake-live LOOP — never treat it as a
+    // live stream (that would stop it looping). Only real HLS URLs get live-edge handling.
+    val liveStream = live && url != DEMO_CLIP_URI
 
     val player = remember {
         ExoPlayer.Builder(context).build().apply { volume = 0f }
@@ -51,15 +56,30 @@ fun VideoPlayer(
     // Prepare only when the media (or loop mode) actually changes. Scrubbing keeps the same VOD
     // loaded and seeks within it (below) instead of re-preparing per move, which re-buffered
     // (stutter) and could crash ExoPlayer on a backwards seek.
-    LaunchedEffect(uri, loop) {
-        player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-        player.setMediaItem(MediaItem.fromUri(uri))
+    LaunchedEffect(uri, loop, liveStream) {
+        // A live feed never ends, so REPEAT is meaningless — and looping a live MediaItem is wrong.
+        player.repeatMode = if (loop && !liveStream) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        val item = if (liveStream) {
+            // Pin a small target offset so ExoPlayer joins NEAR the live edge instead of at the back
+            // of HA's playlist and fast-forwarding to catch up (the confusing "time jump").
+            MediaItem.Builder()
+                .setUri(uri)
+                .setLiveConfiguration(
+                    MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(2_000).build(),
+                )
+                .build()
+        } else {
+            MediaItem.fromUri(uri)
+        }
+        player.setMediaItem(item)
         player.prepare()
+        if (liveStream) player.seekToDefaultPosition()
         player.playWhenReady = !paused
     }
 
     LaunchedEffect(uri, seekToMs) {
-        if (seekToMs != null) {
+        // Scrubbing only applies to VOD; a live stream has no meaningful seek target.
+        if (!liveStream && seekToMs != null) {
             // Clamp into the loaded media (duration is UNSET until prepared) and guard the call:
             // an out-of-range/ill-timed seek must never throw out of this effect and kill the app.
             val dur = player.duration

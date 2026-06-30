@@ -139,7 +139,14 @@ fun AutomationEditScreen(
 
                     Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md)) {
                         PulseButton(
-                            text = if (viewModel.isNew) "Create" else "Save",
+                            // Reflect the save-in-flight wait (we now hold until the new
+                            // automation echoes back over the WebSocket) so it doesn't look idle.
+                            text = when {
+                                busy && viewModel.isNew -> "Creating…"
+                                busy -> "Saving…"
+                                viewModel.isNew -> "Create"
+                                else -> "Save"
+                            },
                             onClick = viewModel::save,
                             enabled = !busy,
                         )
