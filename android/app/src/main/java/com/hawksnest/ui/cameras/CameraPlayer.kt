@@ -68,11 +68,13 @@ fun CameraPlayer(
 
     // Demo/Frigate events come from the source; ring events come off the selector.
     val events: List<CameraEvent> by produceState<List<CameraEvent>>(emptyList(), cam.id) {
-        value = if (isRing) {
-            ringEventsFromSelect(viewModel.entity(cam.eventSelectId!!), cameraName, endMs)
-        } else {
-            viewModel.events(cameraName, startMs, endMs)
-        }
+        value = runCatching {
+            if (isRing) {
+                ringEventsFromSelect(viewModel.entity(cam.eventSelectId!!), cameraName, endMs)
+            } else {
+                viewModel.events(cameraName, startMs, endMs)
+            }
+        }.getOrDefault(emptyList())
     }
     val liveUrl: String? by produceState<String?>(null, cam.id) {
         value = viewModel.liveStreamUrl(cam.entityId)
@@ -101,12 +103,17 @@ fun CameraPlayer(
         paused = false
     }
 
-    // ring recorded playback: select the event, then stream the `_event` camera.
+    // ring recorded playback: select the event, then stream the `_event` camera. Both calls hit HA
+    // and can throw — e.g. scrubbing onto an old event Ring no longer has a recording for. An
+    // uncaught throw here (it runs in produceState's coroutine) would crash the whole player, so
+    // swallow it to null: the transport ladder then steps down to a snapshot instead of dying.
     val ringSrc: String? by produceState<String?>(null, isLive, selected?.id) {
         value = if (isRing && !isLive && selected != null &&
             cam.eventSelectId != null && cam.eventStreamId != null
         ) {
-            viewModel.playRingEvent(cam.eventSelectId, selected.id, cam.eventStreamId)
+            runCatching {
+                viewModel.playRingEvent(cam.eventSelectId, selected.id, cam.eventStreamId)
+            }.getOrNull()
         } else {
             null
         }
@@ -161,6 +168,7 @@ fun CameraPlayer(
                 VideoPlayer(recordingUrl, frame, paused = paused, seekToMs = seekToMs)
             isLive && canWebRtc && !webRtcFailed -> WebRtcPlayer(
                 entityId = cam.entityId,
+                cameraId = cam.id,
                 viewModel = viewModel,
                 onFail = { webRtcFailed = true },
                 modifier = frame,

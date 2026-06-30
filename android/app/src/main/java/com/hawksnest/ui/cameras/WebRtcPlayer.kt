@@ -1,11 +1,18 @@
 package com.hawksnest.ui.cameras
 
+import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.hawksnest.core.ha.WebRtcHandle
@@ -14,6 +21,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
@@ -41,6 +50,8 @@ import org.webrtc.VideoTrack
 @Composable
 fun WebRtcPlayer(
     entityId: String,
+    /** Logical camera id — the key under which captured live frames are stashed for the grid tile. */
+    cameraId: String,
     viewModel: CameraPlayerViewModel,
     onFail: () -> Unit,
     modifier: Modifier = Modifier,
@@ -78,7 +89,59 @@ fun WebRtcPlayer(
         onDispose { session.close() }
     }
 
+    // While the live view is on screen, grab the displayed frame every few seconds and stash the
+    // latest into LiveFrameStore. When the user returns to the grid, that camera's tile shows the
+    // exact frame they were just watching — instead of ring-mqtt's stale interval snapshot. We use
+    // PixelCopy on the SurfaceView's surface (a plain Android API) rather than a libwebrtc frame sink
+    // so we never touch the renderer's GL thread — the native release ordering above stays the only
+    // thing managing it. This effect is keyed to entityId, so it's cancelled before onDispose frees
+    // the surface; a capture that races the teardown just returns null and is dropped.
+    LaunchedEffect(entityId, cameraId) {
+        while (true) {
+            delay(3_000)
+            captureSurface(renderer)?.let { LiveFrameStore.put(cameraId, it) }
+        }
+    }
+
     AndroidView(factory = { renderer }, modifier = modifier)
+}
+
+/**
+ * Copy the renderer's currently-displayed frame to an [ImageBitmap] via [PixelCopy], or null if the
+ * surface isn't ready, the copy fails, or the frame is still black (pre-connect) — so we never stash
+ * a blank tile. Suspends until PixelCopy's async callback returns.
+ */
+private suspend fun captureSurface(renderer: SurfaceViewRenderer): ImageBitmap? {
+    val surface = renderer.holder.surface
+    val w = renderer.width
+    val h = renderer.height
+    if (!surface.isValid || w <= 0 || h <= 0) return null
+    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val copied = suspendCancellableCoroutine<Boolean> { cont ->
+        try {
+            PixelCopy.request(
+                surface,
+                bitmap,
+                { result -> if (cont.isActive) cont.resume(result == PixelCopy.SUCCESS) },
+                Handler(Looper.getMainLooper()),
+            )
+        } catch (_: Exception) {
+            if (cont.isActive) cont.resume(false)
+        }
+    }
+    if (!copied || bitmap.isMostlyBlack()) return null
+    return bitmap.asImageBitmap()
+}
+
+/** Cheap "is this still the pre-connect black frame?" check — sample a 5×5 grid, treat near-zero
+ *  luma everywhere as black so we don't promote an empty frame to the tile. */
+private fun Bitmap.isMostlyBlack(): Boolean {
+    var lit = 0
+    for (i in 1..5) for (j in 1..5) {
+        val px = getPixel(width * i / 6, height * j / 6)
+        if (((px shr 16 and 0xFF) + (px shr 8 and 0xFF) + (px and 0xFF)) > 24) lit++
+    }
+    return lit == 0
 }
 
 /**
