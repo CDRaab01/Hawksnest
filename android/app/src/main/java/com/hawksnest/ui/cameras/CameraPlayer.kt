@@ -165,7 +165,10 @@ fun CameraPlayer(
                 onFail = { webRtcFailed = true },
                 modifier = frame,
             )
-            liveUrl != null -> VideoPlayer(liveUrl!!, frame, loop = true)
+            // live = true pins the HLS feed near the live edge (no fast-forward catch-up). loop
+            // stays true so the demo clip — DEMO_CLIP_URI, which VideoPlayer excludes from live
+            // handling — keeps looping as a fake-live feed.
+            liveUrl != null -> VideoPlayer(liveUrl!!, frame, loop = true, live = true)
             cam.streamUrl != null -> MjpegView(
                 streamUrl = cam.streamUrl!!,
                 snapshotUrl = cam.snapshotUrl,
