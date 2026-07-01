@@ -117,7 +117,7 @@ fun WebRtcPlayer(
     // pending listener before the renderer is released.
     LaunchedEffect(entityId, cameraId) {
         while (true) {
-            captureFrame(renderer)?.let { LiveFrameStore.put(cameraId, it) }
+            captureFrame(renderer)?.let { LiveFrameStore.put(cameraId, it, System.currentTimeMillis()) }
             delay(3_000)
         }
     }

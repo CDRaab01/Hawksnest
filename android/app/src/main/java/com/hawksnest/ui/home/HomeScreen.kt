@@ -348,7 +348,7 @@ private fun CameraTile(
             val liveFrame = LiveFrameStore.get(cam.id)
             if (liveFrame != null) {
                 Image(
-                    bitmap = liveFrame,
+                    bitmap = liveFrame.bitmap,
                     contentDescription = "Camera snapshot",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -384,10 +384,11 @@ private fun CameraTile(
                 horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
             ) {
                 Box(Modifier.size(8.dp).clip(CircleShape).background(if (live) pulse.recovery else Color.White.copy(alpha = 0.4f)))
-                // Ring-style: stamp the snapshot's age (the tile is a still, not a live
-                // feed — tapping it opens live), falling back to LIVE/— if we have no time.
+                // Ring-style age badge. When we're showing a frame captured from the live view, stamp
+                // ITS grab time (so a just-watched battery cam reads "now", not the 7h-old snapshot);
+                // otherwise the snapshot's age. Falls back to LIVE/— when we have no time at all.
                 Text(
-                    cam.lastChangedMs?.let { relativeTime(it) } ?: if (live) "LIVE" else "—",
+                    (liveFrame?.capturedAtMs ?: cam.lastChangedMs)?.let { relativeTime(it) } ?: if (live) "LIVE" else "—",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White.copy(alpha = 0.9f),
                 )

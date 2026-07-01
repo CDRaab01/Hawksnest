@@ -3,6 +3,9 @@ package com.hawksnest.ui.cameras
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.graphics.ImageBitmap
 
+/** A captured live frame plus the wall-clock time it was grabbed (epoch ms) for the tile's age badge. */
+data class LiveFrame(val bitmap: ImageBitmap, val capturedAtMs: Long)
+
 /**
  * The most recent frame captured from a camera's WebRTC live view while it was on screen, keyed by
  * the logical camera id ([com.hawksnest.ui.home.CameraUi.id]).
@@ -18,11 +21,11 @@ import androidx.compose.ui.graphics.ImageBitmap
  * just now", not a durable asset; it's replaced on the next view and gone on app restart.
  */
 object LiveFrameStore {
-    private val frames = mutableStateMapOf<String, ImageBitmap>()
+    private val frames = mutableStateMapOf<String, LiveFrame>()
 
-    fun put(cameraId: String, frame: ImageBitmap) {
-        frames[cameraId] = frame
+    fun put(cameraId: String, frame: ImageBitmap, capturedAtMs: Long) {
+        frames[cameraId] = LiveFrame(frame, capturedAtMs)
     }
 
-    fun get(cameraId: String): ImageBitmap? = frames[cameraId]
+    fun get(cameraId: String): LiveFrame? = frames[cameraId]
 }
