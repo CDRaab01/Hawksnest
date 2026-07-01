@@ -1,9 +1,6 @@
 package com.hawksnest.ui.cameras
 
 import android.graphics.Bitmap
-import android.os.Handler
-import android.os.Looper
-import android.view.PixelCopy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +34,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import org.webrtc.EglRenderer
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
@@ -110,17 +108,17 @@ fun WebRtcPlayer(
         onDispose { session.close() }
     }
 
-    // While the live view is on screen, grab the displayed frame every few seconds and stash the
-    // latest into LiveFrameStore. When the user returns to the grid, that camera's tile shows the
-    // exact frame they were just watching — instead of ring-mqtt's stale interval snapshot. We use
-    // PixelCopy on the SurfaceView's surface (a plain Android API) rather than a libwebrtc frame sink
-    // so we never touch the renderer's GL thread — the native release ordering above stays the only
-    // thing managing it. This effect is keyed to entityId, so it's cancelled before onDispose frees
-    // the surface; a capture that races the teardown just returns null and is dropped.
+    // While the live view is on screen, grab the actual rendered frame periodically and stash the
+    // latest into LiveFrameStore, so returning to the grid shows the tile you were just watching
+    // instead of ring-mqtt's stale interval snapshot. captureFrame uses WebRTC's own GL readback
+    // (addFrameListener) — NOT PixelCopy, which returns black when the video sits on a hardware
+    // overlay (that's why battery-cam tiles never updated). It naturally waits for the first real
+    // frame, so nothing is stored while "Connecting…". Cancelled on dispose, which removes the
+    // pending listener before the renderer is released.
     LaunchedEffect(entityId, cameraId) {
         while (true) {
+            captureFrame(renderer)?.let { LiveFrameStore.put(cameraId, it) }
             delay(3_000)
-            captureSurface(renderer)?.let { LiveFrameStore.put(cameraId, it) }
         }
     }
 
@@ -145,30 +143,29 @@ fun WebRtcPlayer(
 }
 
 /**
- * Copy the renderer's currently-displayed frame to an [ImageBitmap] via [PixelCopy], or null if the
- * surface isn't ready, the copy fails, or the frame is still black (pre-connect) — so we never stash
- * a blank tile. Suspends until PixelCopy's async callback returns.
+ * Grab the next rendered video frame as an [ImageBitmap] via WebRTC's own GL readback
+ * ([SurfaceViewRenderer.addFrameListener]) — reliable even when the SurfaceView composites through a
+ * hardware overlay (where PixelCopy just returns black). The listener is one-shot (EglRenderer clears
+ * it after firing), so this resolves on the next frame; while the stream is still coming up it simply
+ * waits, so we never stash a blank tile. Returns null on a black frame or if the listener can't be
+ * added. Cancelling the caller removes the pending listener before the renderer is released.
  */
-private suspend fun captureSurface(renderer: SurfaceViewRenderer): ImageBitmap? {
-    val surface = renderer.holder.surface
-    val w = renderer.width
-    val h = renderer.height
-    if (!surface.isValid || w <= 0 || h <= 0) return null
-    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-    val copied = suspendCancellableCoroutine<Boolean> { cont ->
-        try {
-            PixelCopy.request(
-                surface,
-                bitmap,
-                { result -> if (cont.isActive) cont.resume(result == PixelCopy.SUCCESS) },
-                Handler(Looper.getMainLooper()),
-            )
-        } catch (_: Exception) {
-            if (cont.isActive) cont.resume(false)
+private suspend fun captureFrame(renderer: SurfaceViewRenderer): ImageBitmap? {
+    var listener: EglRenderer.FrameListener? = null
+    try {
+        return suspendCancellableCoroutine { cont ->
+            val l = EglRenderer.FrameListener { bitmap ->
+                if (cont.isActive) cont.resume(bitmap?.takeUnless { it.isMostlyBlack() }?.asImageBitmap())
+            }
+            listener = l
+            runCatching { renderer.addFrameListener(l, 0.5f) }
+                .onFailure { if (cont.isActive) cont.resume(null) }
+            cont.invokeOnCancellation { runCatching { renderer.removeFrameListener(l) } }
         }
+    } finally {
+        // Always detach (idempotent) — EglRenderer's listeners are one-shot, but don't rely on it.
+        listener?.let { runCatching { renderer.removeFrameListener(it) } }
     }
-    if (!copied || bitmap.isMostlyBlack()) return null
-    return bitmap.asImageBitmap()
 }
 
 /** Cheap "is this still the pre-connect black frame?" check — sample a 5×5 grid, treat near-zero
