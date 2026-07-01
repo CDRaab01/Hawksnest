@@ -4,16 +4,30 @@ import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.hawksnest.core.ha.WebRtcHandle
 import com.hawksnest.core.ha.WebRtcSignal
@@ -29,6 +43,7 @@ import org.webrtc.MediaStream
 import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RendererCommon
 import org.webrtc.RtpReceiver
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
@@ -59,9 +74,19 @@ fun WebRtcPlayer(
     val currentOnFail = rememberUpdatedState(onFail)
     // Process-wide EGL context + PeerConnectionFactory, created once and never disposed (WebRtcCore).
     remember(context) { WebRtcCore.init(context) }
+    // True until the first video frame actually renders. Drives the "Connecting…" overlay so the user
+    // sees progress instead of a black void while the stream comes up — which can take several seconds,
+    // especially on battery cameras that have to wake from sleep.
+    val connecting = remember { mutableStateOf(true) }
     val renderer = remember {
         SurfaceViewRenderer(context).apply {
-            init(WebRtcCore.eglBase.eglBaseContext, null)
+            init(
+                WebRtcCore.eglBase.eglBaseContext,
+                object : RendererCommon.RendererEvents {
+                    override fun onFirstFrameRendered() { scope.launch { connecting.value = false } }
+                    override fun onFrameResolutionChanged(w: Int, h: Int, rotation: Int) {}
+                },
+            )
             setEnableHardwareScaler(true)
         }
     }
@@ -77,6 +102,7 @@ fun WebRtcPlayer(
     }
 
     DisposableEffect(entityId) {
+        connecting.value = true // re-show "Connecting…" for the newly-selected camera
         val session = WebRtcSession(scope, viewModel, WebRtcCore.factory, renderer, entityId) {
             currentOnFail.value()
         }
@@ -98,7 +124,24 @@ fun WebRtcPlayer(
         }
     }
 
-    AndroidView(factory = { renderer }, modifier = modifier)
+    Box(modifier) {
+        AndroidView(factory = { renderer }, modifier = Modifier.fillMaxSize())
+        if (connecting.value) {
+            Column(
+                modifier = Modifier.fillMaxSize().background(Color.Black),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                CircularProgressIndicator(color = Color.White.copy(alpha = 0.7f), strokeWidth = 2.dp)
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Connecting…",
+                    color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+    }
 }
 
 /**
@@ -191,9 +234,12 @@ private class WebRtcSession(
             override fun onCreateFailure(error: String?) = fail()
         }, MediaConstraints())
 
-        // Fall back if we haven't connected within 10s rather than hanging on a black frame.
+        // Fall back if we haven't connected in time rather than hanging on a black frame. 20s (not
+        // 10) because a battery camera has to wake from sleep and start its stream, which routinely
+        // takes longer than 10s — cutting over to HLS too early just trades one black screen for a
+        // slower one. The "Connecting…" overlay covers the wait.
         watchdog = scope.launch {
-            delay(10_000)
+            delay(20_000)
             if (peer?.connectionState() != PeerConnection.PeerConnectionState.CONNECTED) fail()
         }
     }
