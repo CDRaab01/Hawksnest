@@ -79,6 +79,10 @@ class ConnectionManager @Inject constructor(
     suspend fun fetchHistory(entityId: String, hours: Int): List<HistoryPoint> =
         current?.fetchHistory(entityId, hours) ?: emptyList()
 
+    /** History of one entity attribute as (timeMs, value) pairs — real ring event times via eventId. */
+    suspend fun fetchAttributeHistory(entityId: String, startMs: Long, endMs: Long, attr: String): List<Pair<Long, String>> =
+        current?.fetchAttributeHistory(entityId, startMs, endMs, attr) ?: emptyList()
+
     /** The logbook over `[startMs, endMs]` (live HA over WS; synthesized in demo). */
     suspend fun fetchLogbook(startMs: Long, endMs: Long): List<com.hawksnest.core.logic.LogEvent> =
         current?.fetchLogbook(startMs, endMs) ?: emptyList()

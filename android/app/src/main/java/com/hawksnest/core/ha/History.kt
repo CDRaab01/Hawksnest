@@ -43,6 +43,22 @@ fun parseHistory(result: JsonObject, entityId: String): List<HistoryPoint> {
 }
 
 /**
+ * Extract one entity's history as (timeMs, attributeValue) pairs for a single [attr] — used to
+ * recover ring event times from the selector's `eventId` attribute changes. Only samples that
+ * actually carry the attribute are kept (HA emits `a` when attributes change). Sorted by time.
+ */
+fun parseAttributeHistory(result: JsonObject, entityId: String, attr: String): List<Pair<Long, String>> {
+    val series = result[entityId] as? JsonArray ?: return emptyList()
+    return series.mapNotNull { el ->
+        val o = el as? JsonObject ?: return@mapNotNull null
+        val t = sampleTimeMs(o) ?: return@mapNotNull null
+        val a = o["a"] as? JsonObject ?: return@mapNotNull null
+        val v = (a[attr] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+        t to v
+    }.sortedBy { it.first }
+}
+
+/**
  * Map a state series to chart levels (mirrors the web `Sparkline`): an all-numeric series renders
  * its numbers directly; a discrete series (lock/binary/cover/…) maps each distinct state to an
  * evenly-spaced index, so on/off/open/locked still draw a readable step line.

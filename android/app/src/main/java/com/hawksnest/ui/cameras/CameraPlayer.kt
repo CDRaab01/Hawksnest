@@ -33,7 +33,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
-import com.hawksnest.core.logic.ringEventsFromSelect
 import com.hawksnest.core.logic.vodPositionMs
 import com.hawksnest.ui.home.CameraUi
 import com.hawksnest.ui.theme.HawksnestTheme
@@ -70,7 +69,7 @@ fun CameraPlayer(
     val events: List<CameraEvent> by produceState<List<CameraEvent>>(emptyList(), cam.id) {
         value = runCatching {
             if (isRing) {
-                ringEventsFromSelect(viewModel.entity(cam.eventSelectId!!), cameraName, endMs)
+                viewModel.ringEvents(cam.eventSelectId!!, cameraName, startMs, endMs)
             } else {
                 viewModel.events(cameraName, startMs, endMs)
             }

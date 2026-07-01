@@ -8,6 +8,9 @@ import com.hawksnest.core.ha.WebRtcHandle
 import com.hawksnest.core.ha.WebRtcSignal
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.ringEventIdToMs
+import com.hawksnest.core.logic.ringEventOptions
+import com.hawksnest.core.logic.ringEventsFromOptions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -68,6 +71,24 @@ class CameraPlayerViewModel @Inject constructor(
 
     suspend fun events(camera: String, startMs: Long, endMs: Long): List<CameraEvent> =
         connection.fetchCameraEvents(camera, startMs, endMs)
+
+    /**
+     * Ring timeline events at their REAL times: the selector's current options (`Motion N`, kept as
+     * the playable handles) paired with real event times decoded from the `eventId` attribute history
+     * (Ring Snowflake). Falls back to even spacing per-option when a time can't be recovered, so the
+     * timeline degrades gracefully rather than emptying.
+     */
+    suspend fun ringEvents(eventSelectId: String, cameraName: String, startMs: Long, endMs: Long): List<CameraEvent> {
+        val options = ringEventOptions(entity(eventSelectId))
+        if (options.isEmpty()) return emptyList()
+        val timesDesc = runCatching { connection.fetchAttributeHistory(eventSelectId, startMs, endMs, "eventId") }
+            .getOrDefault(emptyList())
+            .map { it.second }.distinct()
+            .mapNotNull { ringEventIdToMs(it) }
+            .filter { it in startMs..endMs }
+            .sortedDescending()
+        return ringEventsFromOptions(options, timesDesc, cameraName, endMs)
+    }
 
     fun recordingUrl(camera: String, startMs: Long, endMs: Long): String? =
         connection.recordingUrlAt(camera, startMs, endMs)
