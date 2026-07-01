@@ -83,6 +83,27 @@ class HaSource(
         return parseHistory(result, entityId)
     }
 
+    override suspend fun fetchAttributeHistory(
+        entityId: String,
+        startMs: Long,
+        endMs: Long,
+        attr: String,
+    ): List<Pair<Long, String>> {
+        val c = conn ?: throw IllegalStateException("Not connected to Home Assistant.")
+        // Keep attributes and ALL changes: the ring event selector's state ("Motion 1") never
+        // changes, but its eventId attribute does per event — that's what we're after.
+        val frame = c.request("history/history_during_period") {
+            put("start_time", Instant.ofEpochMilli(startMs).toString())
+            put("end_time", Instant.ofEpochMilli(endMs).toString())
+            putJsonArray("entity_ids") { add(entityId) }
+            put("minimal_response", false)
+            put("no_attributes", false)
+            put("significant_changes_only", false)
+        }
+        val result = frame["result"] as? JsonObject ?: return emptyList()
+        return parseAttributeHistory(result, entityId, attr)
+    }
+
     override suspend fun fetchLogbook(startMs: Long, endMs: Long, entityIds: List<String>?): List<LogEvent> {
         val c = conn ?: throw IllegalStateException("Not connected to Home Assistant.")
         val frame = c.request("logbook/get_events") {

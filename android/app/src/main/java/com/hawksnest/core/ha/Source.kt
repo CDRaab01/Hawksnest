@@ -53,6 +53,18 @@ interface Source {
         throw UnsupportedOperationException("This source cannot provide history.")
     }
 
+    /**
+     * History of a single [attr] of [entityId] over `[startMs, endMs]` as (timeMs, value) pairs
+     * (all changes, attributes kept). Used to recover real ring event times from `eventId` changes.
+     * Sources that can't provide history return empty rather than throwing.
+     */
+    suspend fun fetchAttributeHistory(
+        entityId: String,
+        startMs: Long,
+        endMs: Long,
+        attr: String,
+    ): List<Pair<Long, String>> = emptyList()
+
     /** Fetch the logbook over `[startMs, endMs]`, optionally narrowed to specific entities. */
     suspend fun fetchLogbook(startMs: Long, endMs: Long, entityIds: List<String>? = null): List<LogEvent> {
         throw UnsupportedOperationException("This source cannot provide a logbook.")
