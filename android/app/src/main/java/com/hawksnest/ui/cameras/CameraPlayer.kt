@@ -84,7 +84,9 @@ fun CameraPlayer(
     var playhead by remember(cam.id) { mutableStateOf<Long?>(null) }
     var paused by remember(cam.id) { mutableStateOf(false) }
     // Ring/go2rtc live is WebRTC (sub-second). Try it first; on failure, step down to HLS/MJPEG.
-    val canWebRtc = viewModel.canWebRtc(cam.entityId)
+    // Decide ONCE per camera — not every recomposition — so a mid-view entity update (battery cams
+    // churn their attributes) can't flip the transport off WebRTC and drop us to the stale snapshot.
+    val canWebRtc = remember(cam.id) { viewModel.canWebRtc(cam.entityId) }
     var webRtcFailed by remember(cam.id) { mutableStateOf(false) }
 
     val isLive = playhead == null

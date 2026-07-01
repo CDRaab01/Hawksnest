@@ -34,14 +34,20 @@ class CameraPlayerViewModel @Inject constructor(
      * Modern HA (2024+) dropped the `frontend_stream_type` state attribute and serves WebRTC via its
      * bundled go2rtc for any STREAM-capable camera — verified live: these ring cameras report
      * `frontend_stream_types: ["web_rtc"]` over `camera/capabilities`. So gate on STREAM support, not
-     * the now-absent attribute. The old `== "web_rtc"` check could never be true on current HA, which
-     * is exactly why live always fell back to HA's 10-min-buffered HLS. The player still steps down to
-     * HLS if a negotiation actually fails (`webRtcFailed`).
+     * the now-absent attribute.
+     *
+     * Crucially we attempt WebRTC when `supported_features` is *present-with-STREAM* OR *absent*, and
+     * only bail on a definite `0` (image-only). A battery camera's live entity churns and momentarily
+     * publishes without attributes; the old `?: 0` treated that as "not streamable", so during a live
+     * view the transport flickered off WebRTC after ~40ms and settled on the stale snapshot (observed
+     * on-device: renderer created then released before it could negotiate). Treating "absent" as
+     * "worth a try" keeps the WebRTC player stable so the negotiation completes. The player still
+     * steps down to HLS/snapshot if a negotiation genuinely fails (`webRtcFailed`).
      */
     fun canWebRtc(entityId: String): Boolean {
         if (!connection.supportsWebRtc()) return false
-        val features = entity(entityId)?.stringAttr("supported_features")?.toIntOrNull() ?: 0
-        return features and CAMERA_FEATURE_STREAM != 0
+        val features = entity(entityId)?.stringAttr("supported_features") ?: return true
+        return (features.toIntOrNull() ?: CAMERA_FEATURE_STREAM) and CAMERA_FEATURE_STREAM != 0
     }
 
     /** Begin a WebRTC negotiation; returns a handle to tear it down (null when unsupported). */
