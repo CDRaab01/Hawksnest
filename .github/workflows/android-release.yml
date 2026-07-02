@@ -23,6 +23,8 @@ jobs:
   release:
     name: "Android — Signed Release APK"
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: android
@@ -61,3 +63,24 @@ jobs:
           name: hawksnest-release-${{ github.run_number }}
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 90
+
+      # Publish a GitHub Release too — Dragonfly (the suite hub) polls releases/latest and can't
+      # see workflow artifacts. version.json carries the versionCode (the API only exposes the
+      # tag) and the sha256 Dragonfly verifies before installing. The android-v prefix keeps
+      # these tags out of any v* web-release automation.
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk hawksnest-0.1.${{ github.run_number }}.apk
+      - name: Generate version.json for Dragonfly
+        run: |
+          SHA256=$(sha256sum hawksnest-0.1.${{ github.run_number }}.apk | cut -d' ' -f1)
+          printf '{"versionCode": %d, "versionName": "%s", "sha256": "%s", "minSdk": 26}\n' \
+            "${{ github.run_number }}" "0.1.${{ github.run_number }}" "$SHA256" > version.json
+          cat version.json
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-v0.1.${{ github.run_number }}
+          name: "Android 0.1.${{ github.run_number }}"
+          generate_release_notes: true
+          files: |
+            android/hawksnest-0.1.${{ github.run_number }}.apk
+            android/version.json
