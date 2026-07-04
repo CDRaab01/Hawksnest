@@ -1,0 +1,39 @@
+version: 2
+
+# Weekly grouped dependency updates (ROADMAP Tier 2 #2). Hawksnest is a web frontend (npm)
+# plus an Android app. The Android AGP/Kotlin/Compose-BOM stay aligned with the suite/Pulse,
+# so Dependabot must not auto-bump those (a deliberate all-repos change) — only the other libs.
+
+updates:
+  # Web frontend (Vite/React/Tailwind, etc.).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm:
+        patterns: ["*"]
+
+  # Android app dependencies — suite-pinned build tooling excluded.
+  - package-ecosystem: "gradle"
+    directory: "/android"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "com.android.tools.build:gradle"
+      - dependency-name: "org.jetbrains.kotlin:*"
+      - dependency-name: "androidx.compose:compose-bom"
+    groups:
+      gradle:
+        patterns: ["*"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]

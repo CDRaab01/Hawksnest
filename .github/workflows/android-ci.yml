@@ -8,6 +8,10 @@ on:
     branches: ["main"]
     paths: ["android/**", ".github/workflows/android-ci.yml"]
   workflow_dispatch:
+  schedule:
+    # Weekly bit-rot check (Mondays 11:30 UTC). `schedule` ignores the `paths` filter, so the
+    # full Android suite runs. android-release.yml is tag-triggered, so nothing ships from this.
+    - cron: "30 11 * * 1"
 
 jobs:
   android-test:
