@@ -1,30 +1,37 @@
 version: 2
 
-# Weekly grouped dependency updates (ROADMAP Tier 2 #2). Hawksnest is a web frontend (npm)
-# plus an Android app. The Android AGP/Kotlin/Compose-BOM stay aligned with the suite/Pulse,
-# so Dependabot must not auto-bump those (a deliberate all-repos change) — only the other libs.
+# Weekly grouped dependency updates (ROADMAP Tier 2 #2). Two guardrails from the first run:
+# (1) major bumps need manual migration — the npm group tried Tailwind 3->4, Vite 5->8, TS 5->6,
+# @types/node 22->26 in one shot and broke the build; keep auto-PRs to minor/patch. (2) The
+# Android AGP/Kotlin/Compose-BOM (library AND Gradle-plugin coordinates) stay aligned with the
+# suite/Pulse, so never auto-bump them.
 
 updates:
-  # Web frontend (Vite/React/Tailwind, etc.).
+  # Web frontend (Vite/React/Tailwind, etc.) — minor/patch only.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       npm:
         patterns: ["*"]
 
-  # Android app dependencies — suite-pinned build tooling excluded.
+  # Android app dependencies — suite-pinned build tooling + majors excluded.
   - package-ecosystem: "gradle"
     directory: "/android"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
     ignore:
-      - dependency-name: "com.android.tools.build:gradle"
-      - dependency-name: "org.jetbrains.kotlin:*"
+      - dependency-name: "com.android*"
+      - dependency-name: "org.jetbrains.kotlin*"
       - dependency-name: "androidx.compose:compose-bom"
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       gradle:
         patterns: ["*"]
