@@ -4,6 +4,10 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  schedule:
+    # Weekly bit-rot check (Mondays 11:00 UTC) so "green" stays meaningful between pushes.
+    # deploy.yml is push-path-triggered (not workflow_run), so this never ships.
+    - cron: "0 11 * * 1"
 
 jobs:
   build:
