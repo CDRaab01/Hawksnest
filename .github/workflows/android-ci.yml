@@ -21,12 +21,12 @@ jobs:
       run:
         working-directory: android
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: echo "sdk.dir=$ANDROID_HOME" > local.properties
       - run: ./gradlew :app:testDebugUnitTest --no-daemon
 
@@ -38,15 +38,15 @@ jobs:
       run:
         working-directory: android
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: echo "sdk.dir=$ANDROID_HOME" > local.properties
       - run: ./gradlew :app:assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: hawksnest-debug-${{ github.sha }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
@@ -64,12 +64,12 @@ jobs:
       run:
         working-directory: android
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Decode signing keystore (if configured)
@@ -94,7 +94,7 @@ jobs:
           VERSION_NAME: "0.1.${{ github.run_number }}"
         run: ./gradlew :app:assembleRelease --no-daemon
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: hawksnest-release-${{ github.sha }}
           path: android/app/build/outputs/apk/release/*.apk
@@ -112,25 +112,25 @@ jobs:
     needs: android-test
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check out Sift (sibling design auditor)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: CDRaab01/Sift
           path: android/sift-src
           token: ${{ secrets.SIFT_REPO_TOKEN || github.token }}
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Configure SDK
         working-directory: android
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
       - name: Run Sift audit
         working-directory: android
         run: ./gradlew :app:testDebugUnitTest --tests "*HawksnestDesignSlopTest" -PsiftDir=sift-src --no-daemon
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: hawksnest-sift-report-${{ github.sha }}
