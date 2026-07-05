@@ -1,0 +1,103 @@
+# ARCHITECTURE.md — Hawksnest (software-level)
+
+How this repo is organized and why. Suite-level context: `C:\Code\ARCHITECTURE.md`. Working
+instructions + production-breaking invariants: [CLAUDE.md](CLAUDE.md). Feature/dev/testing
+overview: [README.md](README.md). Backlog: [ROADMAP.md](ROADMAP.md).
+
+Hawksnest is the **odd one out** in the suite: a presentation layer over **Home Assistant**
+(HA stays the brain), no backend of its own, no public ingress (LAN/Tailscale only), deliberately
+excluded from the Dragonfly config broker and SSO (it authenticates directly to HA). It fronts
+the thing that unlocks the house's doors — security posture outranks features here.
+
+## System shape
+
+```
+Web SPA/PWA (React/TS, nginx pod) ──same-origin /api──▶ nginx ──proxy──▶ Home Assistant (k3s, WSL2)
+Android app (Kotlin/Compose) ──Tailscale, long-lived token──────────────▶ HA WebSocket + REST
+                                                    HA ⇄ ring-mqtt (+go2rtc) ⇄ Ring doorbell/cams
+                                                    HA ⇄ Z-Wave JS (locks, etc.)
+```
+
+One repo, three deliverables:
+
+## 1. Web SPA/PWA (`src/`)
+
+React + TypeScript (Vite), Tailwind mapped onto PULSE CSS tokens (`src/theme/tokens.css` — a
+**CSS port** of the design language, *not* the `design.pulse:pulse-ui` Gradle library; that's
+Compose-only).
+
+| Area | Responsibility |
+|---|---|
+| `src/lib/` | The domain kernel. `cameraModel.ts` collapses ring-mqtt's split entities (`_live`/`_snapshot`/`_event` + selectors/ding/motion) into one logical camera; `cards.ts` maps HA domains → card components (**must never throw** — unknown domains render `GenericCard`); `resolve.ts` centralizes label/icon resolution (per-entity overrides go in `src/config/overrides.ts`, never in components) |
+| `src/store/` | Client state: HA WebSocket connection, auth, entity registry, reconnect logic |
+| `src/screens/` + `src/cards/` + `src/components/` | Presentation; no raw hex — PULSE tokens only |
+| `src/config/` | Entity/room overrides |
+| `public/` + service worker (vite config) | PWA shell. **The SW never caches `/api` and never touches the HA token** — offline = shell + Offline/Demo state, never stale entity data |
+
+Camera streaming: WebRTC negotiates over the existing `/api/websocket`; media flows UDP direct to
+go2rtc. Recorded playback = the last ~5 Ring events via the event-selector entity (not continuous
+VOD; a Frigate seam exists in `cameraEvents.ts`, unused).
+
+## 2. Android app (`android/`, package `com.hawksnest`)
+
+Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Full guide:
+`android/README.md`.
+
+- `core/ha/` — HA WebSocket/REST client (the Kotlin analogue of the web store).
+- `core/logic/`, `core/automations/` — entity → domain-model mapping, automation surfaces.
+- `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
+- Cleartext HTTP is **deliberately permitted** (`network_security_config.xml`): the HA host can
+  be a bare `100.x` Tailscale IP, which a scoped domain-config cannot match. The fix is TLS on
+  the proxy first (ROADMAP #1), then flip `cleartextTrafficPermitted="false"` — not a manifest
+  tweak on its own.
+- Suite membership: signed with the suite key (secrets are `HAWKSNEST_`-prefixed), released by
+  `android-release.yml` on `android/**` pushes, tagged `android-vX.Y.Z` (clear of web `v*`).
+  Managed by the Dragonfly hub for updates — but **no** SuiteConfigReader/AppAuth (nothing to
+  broker; don't add them without a real reason).
+
+## 3. Deployment (`deploy/`)
+
+The web app ships as an nginx pod in the **same k3s cluster/namespace as HA itself** (cluster
+owned by the sibling `hawksnest-automation` repo), NodePort 30080, exposed to LAN/Tailscale via
+Windows portproxy scripts that run at logon (WSL IP changes each reboot).
+
+nginx reverse-proxies `/api` to HA so the browser is same-origin. **Invariant: nginx must NOT
+send `X-Forwarded-For` to HA** — with `use_x_forwarded_for` and an untrusted proxy IP, HA 400s
+every request (this killed all camera frames once). Either keep XFF off (current) or send it AND
+trust the flannel pod CIDR in HA — never half-do it.
+
+`deploy.test.ts` asserts the deploy contract (nginx config, Dockerfile, NodePort) — **if you
+change deploy files, that test is the spec**; update both together.
+
+## Testing map (all real seams covered without real hardware)
+
+- `npm run test` — vitest: screens, stores, protocol, `deploy.test.ts`.
+- `npm run test:e2e` — Playwright against **`mock-ha/`**, a scriptable fake HA speaking the real
+  WebSocket protocol (auth, reconnect, doorbell, lock pending/jam/rejected flows) with a
+  `/__scenario` API. The same mock serves Android instrumented tests
+  (`scripts/android-emulator-test.sh`, needs KVM).
+- CI: `ci.yml` (typecheck/lint/test/build + kubeconform over the k8s manifests),
+  `android-ci.yml` (unit tests + assembleDebug + the advisory **Sift** design audit — a sibling
+  public repo checked out by CI; known to trip on the new Compose render, advisory-only).
+- Known gap: the live camera pipeline (WebRTC web / LL-HLS Android) is only ever hand-tested —
+  the mock serves no `web_rtc` camera. ROADMAP #4 wants at least a written per-release smoke
+  checklist.
+
+## Invariants (security-flavored — this app unlocks doors)
+
+1. **Locks are non-optimistic UI** — pending until HA confirms. Deliberate; the E2E suite pins
+   it. Don't "fix" the lag.
+2. **Service worker: never cache `/api`, never touch the token.**
+3. **nginx XFF rule** (above) — all-or-nothing.
+4. Long-lived-token auth is the accepted Phase-0 posture; the upgrade path is TLS-then-OAuth
+   (ROADMAP #1–2), in that order, web + Android together so the token story stays one story.
+5. Unknown HA domains must render, not crash (`cards.ts` contract).
+
+## Where to make common changes
+
+- **New device type/domain**: `src/lib/cards.ts` mapping + a card component (web);
+  `core/logic` + `ui/devices` (Android). Entity naming quirks → `config/overrides.ts`.
+- **HA protocol behavior**: extend `mock-ha/` first, write the failing E2E, then implement.
+- **Deploy changes**: `deploy/` + `deploy.test.ts` together.
+- **Automation-side features** (new sensors, Ring/Z-Wave config): wrong repo — that's
+  `hawksnest-automation`; Hawksnest usually just renders the new entities via the domain mapping.
