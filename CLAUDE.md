@@ -73,6 +73,9 @@ share of it:
 
 ## Conventions
 
+- **Update `ARCHITECTURE.md` in the same PR** when a change alters architecture — a module's
+  responsibility, a layer boundary, the haSource/data flow, or the token layer. Silently-drifting
+  docs are how a sibling app's API docs said `/plans` for a round (ROADMAP2 T2 #5c).
 - No raw hex in components — everything routes through the PULSE tokens
   (`src/theme/tokens.css` / `tailwind.config.ts`; Android `ui/theme/`).
 - `src/lib/cards.ts` (domain → card mapping) must never throw — unknown domains render
