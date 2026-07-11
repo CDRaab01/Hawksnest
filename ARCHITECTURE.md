@@ -43,9 +43,21 @@ VOD; a Frigate seam exists in `cameraEvents.ts`, unused).
 Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Full guide:
 `android/README.md`.
 
-- `core/ha/` — HA WebSocket/REST client (the Kotlin analogue of the web store).
+- `core/ha/` — HA WebSocket/REST client (the Kotlin analogue of the web store). **All user-facing
+  control calls go through `ControlGate`** (via `ConnectionManager.control`): it is the crash-safety
+  layer (a failed call becomes a message on the app-level snackbar, never an uncaught coroutine
+  exception) and the honest-pending tracker (entity id held in `pendingControls` until HA echoes,
+  the call fails, or a 30 s timeout reports "didn't respond"). Raw `callService` is reserved for
+  screens that surface their own errors (lock keypad codes, Z-Wave maintenance).
 - `core/logic/`, `core/automations/` — entity → domain-model mapping, automation surfaces.
 - `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
+- **Control interaction model** (`ui/components/`): locks use `SlideToAct` — the drag is the
+  confirmation, and the thumb holds a spinner until HA's echo (non-optimistic, per invariant 1).
+  Lights/switches/fans render **optimistically** — the switch thumb follows the finger, the echo
+  reconciles, and a failure snaps back (they are not security surfaces; the non-optimism invariant
+  is locks/alarm only). Alarm segments are plain taps with per-segment pending spinners. Haptics
+  route through the `Haptics` vocabulary (`rememberHaptics()`) — actuation tick, threshold buzz on
+  the slide's commit point, reject buzz with the failure snackbar.
 - Cleartext HTTP is **deliberately permitted** (`network_security_config.xml`): the HA host can
   be a bare `100.x` Tailscale IP, which a scoped domain-config cannot match. The fix is TLS on
   the proxy first (ROADMAP #1), then flip `cleartextTrafficPermitted="false"` — not a manifest
@@ -86,7 +98,9 @@ change deploy files, that test is the spec**; update both together.
 ## Invariants (security-flavored — this app unlocks doors)
 
 1. **Locks are non-optimistic UI** — pending until HA confirms. Deliberate; the E2E suite pins
-   it. Don't "fix" the lag.
+   it. Don't "fix" the lag. (Android renders this as `SlideToAct` — the pending wait *is* the
+   thumb holding at the end of the track. The optimistic switches on lights/switches/fans are
+   **not** a violation: the invariant covers security domains — locks and the alarm — only.)
 2. **Service worker: never cache `/api`, never touch the token.**
 3. **nginx XFF rule** (above) — all-or-nothing.
 4. Long-lived-token auth is the accepted Phase-0 posture; the upgrade path is TLS-then-OAuth

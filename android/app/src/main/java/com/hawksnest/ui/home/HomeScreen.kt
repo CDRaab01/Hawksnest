@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -57,6 +58,7 @@ import com.hawksnest.ui.cameras.bustCache
 import com.hawksnest.ui.components.ConnectionPill
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.SectionHeader
+import com.hawksnest.ui.components.rememberHaptics
 import com.hawksnest.ui.theme.HawksnestTheme
 import com.hawksnest.ui.theme.color
 import kotlinx.coroutines.delay
@@ -80,6 +82,7 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.uiState.collectAsState()
+    val pending by viewModel.pending.collectAsState()
     // One ticking bucket shared by every tile so all snapshots refresh on the same ~10s beat
     // (matches the web SnapshotBucketProvider; Ring rate-limits the proxy, so fewer fetches help).
     val bucket by produceState(0L) {
@@ -142,6 +145,8 @@ fun HomeScreen(
 
         SecurityHero(
             ui,
+            busy = ui.alarmEntityId?.let { it in pending } == true ||
+                ui.alarmRawState in setOf("arming", "disarming", "pending"),
             onArm = viewModel::arm,
             onDisarm = { viewModel.arm("alarm_disarm") },
         )
@@ -239,8 +244,12 @@ private fun LifeSafetyStrip(ui: HomeUi) {
 }
 
 @Composable
-private fun SecurityHero(ui: HomeUi, onArm: (String) -> Unit, onDisarm: () -> Unit) {
+private fun SecurityHero(ui: HomeUi, busy: Boolean, onArm: (String) -> Unit, onDisarm: () -> Unit) {
     val pulse = HawksnestTheme.pulse
+    val haptics = rememberHaptics()
+    // Which circle was tapped, so only its spinner shows while HA arms/disarms. Cleared on settle.
+    var tapped by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(busy) { if (!busy) tapped = null }
     PanelCard(channel = ui.alarm?.let { pulse.color(it.channel) }, raised = true) {
         if (ui.alarm != null) {
             Row(
@@ -253,7 +262,11 @@ private fun SecurityHero(ui: HomeUi, onArm: (String) -> Unit, onDisarm: () -> Un
                         icon = ARM_ICON[b.service] ?: Icons.Filled.LockOpen,
                         active = ui.alarmRawState == b.state,
                         channel = pulse.color(alarmView(b.state).channel),
+                        busy = busy && tapped == b.service,
+                        enabled = !busy,
                         onClick = {
+                            haptics.toggleOn()
+                            tapped = b.service
                             if (b.service == "alarm_disarm") onDisarm() else onArm(b.service)
                         },
                     )
@@ -294,6 +307,8 @@ private fun ArmCircle(
     active: Boolean,
     channel: Color,
     onClick: () -> Unit,
+    busy: Boolean = false,
+    enabled: Boolean = true,
 ) {
     val pulse = HawksnestTheme.pulse
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -306,15 +321,23 @@ private fun ArmCircle(
                     if (active) Modifier
                     else Modifier.border(1.dp, pulse.hairline, CircleShape),
                 )
-                .clickable(onClick = onClick),
+                .clickable(onClick = onClick, enabled = enabled && !busy),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (active) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(26.dp),
-            )
+            if (busy) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    color = if (active) MaterialTheme.colorScheme.surface else channel,
+                    strokeWidth = 2.5.dp,
+                )
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = if (active) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
         }
         Spacer(Modifier.size(HawksnestTheme.spacing.xs))
         Text(

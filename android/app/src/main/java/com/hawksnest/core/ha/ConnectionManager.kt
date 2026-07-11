@@ -26,8 +26,15 @@ class ConnectionManager @Inject constructor(
     private val credentialStore: CredentialStore,
     private val okHttpClient: OkHttpClient,
     private val json: Json,
+    private val controlGate: ControlGate,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
+    /** Entity ids with a user control in flight (see [ControlGate.pending]). */
+    val pendingControls = controlGate.pending
+
+    /** Human-readable control failures for the app-level snackbar (see [ControlGate.errors]). */
+    val controlErrors = controlGate.errors
+
     @Volatile
     private var current: Source? = null
     private var started = false
@@ -60,6 +67,26 @@ class ConnectionManager @Inject constructor(
     /** Perform a service call through the active source (non-optimistic — the echo reconciles). */
     suspend fun callService(domain: String, service: String, data: ServiceData) {
         current?.callService(domain, service, data)
+    }
+
+    /**
+     * The user-facing control path: [callService] wrapped in [ControlGate] — crash-safe (failures
+     * land on [controlErrors], never as an uncaught coroutine exception) with [pendingControls]
+     * tracking until HA echoes. Fire-and-forget in the app scope so an in-flight control outlives
+     * the screen. All tap/slide/toggle handlers go through here; use raw [callService] only where
+     * a screen handles its own errors (e.g. lock keypad codes).
+     */
+    fun control(
+        entityId: String,
+        service: String,
+        label: String,
+        extra: Map<String, Any?> = emptyMap(),
+        awaitEcho: Boolean = true,
+        domain: String = entityId.substringBefore('.'),
+    ) {
+        controlGate.launch(entityId, label, awaitEcho) {
+            callService(domain, service, ServiceData(entityId = entityId, extra = extra))
+        }
     }
 
     /** Read one automation's Config-API config (live HA REST; in-memory in demo). Null if absent. */
