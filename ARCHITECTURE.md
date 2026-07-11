@@ -85,8 +85,13 @@ change deploy files, that test is the spec**; update both together.
 
 ## Invariants (security-flavored — this app unlocks doors)
 
-1. **Locks are non-optimistic UI** — pending until HA confirms. Deliberate; the E2E suite pins
-   it. Don't "fix" the lag.
+1. **Locks _and the alarm_ are non-optimistic UI** — pending until HA confirms, and a failed or
+   silent call surfaces an error rather than doing nothing. Deliberate; the E2E suite pins it.
+   Don't "fix" the lag. The alarm arm/disarm behaviour is shared by the dashboard
+   `SecurityStatusBar` and the `AlarmCard` via the `useAlarmControl` hook (tapped mode spins until
+   HA reaches the requested state / `triggered`, a rejected call shows an error, and a safety-net
+   timeout stops a spinner the panel never answers). `LockCard` carries the same pending/error +
+   timeout contract. (The Android `ControlGate` is the Kotlin analogue.)
 2. **Service worker: never cache `/api`, never touch the token.**
 3. **nginx XFF rule** (above) — all-or-nothing.
 4. Long-lived-token auth is the accepted Phase-0 posture; the upgrade path is TLS-then-OAuth
