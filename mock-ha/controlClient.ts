@@ -4,9 +4,10 @@
  * outcome, drop the socket, read the call log). Mirrors the Android contract.
  */
 import type { Outcome, ServiceCall } from "./wsProtocol";
+import { MOCK_HA_PORT } from "./port";
 
 export class MockControl {
-  constructor(private base = "http://localhost:8765") {}
+  constructor(private base = `http://localhost:${MOCK_HA_PORT}`) {}
 
   private async post(path: string, body?: unknown): Promise<void> {
     const res = await fetch(`${this.base}${path}`, {

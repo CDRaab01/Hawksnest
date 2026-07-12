@@ -7,9 +7,13 @@ protocol to drive Hawksnest's **real** `haSource` against scripted scenarios —
 same process + contract is meant to be reused by the Android instrumented tests.
 
 ```bash
-npm run mock-ha                      # PORT=8765 (override with PORT=…)
+npm run mock-ha                      # port 8765 (override with MOCK_HA_PORT= or PORT=)
 curl localhost:8765/__scenario/health
 ```
+
+The port is defined once in `mock-ha/port.ts` (default 8765) and read by the server, the
+control client, the Playwright `webServer`, and the E2E fixtures — set `MOCK_HA_PORT` to move
+them all together (needed on the Dragonfly host, where 8765 is taken by the kidbot container).
 
 The app connects when its credentials point at the mock, e.g.
 `localStorage["hawksnest.ha"] = {"url":"http://localhost:8765","token":"e2e-token"}`
