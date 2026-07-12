@@ -44,7 +44,11 @@ class ConnectionManager @Inject constructor(
     fun start() {
         if (started) return
         started = true
-        scope.launch { select() }
+        scope.launch {
+            // Upgrade any pre-encryption install to a Keystore-wrapped token, then connect.
+            credentialStore.migrateLegacyToken()
+            select()
+        }
     }
 
     /** Re-select + restart the source after the saved credentials change. */

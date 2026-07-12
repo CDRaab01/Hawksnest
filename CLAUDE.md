@@ -25,6 +25,12 @@ This file adds the things that are easy to get wrong and the suite context.
 - **The service worker never caches `/api`** and never touches the HA token (localStorage).
   Offline = app shell + Offline/Demo state, never stale entity data. Keep it that way when
   editing `vite.config`/SW code.
+- **Android HA token is encrypted at rest** (`util/TokenCipher`, AES-256-GCM key in the Android
+  Keystore) and **excluded from cloud-backup + device-transfer** (`res/xml/*_rules.xml`). The
+  stored value is ciphertext, undecryptable off-device. `CredentialStore.migrateLegacyToken()`
+  upgrades pre-encryption installs on start. Consequence: a clean reinstall / new phone requires
+  re-entering the token — deliberate for a door-unlocking credential. (Web still stores the token
+  in localStorage — a PWA can't Keystore-wrap; TLS + OAuth is its path.)
 - **Locks are non-optimistic UI** — they show pending until HA confirms. Security-critical;
   don't "fix" the lag. The mock-ha E2E suite covers pending/jam/rejected lock flows precisely so
   this stays testable without a real lock.
