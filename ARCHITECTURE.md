@@ -29,7 +29,7 @@ Compose-only).
 | Area | Responsibility |
 |---|---|
 | `src/lib/` | The domain kernel. `cameraModel.ts` collapses ring-mqtt's split entities (`_live`/`_snapshot`/`_event` + selectors/ding/motion) into one logical camera; `cards.ts` maps HA domains → card components (**must never throw** — unknown domains render `GenericCard`); `resolve.ts` centralizes label/icon resolution (per-entity overrides go in `src/config/overrides.ts`, never in components) |
-| `src/store/` | Client state: HA WebSocket connection, auth, entity registry, reconnect logic |
+| `src/store/` | Client state: HA WebSocket connection, auth, entity registry, reconnect logic. The entity sink dedupes the Ring-vs-ring-mqtt double exposure centrally (`src/lib/dedupe.ts`, platform map from the registry): when both integrations expose the same light, the ring-platform twin is dropped so every consumer sees one entity per physical device |
 | `src/screens/` + `src/cards/` + `src/components/` | Presentation; no raw hex — PULSE tokens only. Loading states use the shared `Skeleton` (one hairline-strong shimmer sweep — camera first-frame decode, history fetch); the dashboard arm discs activate via a channel fill-sweep, still non-optimistic (the sweep follows HA's echo, pinned in tests) |
 | `src/config/` | Entity/room overrides |
 | `public/` + service worker (vite config) | PWA shell. **The SW never caches `/api` and never touches the HA token** — offline = shell + Offline/Demo state, never stale entity data |
@@ -50,7 +50,15 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   the call fails, or a 30 s timeout reports "didn't respond"). Raw `callService` is reserved for
   screens that surface their own errors (lock keypad codes, Z-Wave maintenance).
 - `core/logic/`, `core/automations/` — entity → domain-model mapping, automation surfaces.
+  Includes the ring/ring-mqtt dedupe (`Dedupe.kt`, applied centrally at `HaSource`'s entity sink,
+  mirroring the web) and the Devices sectioning model (`DeviceSections.kt`: per-room three-tier
+  rhythm — FEATURED lock/climate/alarm cards, CONTROL rows with inline switches, READONLY rows).
 - `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
+- **Devices v2** (`ui/devices/`): single-column list in the three-tier rhythm, PULSE segment
+  chips (not stock M3), room summaries ("N devices · M on"), search, and long-press → rename/hide
+  persisted in `util/DevicePrefsStore` (DataStore) with a hidden-devices shelf. Display names
+  resolve rename → override → non-junk friendly_name → registry device name
+  (`core/logic/Resolve.kt displayName`).
 - **Control interaction model** (`ui/components/`): locks use `SlideToAct` — the drag is the
   confirmation, and the thumb holds a spinner until HA's echo (non-optimistic, per invariant 1).
   Lights/switches/fans render **optimistically** — the switch thumb follows the finger, the echo

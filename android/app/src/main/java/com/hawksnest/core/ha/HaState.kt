@@ -35,6 +35,10 @@ class HaState @Inject constructor() {
     private val _zwaveEntityIds = MutableStateFlow<List<String>>(emptyList())
     val zwaveEntityIds: StateFlow<List<String>> = _zwaveEntityIds.asStateFlow()
 
+    /** entity_id → integration platform ("ring", "mqtt", …) — feeds the ring/ring-mqtt dedupe. */
+    private val _entityPlatforms = MutableStateFlow<Map<String, String>>(emptyMap())
+    val entityPlatforms: StateFlow<Map<String, String>> = _entityPlatforms.asStateFlow()
+
     private val _status = MutableStateFlow(ConnectionStatus.CONNECTING)
     val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
 
@@ -69,6 +73,8 @@ class HaState @Inject constructor() {
     fun setDevices(devices: DeviceIndex) { _devices.value = devices }
 
     fun setZWaveEntityIds(ids: List<String>) { _zwaveEntityIds.value = ids }
+
+    fun setEntityPlatforms(platforms: Map<String, String>) { _entityPlatforms.value = platforms }
 
     /** Merge a batch of entity updates (live state changes). */
     fun upsertEntities(list: List<HassEntity>) {

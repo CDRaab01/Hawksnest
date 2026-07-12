@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.dedupeRingMqtt
 import com.hawksnest.core.logic.FRIGATE_BASE
 import com.hawksnest.core.logic.LogEvent
 import com.hawksnest.core.logic.normalizeLogbook
@@ -295,7 +296,9 @@ class HaSource(
             c.onClosed { if (!closed.isCompleted) closed.complete(Unit) }
             c.onEntitiesEvent { ev ->
                 entities = applyEntitiesEvent(entities, ev)
-                state.setEntities(entities)
+                // Central dedupe: every consumer (Home, Devices, cameras) sees one
+                // entity per physical device even while Ring + ring-mqtt are both live.
+                state.setEntities(dedupeRingMqtt(entities, state.entityPlatforms.value))
             }
             try {
                 c.connect() // suspends until auth_ok; throws HaAuthException on bad token
@@ -342,6 +345,9 @@ class HaSource(
             state.setEntityCategories(buildEntityCategories(entitiesReg))
             state.setDevices(buildDeviceIndex(areas, entitiesReg, devices))
             state.setZWaveEntityIds(buildZWaveEntityIds(entitiesReg))
+            state.setEntityPlatforms(buildEntityPlatforms(entitiesReg))
+            // Platforms may arrive after the first entity push — re-filter what's shown.
+            state.setEntities(dedupeRingMqtt(entities, state.entityPlatforms.value))
         } catch (_: Exception) {
             // non-fatal: without a registry, entities just group under "Unassigned"
         }

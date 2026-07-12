@@ -265,11 +265,7 @@ private fun ToggleRow(
     onCall: (String, Map<String, Any?>) -> Unit,
 ) {
     val pulse = HawksnestTheme.pulse
-    // The optimistic target. `remember(on)` resets it when the authoritative state changes (the
-    // echo), and the LaunchedEffect resets it when pending clears without one (failure/timeout).
-    var target by remember(on) { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(pending) { if (!pending) target = null }
-    val shown = target ?: on
+    val (shown, setTarget) = rememberOptimisticOnOff(on, pending)
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = HawksnestTheme.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
@@ -284,12 +280,25 @@ private fun ToggleRow(
             checked = shown,
             onCheckedChange = {
                 if (it) haptics.toggleOn() else haptics.toggleOff()
-                target = it
+                setTarget(it)
                 onCall(if (it) "turn_on" else "turn_off", emptyMap())
             },
             colors = SwitchDefaults.colors(checkedTrackColor = pulse.effort),
         )
     }
+}
+
+/**
+ * Hoisted optimistic on/off state: the shown value follows the user's tap
+ * immediately, HA's echo (via `remember(on)`) reconciles it, and a cleared
+ * pending without an echo snaps back. Shared by the device cards' ToggleRow
+ * and the Devices list's compact rows.
+ */
+@Composable
+fun rememberOptimisticOnOff(on: Boolean, pending: Boolean): Pair<Boolean, (Boolean) -> Unit> {
+    var target by remember(on) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(pending) { if (!pending) target = null }
+    return (target ?: on) to { target = it }
 }
 
 @Composable
