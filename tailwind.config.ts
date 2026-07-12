@@ -126,12 +126,18 @@ export default {
           from: { opacity: "0.16" },
           to: { opacity: "0" },
         },
+        // Ambient "alive" pulse for live indicators (camera dot, connection pill).
+        breathe: {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.45" },
+        },
       },
       animation: {
         shimmer: "shimmer 1.5s cubic-bezier(0.2, 0, 0, 1) infinite",
         "fade-in": "fade-in 400ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
         thunk: "thunk 400ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
         "settle-flash": "settle-flash 700ms cubic-bezier(0.2, 0, 0, 1) both",
+        breathe: "breathe 2.4s cubic-bezier(0.2, 0, 0, 1) infinite",
       },
     },
   },

@@ -63,6 +63,7 @@ export function CameraWall() {
               overrides={overrides}
               density="compact"
               name={cam.name}
+              transitionId={cam.id}
             />
           </button>
         ))}
