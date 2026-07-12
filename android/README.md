@@ -9,7 +9,7 @@ Home Assistant stays the backend/brain. The app talks to HA's WebSocket + REST A
 (no Hawksnest server of its own), reaching HA through the existing Hawksnest reverse-proxy host
 over Tailscale, authenticated with a HA **long-lived access token**.
 
-## Status — Phases 0–3 done; Phase 4 (push) pending
+## Status — Phases 0–4 code-complete (push on-device verify pending)
 
 What's here today: a live HA client, not a scaffold. The full PULSE theme (`ui/theme/`) and core
 components (`ui/components/`) are in place, plus:
@@ -33,8 +33,16 @@ components (`ui/components/`) are in place, plus:
   rename/hide (persisted on-device, `DevicePrefsStore`). The Ring-vs-ring-mqtt double exposure
   is deduped centrally at the source layer (`core/logic/Dedupe.kt`) so every screen sees one
   entity per physical device.
-- **Phase 4** ⏳ — push notifications (custom FCM pipeline + owner-authored HA automation). Not yet
-  built.
+- **Phase 4** ✅ (code) — push notifications via **self-hosted ntfy** (not FCM: no Google
+  dependency, tailnet-only). `push/NtfyPushService` is a `specialUse` foreground service that holds
+  one streaming connection to `<base>/<topic>/json` and raises per-kind notifications
+  (`PushNotifier`); `NtfyMessage`/`PushRoute` (parse + doorbell→cameras / alarm→home routing) are
+  pure and JVM-unit-tested. Off by default — opt in under **Settings → Notifications** (requests
+  `POST_NOTIFICATIONS`); `BootReceiver` restarts it after a reboot if enabled. The ntfy server +
+  the HA automations that publish doorbell/alarm events live in the **`hawksnest-automation`** repo
+  (`docs/ntfy-push.md`). **On-device runtime** (delivery with the app closed, battery, reconnect,
+  the notification tap) is the one seam unit tests can't cover — smoke-test it on the phone before
+  relying on it (see the camera smoke checklist's "push fires" item).
 
 > Coverage today is strongest on the pure logic (`core/logic`, `core/ha`), which is JVM-unit-tested.
 > The Compose UI also runs through the **Sift design-slop audit** (below).

@@ -8,8 +8,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -19,8 +25,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.BuildConfig
 import com.hawksnest.ui.components.ConnectionPill
@@ -42,6 +50,14 @@ fun SettingsScreen(
     val savedUrl by viewModel.savedUrl.collectAsState()
     val hasToken by viewModel.hasToken.collectAsState()
     val reachability by viewModel.reachability.collectAsState()
+    val pushEnabled by viewModel.pushEnabled.collectAsState()
+
+    val context = LocalContext.current
+    // Android 13+ gates notifications behind POST_NOTIFICATIONS; request it the
+    // first time push is switched on, then persist + start the listener on grant.
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (granted) viewModel.setPushEnabled(true) }
 
     val defaultUrl = savedUrl ?: BuildConfig.HA_DEFAULT_URL
     var url by remember(defaultUrl) { mutableStateOf(defaultUrl) }
@@ -132,6 +148,46 @@ fun SettingsScreen(
             reachability = reachability,
             onTest = { viewModel.testReachability(url) },
         )
+
+        SectionHeader("Notifications")
+        PanelCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Push alerts",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        "Doorbell rings and alarm changes, even when the app is closed. " +
+                            "Delivered over your tailnet via ntfy — no Google account.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = HawksnestTheme.spacing.xs),
+                    )
+                }
+                Switch(
+                    checked = pushEnabled,
+                    onCheckedChange = { want ->
+                        if (want) {
+                            val needsPerm = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.POST_NOTIFICATIONS,
+                                ) != PackageManager.PERMISSION_GRANTED
+                            if (needsPerm) {
+                                notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                viewModel.setPushEnabled(true)
+                            }
+                        } else {
+                            viewModel.setPushEnabled(false)
+                        }
+                    },
+                    modifier = Modifier.testTag("settingsPushSwitch"),
+                )
+            }
+        }
 
         SectionHeader("About")
         PanelCard {
