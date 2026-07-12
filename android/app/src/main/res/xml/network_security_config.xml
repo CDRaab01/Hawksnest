@@ -1,22 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Hawksnest reaches Home Assistant through its own reverse proxy over Tailscale, typically as
-  cleartext HTTP to a private tailnet host (e.g. http://hawksnest.<tailnet>.ts.net:8080 or a
-  100.x.y.z CGNAT address). Android blocks cleartext by default (API 28+), so it must be allowed.
+  RELEASE posture: cleartext HTTP is DISALLOWED. Hawksnest reaches Home Assistant only over HTTPS —
+  the k3s nginx proxy is fronted by Tailscale Serve (TLS at https://<host>.ts.net:8443, a real
+  Let's Encrypt cert, tailnet-only). Point Settings at that HTTPS URL.
 
-  The host is user-configurable, so Phase 0 permits cleartext broadly. RECOMMENDED TIGHTENING once
-  your host is fixed: set base cleartextTrafficPermitted="false" and add a scoped <domain-config>
-  for just your tailnet host below. Prefer fronting the proxy with TLS (https/wss) — then cleartext
-  can be turned off entirely.
+  This replaces the earlier deliberate cleartext=true (which existed because the HA host could be a
+  bare 100.x Tailscale IP that a scoped <domain-config> can't match) — now that TLS fronts the
+  proxy, cleartext is off entirely. Reverting to a plain-HTTP host would mean re-opening cleartext
+  here and losing the security win.
+
+  Debug builds add a narrow cleartext exception for the instrumented mock-HA at 10.0.2.2 — see
+  src/debug/res/xml/network_security_config.xml. That override never ships in a release APK.
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
-
-    <!-- Example scoped form (keep cleartext only for the tailnet); enable instead of the broad
-         base-config above once the host is known:
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">ts.net</domain>
-        <domain includeSubdomains="true">localhost</domain>
-    </domain-config>
-    -->
+    <base-config cleartextTrafficPermitted="false" />
 </network-security-config>
