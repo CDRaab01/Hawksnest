@@ -98,8 +98,11 @@ android {
 
     // The Sift design-slop suite (Robolectric render of our Compose UI) lives in its own source dir
     // so it is compiled into the unit-test source set only when the Sift composite build is wired.
+    // Register it on the **Kotlin** test source set: under AGP 9's built-in Kotlin there is no
+    // Kotlin Gradle Plugin folding `java.srcDirs` into Kotlin compilation, so a `.java.srcDirs`
+    // registration silently drops the `.kt` suite (the audit then reports "no tests found").
     if (siftAvailable) {
-        sourceSets.getByName("test").java.srcDirs("src/siftAudit/kotlin")
+        sourceSets.getByName("test").kotlin.srcDir("src/siftAudit/kotlin")
     }
 }
 
