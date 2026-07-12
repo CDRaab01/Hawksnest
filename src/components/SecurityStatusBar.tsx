@@ -110,19 +110,37 @@ export function SecurityStatusBar() {
                 aria-label={b.label}
                 className="flex flex-col items-center gap-sm transition-transform duration-fast active:scale-[0.96] disabled:cursor-not-allowed"
               >
+                {/* The disc is layered so activation reads as a radial fill-sweep:
+                    a channel-colored layer scales 0→1 from the center (emphasized/
+                    decel — PULSE's structural move), instead of an instant repaint.
+                    Non-optimistic as ever: the sweep only runs once HA's echo makes
+                    the mode `active`; while HA works, the spinner holds the disc. */}
                 <span
                   className={[
-                    "flex h-16 w-16 items-center justify-center rounded-full transition-colors",
-                    active
-                      ? `${CHANNEL_BG[channel]} text-bg`
-                      : "border border-hairline bg-panel text-ink-dim",
+                    "relative flex h-16 w-16 items-center justify-center overflow-hidden rounded-full",
+                    "border transition-colors duration-standard ease-ease",
+                    active ? "border-transparent text-bg" : "border-hairline bg-panel text-ink-dim",
                   ].join(" ")}
                 >
-                  {isPending ? (
-                    <Loader className="animate-spin" size={26} />
-                  ) : (
-                    <Icon size={26} />
-                  )}
+                  <span
+                    aria-hidden="true"
+                    className={[
+                      "absolute inset-0 rounded-full",
+                      CHANNEL_BG[channel],
+                      "transition-transform duration-emphasized ease-decel motion-reduce:transition-none",
+                      active ? "scale-100" : "scale-0",
+                    ].join(" ")}
+                  />
+                  <span className="relative">
+                    {isPending ? (
+                      <Loader
+                        className={["animate-spin", active ? "" : CHANNEL_TEXT[channel]].join(" ")}
+                        size={26}
+                      />
+                    ) : (
+                      <Icon size={26} />
+                    )}
+                  </span>
                 </span>
                 <span
                   className={[

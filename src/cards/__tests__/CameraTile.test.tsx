@@ -67,6 +67,36 @@ describe("CameraTile", () => {
     expect(screen.queryByText("No signal")).toBeNull();
   });
 
+  it("shows the skeleton shimmer until the first frame decodes, then reveals it", () => {
+    const { container } = render(
+      <CameraTile entity={cam("/a.svg")} overrides={{}} name="Back" />,
+    );
+    // First paint: shimmer up, the visible frame held transparent beneath it.
+    expect(screen.getByTestId("skeleton")).toBeInTheDocument();
+    expect(screen.getByAltText("Back live snapshot")).toHaveClass("opacity-0");
+
+    fireEvent.load(preloader(container)!);
+    // Frame decoded: skeleton gone for good, frame revealed.
+    expect(screen.queryByTestId("skeleton")).toBeNull();
+    expect(screen.getByAltText("Back live snapshot")).toHaveClass("opacity-100");
+  });
+
+  it("shows the offline placeholder — not a skeleton — when the camera isn't live", () => {
+    render(
+      <CameraTile
+        entity={{
+          entity_id: "camera.back",
+          state: "unavailable",
+          attributes: { friendly_name: "Back" },
+        }}
+        overrides={{}}
+        name="Back"
+      />,
+    );
+    expect(screen.queryByTestId("skeleton")).toBeNull();
+    expect(screen.getByText("Offline")).toBeInTheDocument();
+  });
+
   it("renders a sane age from an epoch-seconds last_changed (not a 1970 badge)", () => {
     const tenMinAgoSec = Math.floor(Date.now() / 1000) - 600;
     render(
