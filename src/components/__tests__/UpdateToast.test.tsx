@@ -2,24 +2,27 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// The container imports the SW module `virtual:pwa-register/react`, which only
-// exists when the PWA plugin runs. Mock it so we can drive needRefresh/reload.
-const updateServiceWorker = vi.fn((..._args: unknown[]) => Promise.resolve());
-const setNeedRefresh = vi.fn();
-let needRefresh = false;
+// The container imports `virtual:pwa-register/react`, which only exists when the
+// PWA plugin runs. Mock it via vi.hoisted so the shared spies are safe to
+// reference inside the (hoisted) factory without a TDZ/scope error.
+const sw = vi.hoisted(() => ({
+  updateServiceWorker: vi.fn((..._args: unknown[]) => Promise.resolve()),
+  setNeedRefresh: vi.fn(),
+  needRefresh: false,
+}));
 vi.mock("virtual:pwa-register/react", () => ({
   useRegisterSW: () => ({
-    needRefresh: [needRefresh, setNeedRefresh],
-    updateServiceWorker,
+    needRefresh: [sw.needRefresh, sw.setNeedRefresh],
+    updateServiceWorker: sw.updateServiceWorker,
   }),
 }));
 
 import { UpdateToast, UpdateToastView } from "../UpdateToast";
 
 beforeEach(() => {
-  needRefresh = false;
-  updateServiceWorker.mockClear();
-  setNeedRefresh.mockClear();
+  sw.needRefresh = false;
+  sw.updateServiceWorker.mockClear();
+  sw.setNeedRefresh.mockClear();
 });
 
 describe("UpdateToastView", () => {
@@ -39,26 +42,26 @@ describe("UpdateToastView", () => {
 
 describe("UpdateToast", () => {
   it("renders nothing until a new worker is waiting", () => {
-    needRefresh = false;
+    sw.needRefresh = false;
     render(<UpdateToast />);
     expect(screen.queryByText("Update ready")).toBeNull();
   });
 
   it("prompts and activates the waiting worker on Reload", async () => {
     const user = userEvent.setup();
-    needRefresh = true;
+    sw.needRefresh = true;
     render(<UpdateToast />);
     expect(screen.getByText("Update ready")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Reload" }));
-    expect(updateServiceWorker).toHaveBeenCalledWith(true);
+    expect(sw.updateServiceWorker).toHaveBeenCalledWith(true);
   });
 
   it("dismiss clears the pending flag without reloading", async () => {
     const user = userEvent.setup();
-    needRefresh = true;
+    sw.needRefresh = true;
     render(<UpdateToast />);
     await user.click(screen.getByRole("button", { name: "Dismiss update prompt" }));
-    expect(setNeedRefresh).toHaveBeenCalledWith(false);
-    expect(updateServiceWorker).not.toHaveBeenCalled();
+    expect(sw.setNeedRefresh).toHaveBeenCalledWith(false);
+    expect(sw.updateServiceWorker).not.toHaveBeenCalled();
   });
 });
