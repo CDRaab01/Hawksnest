@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.CardType
+import com.hawksnest.core.logic.isDimmableLight
 import com.hawksnest.core.logic.lockStateLabel
 import com.hawksnest.ui.theme.HawksnestTheme
 import kotlinx.serialization.json.JsonObject
@@ -133,8 +134,12 @@ fun DeviceControlCard(
             CardType.LIGHT -> {
                 val on = device.rawState == "on"
                 ToggleRow(on, pending, haptics, onCall)
-                val pct = device.attributes.num("brightness")?.let { (it / 2.55).roundToInt() } ?: 0
-                LevelSlider(pct, enabled = on) { v -> onCall("turn_on", mapOf("brightness_pct" to v)) }
+                // On/off-only lights (relay/switch-type) get no dimmer — a dead
+                // slider on every porch light was worse than no slider.
+                if (isDimmableLight(device.attributes)) {
+                    val pct = device.attributes.num("brightness")?.let { (it / 2.55).roundToInt() } ?: 0
+                    LevelSlider(pct, enabled = on) { v -> onCall("turn_on", mapOf("brightness_pct" to v)) }
+                }
             }
             CardType.FAN -> {
                 val on = device.rawState == "on"
@@ -209,7 +214,10 @@ fun DeviceControlCard(
 
 /** Human-readable state line per domain. */
 private fun subtitle(d: DeviceUi): String = when (d.card) {
-    CardType.LIGHT -> if (d.rawState == "on") "On · ${d.attributes.num("brightness")?.let { (it / 2.55).roundToInt() } ?: 0}%" else "Off"
+    CardType.LIGHT ->
+        if (d.rawState != "on") "Off"
+        else if (isDimmableLight(d.attributes)) "On · ${d.attributes.num("brightness")?.let { (it / 2.55).roundToInt() } ?: 0}%"
+        else "On"
     CardType.FAN -> if (d.rawState == "on") "On · ${d.attributes.num("percentage")?.roundToInt() ?: 0}%" else "Off"
     CardType.COVER -> "${d.stateText} · ${d.attributes.num("current_position")?.roundToInt() ?: 0}%"
     CardType.CLIMATE -> {
