@@ -121,6 +121,16 @@ describe("CameraTile", () => {
     expect(container.querySelector("[data-transition]")).toBeNull();
   });
 
+  it("pulses the ding ring only while the doorbell is ringing", () => {
+    const { rerender } = render(
+      <CameraTile entity={cam("/a.svg")} overrides={{}} name="Back" ringing />,
+    );
+    expect(screen.getByTestId("ding-ring")).toBeInTheDocument();
+
+    rerender(<CameraTile entity={cam("/a.svg")} overrides={{}} name="Back" ringing={false} />);
+    expect(screen.queryByTestId("ding-ring")).toBeNull();
+  });
+
   it("renders a sane age from an epoch-seconds last_changed (not a 1970 badge)", () => {
     const tenMinAgoSec = Math.floor(Date.now() / 1000) - 600;
     render(

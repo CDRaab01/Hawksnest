@@ -22,10 +22,13 @@ export function CameraTile({
   density = "comfortable",
   name: nameOverride,
   transitionId,
+  ringing = false,
 }: CardProps & {
   name?: string;
   /** Logical camera id — names the tile for the tile→player View Transition. */
   transitionId?: string;
+  /** True while this camera's doorbell `_ding` sensor is on — pulses the tile. */
+  ringing?: boolean;
 }) {
   const name = nameOverride ?? resolveName(entity, overrides);
   const aspect = density === "compact" ? "aspect-video" : "aspect-[4/3]";
@@ -133,6 +136,16 @@ export function CameraTile({
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-md">
           <span className="font-body text-body text-white">{name}</span>
         </div>
+
+        {/* Doorbell ding: the ringing camera's tile pulses a streak ring so the
+            eye lands on the right feed even before reading the banner. */}
+        {ringing && (
+          <div
+            aria-hidden="true"
+            data-testid="ding-ring"
+            className="pointer-events-none absolute inset-0 rounded border-2 border-streak animate-ding-ring motion-reduce:animate-none"
+          />
+        )}
       </div>
     </PanelCard>
   );

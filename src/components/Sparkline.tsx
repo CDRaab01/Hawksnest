@@ -96,6 +96,10 @@ export function Sparkline({
         strokeWidth={1}
         vectorEffect="non-scaling-stroke"
       />
+      {/* pathLength=1 normalizes the dash space so the draw-in animates 1 → 0
+          regardless of the real path length. Runs once on mount (each range
+          change remounts the chart via its loading state); live data updates
+          reshape the path without re-drawing. */}
       <path
         d={geom.d}
         fill="none"
@@ -104,10 +108,15 @@ export function Sparkline({
         strokeLinejoin="round"
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
+        pathLength={1}
+        strokeDasharray={1}
+        className="animate-draw motion-reduce:animate-none"
       />
-      {/* glow dot on the latest point only */}
-      <circle cx={geom.cx} cy={geom.cy} r={5} fill={STROKE[channel]} opacity={0.25} />
-      <circle cx={geom.cx} cy={geom.cy} r={2.5} fill={STROKE[channel]} />
+      {/* glow dot on the latest point only — lands after the line finishes drawing */}
+      <g className="animate-fade-in motion-reduce:animate-none" style={{ animationDelay: "500ms" }}>
+        <circle cx={geom.cx} cy={geom.cy} r={5} fill={STROKE[channel]} opacity={0.25} />
+        <circle cx={geom.cx} cy={geom.cy} r={2.5} fill={STROKE[channel]} />
+      </g>
     </svg>
   );
 }

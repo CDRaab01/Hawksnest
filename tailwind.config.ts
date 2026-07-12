@@ -131,6 +131,22 @@ export default {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.45" },
         },
+        // Doorbell banner spring entrance: drop in, slight overshoot, settle.
+        "banner-in": {
+          "0%": { transform: "translateY(-120%)", opacity: "0" },
+          "70%": { transform: "translateY(4%)", opacity: "1" },
+          "100%": { transform: "translateY(0)", opacity: "1" },
+        },
+        // Ringing camera tile: a streak ring swells and fades, repeatedly.
+        "ding-ring": {
+          "0%": { transform: "scale(0.98)", opacity: "0.9" },
+          "100%": { transform: "scale(1.03)", opacity: "0" },
+        },
+        // Chart line draw-in (pathLength-normalized dash offset 1 → 0).
+        draw: {
+          from: { strokeDashoffset: "1" },
+          to: { strokeDashoffset: "0" },
+        },
       },
       animation: {
         shimmer: "shimmer 1.5s cubic-bezier(0.2, 0, 0, 1) infinite",
@@ -138,6 +154,9 @@ export default {
         thunk: "thunk 400ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
         "settle-flash": "settle-flash 700ms cubic-bezier(0.2, 0, 0, 1) both",
         breathe: "breathe 2.4s cubic-bezier(0.2, 0, 0, 1) infinite",
+        "banner-in": "banner-in 400ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
+        "ding-ring": "ding-ring 1.2s cubic-bezier(0.05, 0.7, 0.1, 1) infinite",
+        draw: "draw 600ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
       },
     },
   },
