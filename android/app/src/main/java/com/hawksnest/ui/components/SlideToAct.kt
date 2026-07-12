@@ -37,6 +37,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hawksnest.ui.theme.PulseMotion
 import kotlinx.coroutines.launch
@@ -146,15 +147,26 @@ fun SlideToAct(
                 .clip(CircleShape)
                 .background(channel.copy(alpha = 0.25f)),
         )
-        // Hint label, fading out as the slide progresses so the gesture feels responsive.
-        Text(
-            text = if (pending) pendingLabel else label,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        // Hint label, fading out as the slide progresses so the gesture feels
+        // responsive. Centered in the space RIGHT of the resting thumb — centering
+        // across the whole track put the first characters under the thumb on
+        // narrow cards ("e to unlock").
+        Box(
             modifier = Modifier
-                .align(Alignment.Center)
-                .graphicsLayer { alpha = if (pending) 1f else (1f - progress * 1.4f).coerceIn(0f, 1f) },
-        )
+                .matchParentSize()
+                .padding(start = ThumbSize + TrackPadding * 2, end = TrackPadding * 2),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (pending) pendingLabel else label,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .graphicsLayer { alpha = if (pending) 1f else (1f - progress * 1.4f).coerceIn(0f, 1f) },
+            )
+        }
         // The thumb: channel disc carrying the action icon, or a spinner while pending.
         Box(
             modifier = Modifier

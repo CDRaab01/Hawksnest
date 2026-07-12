@@ -15,6 +15,12 @@ const light = (state: string, brightness?: number): HassEntity => ({
   attributes: { friendly_name: "Porch", ...(brightness !== undefined ? { brightness } : {}) },
 });
 
+const onOffLight = (state: string): HassEntity => ({
+  entity_id: "light.porch",
+  state,
+  attributes: { friendly_name: "Porch", supported_color_modes: ["onoff"] },
+});
+
 beforeEach(() => {
   mockCall.mockClear();
   mockCall.mockImplementation(() => Promise.resolve());
@@ -45,6 +51,30 @@ describe("LightCard feel", () => {
 
     expect(toggle).toHaveAttribute("aria-checked", "false"); // snapped back
     expect(screen.getByText("Couldn't reach the light.")).toBeInTheDocument();
+  });
+
+  it("hides the dimmer surface entirely for on/off-only lights", () => {
+    render(<LightCard entity={onOffLight("on")} overrides={{}} />);
+    // No slider, no made-up percentage — just the honest state.
+    expect(screen.queryByRole("slider")).toBeNull();
+    expect(screen.queryByText(/% brightness/)).toBeNull();
+    expect(screen.getByText("On")).toBeInTheDocument();
+  });
+
+  it("keeps the dimmer for brightness-capable lights even while OFF", () => {
+    // HA drops the `brightness` attribute while off — supported_color_modes
+    // is what keeps the slider from vanishing every time the light turns off.
+    render(
+      <LightCard
+        entity={{
+          entity_id: "light.porch",
+          state: "off",
+          attributes: { friendly_name: "Porch", supported_color_modes: ["brightness"] },
+        }}
+        overrides={{}}
+      />,
+    );
+    expect(screen.getByRole("slider", { name: "Porch brightness" })).toBeInTheDocument();
   });
 
   it("commits brightness once per gesture (on release), not per drag tick", () => {

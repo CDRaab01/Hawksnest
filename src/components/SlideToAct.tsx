@@ -155,10 +155,16 @@ export function SlideToAct({
         className={["absolute inset-y-0 left-0 rounded-[27px] opacity-25", CHANNEL_BG[channel]].join(" ")}
         style={{ width: offset + THUMB_PX + PAD_PX * 2 }}
       />
-      {/* Hint label, fading as the slide progresses. */}
+      {/* Hint label, fading as the slide progresses. Centered in the space
+          RIGHT of the resting thumb — centering across the whole track put the
+          first characters under the thumb on narrow cards ("e to unlock"). */}
       <span
-        className="pointer-events-none absolute inset-0 flex items-center justify-center font-body text-body text-ink-dim"
-        style={{ opacity: pending ? 1 : Math.max(0, 1 - progress * 1.4) }}
+        className="pointer-events-none absolute inset-y-0 right-0 flex items-center justify-center truncate font-body text-body text-ink-dim"
+        style={{
+          left: THUMB_PX + PAD_PX * 2,
+          paddingRight: PAD_PX * 2,
+          opacity: pending ? 1 : Math.max(0, 1 - progress * 1.4),
+        }}
       >
         {pending ? pendingLabel : label}
       </span>

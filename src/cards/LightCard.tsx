@@ -3,6 +3,7 @@ import { Lightbulb, LightbulbOff } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { DataText } from "../components/DataText";
 import { resolveName } from "../lib/resolve";
+import { isDimmableLight } from "../lib/ha";
 import { callService } from "../store/connection";
 import type { CardProps } from "./types";
 
@@ -28,6 +29,10 @@ const WARMTH_MAX = 0.16;
 export function LightCard({ entity, overrides }: CardProps) {
   const name = resolveName(entity, overrides);
   const actual = entity.state === "on";
+  // On/off-only lights (relay/switch-type) get no dimmer surface at all — a
+  // dead slider and a made-up "% brightness" on every porch light was worse
+  // than nothing.
+  const dimmable = isDimmableLight(entity);
   const brightnessPct =
     typeof entity.attributes.brightness === "number"
       ? toPercent(entity.attributes.brightness)
@@ -71,7 +76,9 @@ export function LightCard({ entity, overrides }: CardProps) {
   }
 
   // The card is the dimmer: wash opacity tracks the (live-dragged) level.
-  const warmth = on ? WARMTH_MIN + (pct / 100) * (WARMTH_MAX - WARMTH_MIN) : 0;
+  // Non-dimmers get a fixed mid warmth when lit — on/off is still a state
+  // worth reading at a glance.
+  const warmth = !on ? 0 : dimmable ? WARMTH_MIN + (pct / 100) * (WARMTH_MAX - WARMTH_MIN) : 0.09;
 
   return (
     <PanelCard tint={on ? "strength" : undefined} className="relative overflow-hidden p-lg">
@@ -89,10 +96,12 @@ export function LightCard({ entity, overrides }: CardProps) {
         <div className="min-w-0">
           <div className="truncate font-body text-body-lg text-ink">{name}</div>
           <div className="font-body text-body text-ink-dim">
-            {on ? (
+            {on && dimmable ? (
               <>
                 <DataText className="text-strength">{pct}</DataText>% brightness
               </>
+            ) : on ? (
+              "On"
             ) : (
               "Off"
             )}
@@ -120,6 +129,7 @@ export function LightCard({ entity, overrides }: CardProps) {
           />
         </button>
       </div>
+      {dimmable && (
       <input
         type="range"
         min={1}
@@ -136,6 +146,7 @@ export function LightCard({ entity, overrides }: CardProps) {
         }}
         className="mt-lg w-full accent-strength disabled:opacity-40"
       />
+      )}
     </PanelCard>
   );
 }
