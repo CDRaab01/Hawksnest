@@ -42,6 +42,12 @@ export default {
           dim: "var(--streak-dim)",
           on: "var(--streak-on)",
         },
+        // Hairlines as colors too (not just borderColor) so gradients/fills can
+        // use them — e.g. the skeleton shimmer sweeps in hairline-strong.
+        hairline: {
+          DEFAULT: "var(--hairline)",
+          strong: "var(--hairline-strong)",
+        },
       },
       borderColor: {
         hairline: "var(--hairline)",
@@ -95,6 +101,22 @@ export default {
       transitionTimingFunction: {
         ease: "cubic-bezier(0.2, 0, 0, 1)",
         decel: "cubic-bezier(0.05, 0.7, 0.1, 1)",
+      },
+      keyframes: {
+        // One low-amplitude sweep across a skeleton surface (hairline-strong, not
+        // a candy gradient) — the loading texture for camera tiles + charts.
+        shimmer: {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
+        "fade-in": {
+          from: { opacity: "0" },
+          to: { opacity: "1" },
+        },
+      },
+      animation: {
+        shimmer: "shimmer 1.5s cubic-bezier(0.2, 0, 0, 1) infinite",
+        "fade-in": "fade-in 400ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
       },
     },
   },

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Camera, VideoOff } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
+import { Skeleton } from "../components/Skeleton";
 import { useSnapshotBucket } from "../components/snapshotBucketContext";
 import { useHaBaseUrl } from "../store/entityStore";
 import { resolveName } from "../lib/resolve";
@@ -48,7 +49,13 @@ export function CameraTile({
           <img
             src={visible}
             alt={`${name} live snapshot`}
-            className="absolute inset-0 h-full w-full object-cover"
+            className={[
+              "absolute inset-0 h-full w-full object-cover",
+              // First frame: hidden under the skeleton until it decodes, then a
+              // gentle reveal. Refresh swaps stay at full opacity (no flicker).
+              "transition-opacity duration-emphasized ease-decel motion-reduce:transition-none",
+              loaded ? "opacity-100" : "opacity-0",
+            ].join(" ")}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-xs">
@@ -61,6 +68,16 @@ export function CameraTile({
               {failed ? "No signal" : "Offline"}
             </span>
           </div>
+        )}
+
+        {/* First-frame loading texture: a PULSE skeleton shimmer fills the tile
+            while the initial snapshot decodes over the tunnel; it never shows
+            again once any frame has landed (refreshes swap seamlessly above). */}
+        {live && !loaded && (
+          <Skeleton
+            className="absolute inset-0"
+            label={`Loading ${name} snapshot`}
+          />
         )}
 
         {/* Hidden preloader: fetch the next frame off-screen and only promote it to the
