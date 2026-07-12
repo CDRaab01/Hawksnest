@@ -10,6 +10,24 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Hawksnest</title>
+    <script>
+      // Apply the saved appearance before first paint so a light-theme device
+      // never flashes the dark default. Mirrors store/theme.ts (default: dark).
+      (function () {
+        try {
+          var p = localStorage.getItem("hawksnest:theme") || "dark";
+          var sysLight =
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: light)").matches;
+          var light = p === "light" || (p === "system" && sysLight);
+          var e = document.documentElement;
+          e.classList.toggle("light", light);
+          e.classList.toggle("dark", !light);
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute("content", light ? "#eef1f5" : "#0B0D10");
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

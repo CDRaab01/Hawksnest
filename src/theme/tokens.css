@@ -4,7 +4,13 @@
  *   Pulse.kt (channels, surfaces, hairline, gradients), Color.kt (hex),
  *   Dimens.kt (spacing), Shape.kt (radii), Motion.kt (durations/easings).
  *
- * v1 is dark-only. A :root.light block is intentionally omitted (deferred).
+ * Dark is the default (bare :root); the light variant lives in :root.light
+ * below and is opt-in via Settings → Appearance (store/theme.ts toggles the
+ * class on <html>). Channel *hues shift* between themes on purpose: a vivid
+ * accent that reads as text on OLED-dark fails contrast on white, so the light
+ * block darkens each base enough to clear ~AA on the light surfaces while
+ * keeping the channel recognizable. Meaning is preserved, legibility isn't
+ * sacrificed.
  * Channel meaning in Hawksnest (a home dashboard, not a fitness app):
  *   effort/blue    -> primary & interactive (toggles, sliders, primary actions)
  *   recovery/green -> secure / settled / done (locked, closed, "Safe")
@@ -49,4 +55,41 @@
   --hero-to: #5b2be0;
   --energy-from: #ff8a5c;
   --energy-to: #f5a623;
+}
+
+/*
+ * Light variant. Opt-in via <html class="light"> (store/theme.ts). Surfaces
+ * invert (paper bg, white raised cards, ink text); channel bases darken so
+ * `text-<channel>` clears contrast on the light panels, while `-dim` becomes a
+ * pale tint that the base hue reads on and `-on` stays white on the saturated
+ * base. Gradients keep their saturated hues (white content sits on them).
+ */
+:root.light {
+  color-scheme: light;
+
+  --bg: #eef1f5;
+  --panel: #f7f9fc;
+  --panel-high: #ffffff;
+  --hairline: rgba(16, 20, 26, 0.1);
+  --hairline-strong: rgba(16, 20, 26, 0.2);
+
+  --text: #10141a;
+  --text-dim: #4a5563;
+  --text-faint: #7a8592;
+
+  --effort: #2258d8;
+  --effort-dim: #e3ebff;
+  --effort-on: #ffffff;
+
+  --recovery: #0a7350;
+  --recovery-dim: #d6f1e5;
+  --recovery-on: #ffffff;
+
+  --strength: #5b3fe0;
+  --strength-dim: #e9e4ff;
+  --strength-on: #ffffff;
+
+  --streak: #c2410c;
+  --streak-dim: #ffe4d6;
+  --streak-on: #ffffff;
 }

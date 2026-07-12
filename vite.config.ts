@@ -11,7 +11,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: "autoUpdate",
+      // "prompt", not "autoUpdate": a wall-mounted tablet may sit on one tab for
+      // days and never navigate, so silent skip-waiting would strand it on a
+      // stale shell. Instead `UpdateToast` (useRegisterSW) surfaces a "reload"
+      // prompt when a new SW is waiting. injectRegister:false because the React
+      // hook registers the SW itself — leaving it on "auto" would double-register.
+      registerType: "prompt",
+      injectRegister: false,
       // Precache the built app shell only. CRITICAL: nothing under /api is ever
       // cached — that's the live HA WebSocket/REST surface and the only thing
       // that carries the long-lived token. The token itself lives in

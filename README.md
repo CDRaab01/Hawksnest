@@ -121,6 +121,12 @@ Playwright drives the real app in Chromium against two backends:
 `npm run test:e2e` starts both servers automatically. In the cloud sandbox it uses the
 pre-installed Chromium; in CI the advisory `e2e` job installs Playwright's managed browser.
 
+### Camera live path (manual)
+
+The one seam automation can't reach — WebRTC (web) / LL-HLS (Android) live playback against real
+go2rtc — has a per-release smoke checklist in [`docs/CAMERA-SMOKE.md`](docs/CAMERA-SMOKE.md). Run it
+before releasing anything that touched the camera stack or the nginx camera proxy.
+
 ## Layout
 
 ```
