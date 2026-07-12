@@ -81,10 +81,12 @@ The web app ships as an nginx pod in the **same k3s cluster/namespace as HA itse
 owned by the sibling `hawksnest-automation` repo), NodePort 30080, exposed to LAN/Tailscale via
 Windows portproxy scripts that run at logon (WSL IP changes each reboot).
 
-nginx reverse-proxies `/api` to HA so the browser is same-origin. **Invariant: nginx must NOT
-send `X-Forwarded-For` to HA** — with `use_x_forwarded_for` and an untrusted proxy IP, HA 400s
-every request (this killed all camera frames once). Either keep XFF off (current) or send it AND
-trust the flannel pod CIDR in HA — never half-do it.
+nginx reverse-proxies `/api` to HA so the browser is same-origin. **Invariant: every HA-proxied
+location must CLEAR `X-Forwarded-For`/`X-Forwarded-Proto` (`proxy_set_header … ""`)** — with
+`use_x_forwarded_for` and an untrusted proxy IP, HA 400s every request (this killed all camera
+frames once). Not-adding XFF was enough behind a plain portproxy, but the TLS front (Tailscale
+Serve, `:8443`) injects XFF and nginx passes inbound headers through, so it must be actively
+stripped. Alternative: trust the flannel pod CIDR in HA — never half-do it.
 
 `deploy.test.ts` asserts the deploy contract (nginx config, Dockerfile, NodePort) — **if you
 change deploy files, that test is the spec**; update both together.

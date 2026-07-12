@@ -18,7 +18,15 @@ browser ──http──> Hawksnest pod (nginx :80)
 - `nginx.conf` — SPA fallback + `/api` + `/api/websocket` proxy to HA's Service.
 - `k8s/` — kustomize: `deployment.yaml`, `service.yaml` (NodePort **30080**), `kustomization.yaml`
   (namespace `home-automation`).
-- `windows/portproxy-hawksnest.ps1` — LAN/Tailscale exposure `0.0.0.0:8080 → wsl:30080`.
+- `windows/hawksnest-serve.ps1` — **HTTPS exposure over the tailnet** via Tailscale Serve
+  (`https://<host>.ts.net:8443 → 127.0.0.1:8390 → wsl:30080`), run at logon. This supersedes
+  `portproxy-hawksnest.ps1` (below) now that the Dragonfly WSL distro runs in **mirrored**
+  networking, where the old `netsh portproxy → <wsl-eth0>:30080` model breaks (no NAT interface;
+  the NodePort is an iptables DNAT, not a listening socket the host can see). The script instead
+  runs a real socat listener inside WSL that mirrored mode surfaces to host loopback, then fronts
+  it with Tailscale's TLS. See the script header for the full rationale.
+- `windows/portproxy-hawksnest.ps1` — *legacy* NAT-mode LAN/Tailscale exposure
+  `0.0.0.0:8080 → wsl:30080`. Broken under mirrored WSL networking; kept for the NAT-mode case.
 - `../.github/workflows/deploy.yml` — self-hosted-runner build + import + apply.
 
 ## Bring-up (on the Dragonfly host)
@@ -31,16 +39,19 @@ browser ──http──> Hawksnest pod (nginx :80)
    kubectl -n home-automation rollout status deployment/hawksnest
    ```
    Confirm: `kubectl -n home-automation get pod,svc -l app=hawksnest` shows the pod Ready.
-2. **Expose to the LAN/Tailscale** (Administrator PowerShell on Windows):
+2. **Expose over HTTPS on the tailnet** (PowerShell on Windows):
    ```powershell
-   .\deploy\windows\portproxy-hawksnest.ps1
+   .\deploy\windows\hawksnest-serve.ps1
    ```
-   Add it to the host's logon/boot task next to `portproxy-ha.ps1` (WSL2's IP changes on reboot).
-3. **Open** `http://192.168.4.34:8080` (or the host's Tailscale IP). Go to **Settings** — the URL
-   already defaults to this site (the proxy) — paste a Home Assistant **long-lived access token**
+   Add it to the host's logon/boot task. It starts the WSL socat forwarder each boot; the
+   Tailscale Serve config persists on its own. (On a NAT-mode host, use the legacy
+   `portproxy-hawksnest.ps1` instead.)
+3. **Open** `https://<host>.ts.net:8443` (the script prints the exact URL). Go to **Settings** —
+   the URL defaults to this site (the proxy) — paste a Home Assistant **long-lived access token**
    (HA → your profile → Long-lived access tokens) → **Connect**.
 4. **Verify:** the header pill shows **Connected**, entities appear grouped by your real HA areas,
-   and DevTools → Network → WS shows `/api/websocket` upgraded (101). No CORS errors.
+   `/api/websocket` upgrades (101), and **camera frames paint** (the XFF path — nginx clears
+   `X-Forwarded-For`, else HA 400s every frame; see nginx.conf). No CORS errors.
 
 ## Rollback
 ```bash
