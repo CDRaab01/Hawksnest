@@ -103,13 +103,10 @@ class CameraPlayerViewModel @Inject constructor(
     fun sirenOn(entityId: String): Flow<Boolean> =
         connection.state.entities.map { it[entityId]?.state == "on" }
 
-    /** Sound or silence a camera's siren (ring-mqtt `switch.<base>_siren`). */
-    suspend fun setSiren(entityId: String, on: Boolean) {
-        connection.callService(
-            "switch",
-            if (on) "turn_on" else "turn_off",
-            ServiceData(entityId = entityId),
-        )
+    /** Sound or silence a camera's siren (ring-mqtt `switch.<base>_siren`), crash-safe via the
+     *  control gate — a failed siren call must never crash the player. */
+    fun setSiren(entityId: String, on: Boolean) {
+        connection.control(entityId, if (on) "turn_on" else "turn_off", label = "Siren")
     }
 
     /** Select which ring-mqtt event plays, then resolve the `_event` stream URL. */

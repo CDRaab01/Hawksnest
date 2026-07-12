@@ -60,6 +60,7 @@ fun DevicesScreen(
     viewModel: DevicesViewModel = hiltViewModel(),
 ) {
     val groups by viewModel.groups.collectAsState()
+    val pending by viewModel.pending.collectAsState()
     var filter by rememberSaveable { mutableStateOf(DeviceFilter.ALL) }
 
     // Only offer chips for kinds that are actually present, so the row isn't full of dead filters.
@@ -99,6 +100,7 @@ fun DevicesScreen(
                         device,
                         onCall = { service, extra -> viewModel.call(device.entityId, service, extra) },
                         onOpen = { onOpenEntity(device.entityId) },
+                        pending = device.entityId in pending,
                     )
                 }
             }
@@ -109,6 +111,7 @@ fun DevicesScreen(
                     device,
                     onCall = { service, extra -> viewModel.call(device.entityId, service, extra) },
                     onOpen = { onOpenEntity(device.entityId) },
+                    pending = device.entityId in pending,
                 )
             }
         }

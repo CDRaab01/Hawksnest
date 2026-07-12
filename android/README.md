@@ -21,6 +21,12 @@ components (`ui/components/`) are in place, plus:
 - **Phase 3** ✅ — camera snapshots + live MJPEG (`ui/cameras/`). (An earlier biometric gate + alarm
   PIN keypad on unlock/disarm were removed — the home owner found the friction unwanted; disarm/unlock
   now fire directly. A panel that enforces HA `code_format` must allow codeless disarm from the app.)
+- **Control feel** ✅ — every user-facing control call goes through `core/ha/ControlGate`
+  (crash-safe: failures land on one app-level snackbar with a reject buzz; honest pending via
+  `pendingControls`). Locks are a **slide-to-act** track (`ui/components/SlideToAct.kt` — the drag
+  is the confirmation; the thumb holds a spinner until HA's echo; no accidental unlocks).
+  Lights/switches/fans are **optimistic** (the thumb follows the finger; the echo reconciles;
+  failures snap back). Semantic haptics throughout (`ui/components/Haptics.kt`).
 - **Phase 4** ⏳ — push notifications (custom FCM pipeline + owner-authored HA automation). Not yet
   built.
 

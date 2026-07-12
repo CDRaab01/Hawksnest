@@ -25,7 +25,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,7 +36,6 @@ import com.hawksnest.core.logic.vodPositionMs
 import com.hawksnest.ui.home.CameraUi
 import com.hawksnest.ui.theme.HawksnestTheme
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 private const val DAY_MS = 24 * 3600_000L
@@ -218,7 +216,6 @@ private fun SirenButton(
     viewModel: CameraPlayerViewModel,
     modifier: Modifier = Modifier,
 ) {
-    val scope = rememberCoroutineScope()
     val on by viewModel.sirenOn(entityId).collectAsState(initial = false)
     var armed by remember { mutableStateOf(false) }
     LaunchedEffect(armed) {
@@ -245,12 +242,12 @@ private fun SirenButton(
             .clickable {
                 when {
                     on -> {
-                        scope.launch { viewModel.setSiren(entityId, false) }
+                        viewModel.setSiren(entityId, false)
                         armed = false
                     }
                     !armed -> armed = true
                     else -> {
-                        scope.launch { viewModel.setSiren(entityId, true) }
+                        viewModel.setSiren(entityId, true)
                         armed = false
                     }
                 }
