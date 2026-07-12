@@ -4,12 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hawksnest.config.overrides
 import com.hawksnest.core.ha.ConnectionManager
-import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.logic.NON_DEVICE_DOMAINS
 import com.hawksnest.core.logic.domainToCard
 import com.hawksnest.core.logic.groupByArea
 import com.hawksnest.core.logic.isPrimaryEntity
+import com.hawksnest.core.logic.prettifyEntityId
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.ui.components.DeviceUi
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class DeviceGroup(val area: String, val devices: List<DeviceUi>)
@@ -55,9 +54,16 @@ class DevicesViewModel @Inject constructor(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Entity ids with a control in flight — cards render pending state from this. */
+    val pending: StateFlow<Set<String>> = connection.pendingControls
+
+    /** Crash-safe control call; failures surface on the app snackbar, pending on [pending]. */
     fun call(entityId: String, service: String, extra: Map<String, Any?> = emptyMap()) {
-        viewModelScope.launch {
-            connection.callService(domainOf(entityId), service, ServiceData(entityId = entityId, extra = extra))
-        }
+        connection.control(entityId, service, controlLabel(connection, entityId), extra)
     }
 }
+
+/** The device's resolved display name for control failure messages. */
+internal fun controlLabel(connection: ConnectionManager, entityId: String): String =
+    connection.state.entities.value[entityId]?.let { resolveName(it, overrides) }
+        ?: prettifyEntityId(entityId)
