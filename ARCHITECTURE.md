@@ -123,6 +123,8 @@ change deploy files, that test is the spec**; update both together.
 3. **nginx XFF rule** (above) — all-or-nothing.
 4. Long-lived-token auth is the accepted Phase-0 posture; the upgrade path is TLS-then-OAuth
    (ROADMAP #1–2), in that order, web + Android together so the token story stays one story.
+   Android hardens token-at-rest now: the LLAT is Keystore-encrypted (`util/TokenCipher`) and
+   excluded from cloud backup / device transfer, so a copied credential file is useless off-device.
 5. Unknown HA domains must render, not crash (`cards.ts` contract).
 
 ## Where to make common changes
