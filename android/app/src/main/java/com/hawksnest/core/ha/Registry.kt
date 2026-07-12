@@ -115,6 +115,21 @@ fun buildDeviceIndex(areas: JsonArray, entities: JsonArray, devices: JsonArray):
     return DeviceIndex(out, deviceByEntity)
 }
 
+/**
+ * entity_id → integration platform id ("ring", "mqtt", "zwave_js", …), parsed from
+ * `config/entity_registry/list`. Powers the ring/ring-mqtt dedupe (core/logic/Dedupe.kt).
+ */
+fun buildEntityPlatforms(entities: JsonArray): Map<String, String> {
+    val out = LinkedHashMap<String, String>()
+    for (el in entities) {
+        val o = el as? JsonObject ?: continue
+        val entityId = o.str("entity_id") ?: continue
+        val platform = o.str("platform") ?: continue
+        out[entityId] = platform
+    }
+    return out
+}
+
 /** HA's integration platform id for Z-Wave JS entities. */
 const val ZWAVE_PLATFORM = "zwave_js"
 

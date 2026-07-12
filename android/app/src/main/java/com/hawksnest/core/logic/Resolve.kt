@@ -42,6 +42,37 @@ fun resolveName(entity: HassEntity, overrides: OverrideMap = emptyMap()): String
     return prettifyEntityId(entity.entityId)
 }
 
+/**
+ * Devices-list display name — the richer chain the Devices redesign uses:
+ *   1. user rename (long-press → Rename, persisted on-device)
+ *   2. per-entity override map (project-seeded)
+ *   3. HA friendly_name, unless it's junk (just the domain word: "Lock", "Light")
+ *   4. the registry device's name (name_by_user || name)
+ *   5. whatever friendly_name there was, else the prettified entity_id
+ */
+fun displayName(
+    entity: HassEntity,
+    overrides: OverrideMap = emptyMap(),
+    rename: String? = null,
+    deviceName: String? = null,
+): String {
+    rename?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    overrides[entity.entityId]?.name?.let { return it }
+    val friendly = entity.friendlyName()
+    if (friendly != null && !isJunkName(friendly, entity.entityId)) return friendly
+    deviceName?.trim()?.takeIf { it.isNotEmpty() && it != "Device" }?.let { return it }
+    return friendly ?: prettifyEntityId(entity.entityId)
+}
+
+/**
+ * A friendly_name that is literally just the domain word carries no information
+ * ("Lock" on lock.*, "Light" on light.*) — the registry device name beats it.
+ */
+fun isJunkName(name: String, entityId: String): Boolean {
+    val domainWord = entityId.substringBefore('.').replace('_', ' ')
+    return name.trim().equals(domainWord, ignoreCase = true)
+}
+
 /** `binary_sensor.front_door_current_status` -> "Front Door Current Status". */
 fun prettifyEntityId(entityId: String): String =
     entityId.substringAfter('.', entityId)

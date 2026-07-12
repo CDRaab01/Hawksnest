@@ -23,6 +23,8 @@ interface EntityState {
   categories: Record<string, string>;
   /** Entity ids owned by the Z-Wave JS integration (for controller-liveness detection). */
   zwaveEntityIds: string[];
+  /** entity_id → integration platform ("ring", "mqtt", …) — feeds the ring/ring-mqtt dedupe. */
+  entityPlatforms: Record<string, string>;
   status: ConnectionStatus;
   error?: string;
   /**
@@ -44,6 +46,8 @@ interface EntityState {
   setCategories: (categories: Record<string, string>) => void;
   /** Replace the Z-Wave entity-id list (resolved from the registry on connect). */
   setZWaveEntityIds: (ids: string[]) => void;
+  /** Replace the entity-platform map (resolved from the registry on connect). */
+  setEntityPlatforms: (platforms: Record<string, string>) => void;
   /** Merge a batch of entity updates (live state changes). */
   upsertEntities: (entities: HassEntity[]) => void;
   setStatus: (status: ConnectionStatus, error?: string) => void;
@@ -57,6 +61,7 @@ export const useEntityStore = create<EntityState>((set) => ({
   devices: EMPTY_DEVICE_INDEX,
   categories: {},
   zwaveEntityIds: [],
+  entityPlatforms: {},
   status: "connecting",
   baseUrl: "",
   setSnapshot: (entities, areas) => set({ entities, areas }),
@@ -65,6 +70,7 @@ export const useEntityStore = create<EntityState>((set) => ({
   setDevices: (devices) => set({ devices }),
   setCategories: (categories) => set({ categories }),
   setZWaveEntityIds: (zwaveEntityIds) => set({ zwaveEntityIds }),
+  setEntityPlatforms: (entityPlatforms) => set({ entityPlatforms }),
   upsertEntities: (list) =>
     set((s) => {
       const entities = { ...s.entities };

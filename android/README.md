@@ -27,6 +27,12 @@ components (`ui/components/`) are in place, plus:
   is the confirmation; the thumb holds a spinner until HA's echo; no accidental unlocks).
   Lights/switches/fans are **optimistic** (the thumb follows the finger; the echo reconciles;
   failures snap back). Semantic haptics throughout (`ui/components/Haptics.kt`).
+- **Devices v2** ✅ — the Devices tab redesigned as a single-column, three-tier rhythm per room
+  (featured lock/climate/alarm cards; compact control rows with inline optimistic switches;
+  read-only state rows), PULSE segment chips, room summaries, search, and long-press →
+  rename/hide (persisted on-device, `DevicePrefsStore`). The Ring-vs-ring-mqtt double exposure
+  is deduped centrally at the source layer (`core/logic/Dedupe.kt`) so every screen sees one
+  entity per physical device.
 - **Phase 4** ⏳ — push notifications (custom FCM pipeline + owner-authored HA automation). Not yet
   built.
 

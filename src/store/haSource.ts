@@ -20,10 +20,12 @@ import {
   type CameraEvent,
   type RawFrigateEvent,
 } from "../lib/cameraEvents";
+import { dedupeRingMqtt } from "../lib/dedupe";
 import {
   buildAreaRegistry,
   buildDeviceIndex,
   buildEntityCategories,
+  buildEntityPlatforms,
   buildZWaveEntityIds,
   toEntityRecord,
   type AreaRegistryEntry,
@@ -61,6 +63,7 @@ async function fetchRegistry(conn: Connection): Promise<{
   devices: DeviceIndex;
   categories: Record<string, string>;
   zwaveEntityIds: string[];
+  entityPlatforms: Record<string, string>;
 }> {
   const [areas, entities, devices] = await Promise.all([
     conn.sendMessagePromise<AreaRegistryEntry[]>({
@@ -78,6 +81,7 @@ async function fetchRegistry(conn: Connection): Promise<{
     devices: buildDeviceIndex(areas, entities, devices),
     categories: buildEntityCategories(entities),
     zwaveEntityIds: buildZWaveEntityIds(entities),
+    entityPlatforms: buildEntityPlatforms(entities),
   };
 }
 
@@ -249,11 +253,15 @@ export function createHaSource(
   async function loadAreas() {
     if (!conn) return;
     try {
-      const { areas, devices, categories, zwaveEntityIds } = await fetchRegistry(conn);
+      const { areas, devices, categories, zwaveEntityIds, entityPlatforms } =
+        await fetchRegistry(conn);
       store().setAreas(areas);
       store().setDevices(devices);
       store().setCategories(categories);
       store().setZWaveEntityIds(zwaveEntityIds);
+      store().setEntityPlatforms(entityPlatforms);
+      // Platforms can arrive after the first entity push — re-filter what's shown.
+      store().setEntities(dedupeRingMqtt(store().entities, entityPlatforms));
     } catch {
       // Registry unavailable (older HA / limited token) — keep entities,
       // they group under "Unassigned" rather than failing the connection.
@@ -292,7 +300,11 @@ export function createHaSource(
       });
 
       unsub = deps.subscribe(conn, (entities) => {
-        store().setEntities(toEntityRecord(entities));
+        // Central dedupe: every consumer (Home, Devices, camera wall) sees one
+        // entity per physical device even while Ring + ring-mqtt are both live.
+        store().setEntities(
+          dedupeRingMqtt(toEntityRecord(entities), store().entityPlatforms),
+        );
       });
 
       store().setStatus("connected");
