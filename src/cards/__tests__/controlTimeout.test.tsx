@@ -37,9 +37,13 @@ describe("control no-response timeouts", () => {
   it("LockCard stops spinning and reports when the lock never echoes", () => {
     render(<LockCard entity={lock("locked")} overrides={{}} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+    // Keyboard commit on the slide thumb (the drag's accessible equivalent).
+    fireEvent.keyDown(screen.getByRole("button", { name: "Slide to unlock" }), {
+      key: "Enter",
+    });
     expect(mockCall).toHaveBeenCalledWith("lock", "unlock", { entity_id: "lock.front_door" });
-    expect(screen.getByText("Unlocking…")).toBeInTheDocument(); // pending
+    // Pending shows on the status line AND the slide track.
+    expect(screen.getAllByText("Unlocking…").length).toBeGreaterThan(0);
 
     act(() => {
       vi.advanceTimersByTime(45_000);

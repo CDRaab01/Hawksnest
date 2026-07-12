@@ -101,6 +101,14 @@ fun DeviceControlCard(
             CardType.LOCK -> {
                 val locked = device.rawState == "locked"
                 val transitional = device.rawState == "locking" || device.rawState == "unlocking"
+                // The bolt's confirm tick: when a busy lock settles into locked/unlocked
+                // (HA's echo — the moment the physical bolt actually threw), buzz once.
+                var wasBusy by remember { mutableStateOf(false) }
+                LaunchedEffect(device.rawState, pending) {
+                    val settledNow = device.rawState == "locked" || device.rawState == "unlocked"
+                    if (wasBusy && settledNow && !pending) haptics.confirm()
+                    wasBusy = pending || transitional
+                }
                 Box(Modifier.padding(top = HawksnestTheme.spacing.md)) {
                     SlideToAct(
                         label = if (locked) "Slide to unlock" else "Slide to lock",

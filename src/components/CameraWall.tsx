@@ -1,5 +1,5 @@
 import { CameraOff } from "lucide-react";
-import { useLogicalCameras } from "../store/entityStore";
+import { useEntityStore, useLogicalCameras } from "../store/entityStore";
 import { useCameraOverlay } from "../store/cameraOverlay";
 import { overrides } from "../config/overrides";
 import { isCameraLive } from "../lib/cameraUrl";
@@ -15,6 +15,7 @@ import { PanelCard } from "./PanelCard";
  */
 export function CameraWall() {
   const cameras = useLogicalCameras();
+  const entities = useEntityStore((s) => s.entities);
   const openCamera = useCameraOverlay((s) => s.open);
 
   if (cameras.length === 0) {
@@ -63,6 +64,8 @@ export function CameraWall() {
               overrides={overrides}
               density="compact"
               name={cam.name}
+              transitionId={cam.id}
+              ringing={cam.dingId !== null && entities[cam.dingId]?.state === "on"}
             />
           </button>
         ))}

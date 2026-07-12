@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { X, ExternalLink } from "lucide-react";
 import type { LogicalCamera } from "../lib/cameraModel";
 import { useLogicalCameras } from "../store/entityStore";
+import { viewTransitionNameFor } from "../store/cameraOverlay";
 import { CameraPlayer } from "./camera/CameraPlayer";
 
 interface Props {
@@ -38,7 +39,13 @@ export function CameraLightbox({ camera, onClose }: Props) {
       onClick={onClose}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-lg backdrop-blur"
     >
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-4xl">
+      {/* The player claims the open camera's transition name, so the wall tile
+          visually expands into it (and collapses back on close). */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-4xl"
+        style={{ viewTransitionName: viewTransitionNameFor(active.id) }}
+      >
         <div className="mb-md flex items-center justify-end gap-sm">
           <Link
             to={`/entity/${encodeURIComponent(active.liveEntity.entity_id)}`}

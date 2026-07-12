@@ -136,7 +136,7 @@ export function TalkButton({ src }: { src: string }) {
       aria-label={micSupported ? "Hold to talk to the camera" : "Talk requires HTTPS"}
       aria-pressed={state === "talking"}
       className={[
-        "flex items-center gap-xs rounded-sm px-sm py-xs caption-label transition-colors duration-fast select-none",
+        "relative flex items-center gap-xs rounded-sm px-sm py-xs caption-label transition-colors duration-fast select-none",
         !micSupported
           ? "bg-panel text-ink-faint cursor-not-allowed"
           : active
@@ -146,6 +146,14 @@ export function TalkButton({ src }: { src: string }) {
               : "bg-panel text-ink-dim hover:text-ink",
       ].join(" ")}
     >
+      {/* Transmit ring: while the mic is live, a ring expands from the button so
+          "am I broadcasting into the yard?" is never ambiguous. */}
+      {state === "talking" && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 animate-ping rounded-sm bg-recovery opacity-30 motion-reduce:hidden"
+        />
+      )}
       {micSupported ? (
         <Mic size={14} className={state === "talking" ? "animate-pulse" : undefined} />
       ) : (

@@ -60,7 +60,10 @@ describe("Area detail", () => {
     const main = screen.getByRole("main");
     await within(main).findByText("Locked");
 
-    await user.click(within(main).getByRole("button", { name: "Unlock" }));
+    // Unlock is a deliberate action: commit the slide via its keyboard path.
+    const thumb = within(main).getByRole("button", { name: "Slide to unlock" });
+    thumb.focus();
+    await user.keyboard("{Enter}");
 
     expect(await within(main).findByText("Unlocked")).toBeInTheDocument();
   });

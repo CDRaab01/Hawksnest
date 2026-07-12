@@ -113,10 +113,50 @@ export default {
           from: { opacity: "0" },
           to: { opacity: "1" },
         },
+        // The bolt "thunk": a physical settle on the lock icon when HA's echo
+        // confirms — quick press past center, small rebound, rest.
+        thunk: {
+          "0%": { transform: "scale(1) rotate(0deg)" },
+          "35%": { transform: "scale(1.18) rotate(-6deg)" },
+          "65%": { transform: "scale(0.94) rotate(2deg)" },
+          "100%": { transform: "scale(1) rotate(0deg)" },
+        },
+        // One-shot channel wash over a card at the settle moment, fading out.
+        "settle-flash": {
+          from: { opacity: "0.16" },
+          to: { opacity: "0" },
+        },
+        // Ambient "alive" pulse for live indicators (camera dot, connection pill).
+        breathe: {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.45" },
+        },
+        // Doorbell banner spring entrance: drop in, slight overshoot, settle.
+        "banner-in": {
+          "0%": { transform: "translateY(-120%)", opacity: "0" },
+          "70%": { transform: "translateY(4%)", opacity: "1" },
+          "100%": { transform: "translateY(0)", opacity: "1" },
+        },
+        // Ringing camera tile: a streak ring swells and fades, repeatedly.
+        "ding-ring": {
+          "0%": { transform: "scale(0.98)", opacity: "0.9" },
+          "100%": { transform: "scale(1.03)", opacity: "0" },
+        },
+        // Chart line draw-in (pathLength-normalized dash offset 1 → 0).
+        draw: {
+          from: { strokeDashoffset: "1" },
+          to: { strokeDashoffset: "0" },
+        },
       },
       animation: {
         shimmer: "shimmer 1.5s cubic-bezier(0.2, 0, 0, 1) infinite",
         "fade-in": "fade-in 400ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
+        thunk: "thunk 400ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
+        "settle-flash": "settle-flash 700ms cubic-bezier(0.2, 0, 0, 1) both",
+        breathe: "breathe 2.4s cubic-bezier(0.2, 0, 0, 1) infinite",
+        "banner-in": "banner-in 400ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
+        "ding-ring": "ding-ring 1.2s cubic-bezier(0.05, 0.7, 0.1, 1) infinite",
+        draw: "draw 600ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
       },
     },
   },

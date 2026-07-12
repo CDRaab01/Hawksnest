@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { CameraTile } from "../CameraTile";
 import { useEntityStore } from "../../store/entityStore";
+import { useCameraOverlay, viewTransitionNameFor } from "../../store/cameraOverlay";
 import type { HassEntity } from "../../lib/ha";
 
 beforeEach(() => {
   useEntityStore.setState({ entities: {}, areas: {}, status: "demo", baseUrl: "" });
+  useCameraOverlay.setState({ openId: null });
 });
 
 function cam(picture: string, lastChanged?: string): HassEntity {
@@ -95,6 +97,38 @@ describe("CameraTile", () => {
     );
     expect(screen.queryByTestId("skeleton")).toBeNull();
     expect(screen.getByText("Offline")).toBeInTheDocument();
+  });
+
+  it("names the tile for the view transition — and yields the name while open", () => {
+    const { container } = render(
+      <CameraTile
+        entity={cam("/a.svg")}
+        overrides={{}}
+        name="Back"
+        transitionId="camera.back"
+      />,
+    );
+    // Named while closed (the tile is the transition source).
+    expect(
+      container.querySelector(`[data-transition="${viewTransitionNameFor("camera.back")}"]`),
+    ).not.toBeNull();
+
+    // Open in the player: the PLAYER owns the name — the tile must release it
+    // (a view-transition-name must be unique on screen).
+    act(() => {
+      useCameraOverlay.setState({ openId: "camera.back" });
+    });
+    expect(container.querySelector("[data-transition]")).toBeNull();
+  });
+
+  it("pulses the ding ring only while the doorbell is ringing", () => {
+    const { rerender } = render(
+      <CameraTile entity={cam("/a.svg")} overrides={{}} name="Back" ringing />,
+    );
+    expect(screen.getByTestId("ding-ring")).toBeInTheDocument();
+
+    rerender(<CameraTile entity={cam("/a.svg")} overrides={{}} name="Back" ringing={false} />);
+    expect(screen.queryByTestId("ding-ring")).toBeNull();
   });
 
   it("renders a sane age from an epoch-seconds last_changed (not a 1970 badge)", () => {
