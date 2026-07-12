@@ -18,10 +18,13 @@ This file adds the things that are easy to get wrong and the suite context.
 
 ## Architecture invariants (violating these has broken production before)
 
-- **nginx must NOT send `X-Forwarded-For` to HA.** With `use_x_forwarded_for` on and an
-  untrusted proxy IP, HA **400s the request** (it does not ignore the header) — this killed all
-  camera frames once. Either keep XFF off (current), or send it AND add the flannel pod CIDR
-  `10.42.0.0/16` to HA's `trusted_proxies`. Never half-do it. Details: deploy/README.md.
+- **nginx must actively CLEAR `X-Forwarded-For`/`X-Forwarded-Proto` to HA** (each HA-proxied
+  `location` sets them to `""`). HA has `use_x_forwarded_for` on and **400s the request**
+  from a proxy IP not in `trusted_proxies` — this killed all camera frames once. It was enough
+  to just *not add* XFF while the app was reached via a plain portproxy, but the TLS front
+  (Tailscale Serve, `https://<host>.ts.net:8443`) injects XFF and nginx passes inbound headers
+  through, so it must be stripped. Alternative: add the flannel pod CIDR `10.42.0.0/16` to HA's
+  `trusted_proxies`. Never half-do it. Details: deploy/README.md.
 - **The service worker never caches `/api`** and never touches the HA token (localStorage).
   Offline = app shell + Offline/Demo state, never stale entity data. Keep it that way when
   editing `vite.config`/SW code.
