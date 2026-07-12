@@ -23,6 +23,18 @@ export default tseslint.config(
         "warn",
         { allowConstantExport: true },
       ],
+      // Honor the `_`-prefix convention for intentionally-unused bindings —
+      // used across the codebase for placeholder rest params in test mocks
+      // (e.g. `vi.fn((..._args) => …)`, where the arg exists only to shape the
+      // mock's signature) and ignored catch bindings.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
     },
   },
 );

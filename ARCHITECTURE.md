@@ -24,7 +24,10 @@ One repo, three deliverables:
 
 React + TypeScript (Vite), Tailwind mapped onto PULSE CSS tokens (`src/theme/tokens.css` — a
 **CSS port** of the design language, *not* the `design.pulse:pulse-ui` Gradle library; that's
-Compose-only).
+Compose-only). Dark is the default; a light variant (`:root.light`) is opt-in via Settings →
+Appearance. `src/store/theme.ts` owns the Dark/Light/System preference (persisted), toggles the
+class on `<html>`, and an inline script in `index.html` applies it before first paint (no flash).
+Channel hues intentionally shift between themes so a vivid accent still clears contrast on white.
 
 | Area | Responsibility |
 |---|---|
@@ -32,7 +35,7 @@ Compose-only).
 | `src/store/` | Client state: HA WebSocket connection, auth, entity registry, reconnect logic. The entity sink dedupes the Ring-vs-ring-mqtt double exposure centrally (`src/lib/dedupe.ts`, platform map from the registry): when both integrations expose the same light, the ring-platform twin is dropped so every consumer sees one entity per physical device |
 | `src/screens/` + `src/cards/` + `src/components/` | Presentation; no raw hex — PULSE tokens only. Loading states use the shared `Skeleton` (one hairline-strong shimmer sweep — camera first-frame decode, history fetch); the dashboard arm discs activate via a channel fill-sweep, still non-optimistic (the sweep follows HA's echo, pinned in tests) |
 | `src/config/` | Entity/room overrides |
-| `public/` + service worker (vite config) | PWA shell. **The SW never caches `/api` and never touches the HA token** — offline = shell + Offline/Demo state, never stale entity data |
+| `public/` + service worker (vite config) | PWA shell. **The SW never caches `/api` and never touches the HA token** — offline = shell + Offline/Demo state, never stale entity data. Updates are **prompt**, not silent (`registerType:"prompt"`): `UpdateToast` (useRegisterSW) surfaces a "reload" prompt when a new shell is waiting, so a wall tablet that never navigates isn't stranded on a stale build |
 
 Camera streaming: WebRTC negotiates over the existing `/api/websocket`; media flows UDP direct to
 go2rtc. Recorded playback = the last ~5 Ring events via the event-selector entity (not continuous

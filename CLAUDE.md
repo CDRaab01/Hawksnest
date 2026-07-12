@@ -96,5 +96,4 @@ share of it:
 - Label/icon resolution is centralized (`src/lib/resolve.ts` + `src/config/overrides.ts`);
   add per-entity overrides there, not in components.
 - Phase 4 web shipped (entity detail/history, cover/climate/media_player/fan, drag-and-drop,
-  PWA). Android Phase 4 (push notifications via FCM + HA automation) is **not built**. Next web
-  ideas: OAuth to HA (replace the long-lived token), light theme.
+  PWA + prompt-to-update, light theme). Next web idea: OAuth to HA (replace the long-lived token).
