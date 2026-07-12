@@ -1,13 +1,13 @@
 import { useMemo } from "react";
-import { Home, Lock, ShieldOff, type LucideIcon } from "lucide-react";
+import { Home, Loader, Lock, ShieldOff, type LucideIcon } from "lucide-react";
 import { PanelCard } from "./PanelCard";
 import type { Channel } from "./PanelCard";
+import { useAlarmControl } from "./useAlarmControl";
 import { usePrimaryAlarm, useEntityStore } from "../store/entityStore";
 import { alarmView, ARM_BUTTONS } from "../lib/alarm";
 import { resolveName } from "../lib/resolve";
 import { overrides } from "../config/overrides";
 import { domainOf } from "../lib/ha";
-import { callService } from "../store/connection";
 
 const CHANNEL_BG: Record<Channel, string> = {
   effort: "bg-effort",
@@ -86,10 +86,9 @@ export function SecurityStatusBar() {
   const view = alarm ? alarmView(alarm.state) : null;
   const allSecure = securityLine === "All doors locked";
 
-  function arm(service: string) {
-    if (!alarm) return;
-    void callService("alarm_control_panel", service, { entity_id: alarm.entity_id });
-  }
+  // Non-optimistic arm/disarm: the tapped circle spins until HA's echo, failures
+  // surface (shared with the AlarmCard). Security-critical — never optimistic.
+  const { pending, error, arm } = useAlarmControl(alarm);
 
   return (
     <PanelCard tint={view?.triggered ? "streak" : undefined} raised className="p-lg">
@@ -99,14 +98,17 @@ export function SecurityStatusBar() {
             const active = alarm.state === b.state;
             const channel = alarmView(b.state).channel;
             const Icon = ARM_ICON[b.service] ?? ShieldOff;
+            const isPending = pending === b.service;
             return (
               <button
                 key={b.service}
                 type="button"
                 onClick={() => arm(b.service)}
+                disabled={pending !== null}
                 aria-pressed={active}
+                aria-busy={isPending}
                 aria-label={b.label}
-                className="flex flex-col items-center gap-sm transition-transform duration-fast active:scale-[0.96]"
+                className="flex flex-col items-center gap-sm transition-transform duration-fast active:scale-[0.96] disabled:cursor-not-allowed"
               >
                 <span
                   className={[
@@ -116,7 +118,11 @@ export function SecurityStatusBar() {
                       : "border border-hairline bg-panel text-ink-dim",
                   ].join(" ")}
                 >
-                  <Icon size={26} />
+                  {isPending ? (
+                    <Loader className="animate-spin" size={26} />
+                  ) : (
+                    <Icon size={26} />
+                  )}
                 </span>
                 <span
                   className={[
@@ -134,18 +140,24 @@ export function SecurityStatusBar() {
         <div className="font-display text-headline text-ink-dim">No alarm panel</div>
       )}
 
-      {/* One plain-language security line + any offline notice. */}
+      {/* A failed arm/disarm, or the plain-language security line + any offline notice. */}
       <div className="mt-lg border-t border-hairline pt-md text-center">
-        <span
-          className={[
-            "font-body text-body",
-            allSecure ? "text-recovery" : "text-streak",
-          ].join(" ")}
-        >
-          {securityLine}
-        </span>
-        {offlineLabel && (
-          <span className="ml-sm font-body text-caption text-streak">· {offlineLabel}</span>
+        {error ? (
+          <span className="font-body text-body text-streak">{error}</span>
+        ) : (
+          <>
+            <span
+              className={[
+                "font-body text-body",
+                allSecure ? "text-recovery" : "text-streak",
+              ].join(" ")}
+            >
+              {securityLine}
+            </span>
+            {offlineLabel && (
+              <span className="ml-sm font-body text-caption text-streak">· {offlineLabel}</span>
+            )}
+          </>
         )}
       </div>
     </PanelCard>

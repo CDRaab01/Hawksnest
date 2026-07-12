@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Lock, LockOpen, Loader, AlertTriangle } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
@@ -7,6 +7,14 @@ import { callService } from "../store/connection";
 import type { CardProps } from "./types";
 
 type Target = "locked" | "unlocked";
+
+/**
+ * How long to keep spinning before concluding the lock isn't reporting back.
+ * HA accepted the call but no state echo ever arrives when the Z-Wave node is
+ * dead (or the deadbolt is out of range) while HA itself is fine — without this
+ * the spinner would run forever. Comfortably longer than a healthy lock's throw.
+ */
+const LOCK_TIMEOUT_MS = 45_000;
 
 /**
  * Lock card. Locks are a physical-security exception to optimistic UI: we never
@@ -30,6 +38,24 @@ export function LockCard({ entity, overrides, density = "comfortable" }: CardPro
     if (!pending) return;
     if (entity.state === pending || entity.state === "jammed") setPending(null);
   }, [entity.state, pending]);
+
+  // Safety net: HA can accept the call yet never echo a new state (dead Z-Wave
+  // node, deadbolt out of range) — stop spinning after the timeout and say so,
+  // rather than leaving a lock control that looks stuck forever.
+  const timerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!pending) {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+      return;
+    }
+    timerRef.current = window.setTimeout(() => {
+      setPending(null);
+      setError("The lock didn't respond.");
+    }, LOCK_TIMEOUT_MS);
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    };
+  }, [pending]);
 
   async function request(target: Target) {
     setError(null);
