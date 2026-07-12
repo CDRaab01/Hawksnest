@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG-ONLY override (merged over src/main for debug builds; never in a release APK).
+
+  Keeps the release posture — cleartext disallowed by default — but permits cleartext to the
+  instrumented mock-HA at 10.0.2.2 (the emulator's alias for the host loopback, where
+  scripts/android-emulator-test.sh runs the mock server) and to localhost, so the instrumented
+  tests can talk to the fake HA over plain HTTP without weakening the shipped app.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

@@ -131,15 +131,15 @@ needed if the Sift repo is ever made private.
 
 ## Networking note
 
-Hawksnest reaches HA as cleartext HTTP to a private tailnet host, which Android blocks by default.
-`res/xml/network_security_config.xml` permits cleartext via a broad `base-config`.
+Hawksnest reaches HA **only over HTTPS**. `res/xml/network_security_config.xml` sets
+`cleartextTrafficPermitted="false"` — cleartext HTTP is disallowed in release builds.
 
-This is a **deliberate Phase-0 choice, not an oversight**: the HA host is user-entered and may be a
-MagicDNS name (`*.ts.net`) *or* a raw CGNAT IP (`100.x.y.z`). A scoped `<domain-config>` can match
-the hostname form but **not** a bare IP, so tightening it risks silently breaking lock/disarm
-connectivity for IP-based setups — unacceptable for a security app. Recommended hardening, in order:
-1. Front the proxy with TLS (`https`/`wss`) and set `cleartextTrafficPermitted="false"` — best.
-2. If staying cleartext, switch to the scoped `<domain-config>` example in the file **and** always
-   use the MagicDNS hostname (never the bare IP).
+The proxy is fronted by **Tailscale Serve** (TLS at `https://<host>.ts.net:8443`, a real
+Let's Encrypt cert, tailnet-only; see `deploy/windows/hawksnest-serve.ps1`). Point **Settings →
+HA URL** at that HTTPS address. (A `100.x` Tailscale IP won't work now — cleartext is off and the
+cert is issued for the MagicDNS name — so always use the `*.ts.net:8443` hostname.)
 
-See the comments in `res/xml/network_security_config.xml`.
+The earlier deliberate `cleartext=true` existed because the HA host could be a bare CGNAT IP a
+scoped `<domain-config>` can't match; TLS fronting the proxy removed that constraint. A
+**debug-only** override (`src/debug/res/xml/network_security_config.xml`) still permits cleartext to
+`10.0.2.2`/`localhost` for the instrumented mock-HA — it never ships in a release APK.
