@@ -113,10 +113,25 @@ export default {
           from: { opacity: "0" },
           to: { opacity: "1" },
         },
+        // The bolt "thunk": a physical settle on the lock icon when HA's echo
+        // confirms — quick press past center, small rebound, rest.
+        thunk: {
+          "0%": { transform: "scale(1) rotate(0deg)" },
+          "35%": { transform: "scale(1.18) rotate(-6deg)" },
+          "65%": { transform: "scale(0.94) rotate(2deg)" },
+          "100%": { transform: "scale(1) rotate(0deg)" },
+        },
+        // One-shot channel wash over a card at the settle moment, fading out.
+        "settle-flash": {
+          from: { opacity: "0.16" },
+          to: { opacity: "0" },
+        },
       },
       animation: {
         shimmer: "shimmer 1.5s cubic-bezier(0.2, 0, 0, 1) infinite",
         "fade-in": "fade-in 400ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
+        thunk: "thunk 400ms cubic-bezier(0.05, 0.7, 0.1, 1) both",
+        "settle-flash": "settle-flash 700ms cubic-bezier(0.2, 0, 0, 1) both",
       },
     },
   },
