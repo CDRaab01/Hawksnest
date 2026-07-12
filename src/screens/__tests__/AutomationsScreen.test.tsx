@@ -4,7 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 // Stub the source plumbing — we only assert which HA service calls the rows make.
-const callService = vi.fn();
+// Returns a promise so the rows' optimistic `.then/.catch` chaining works.
+const callService = vi.fn((..._args: unknown[]) => Promise.resolve());
 vi.mock("../../store/connection", () => ({
   callService: (...args: unknown[]) => callService(...args),
 }));
@@ -29,6 +30,7 @@ function seedAutomation(state = "on") {
 
 beforeEach(() => {
   callService.mockClear();
+  callService.mockImplementation(() => Promise.resolve());
   useEntityStore.setState({ entities: {}, areas: {}, status: "connected", error: undefined });
 });
 
@@ -65,7 +67,7 @@ describe("Automations list", () => {
     });
   });
 
-  it("runs an automation on demand", async () => {
+  it("runs an automation on demand and flashes a confirmation", async () => {
     const user = userEvent.setup();
     seedAutomation("on");
     renderScreen();
@@ -75,5 +77,38 @@ describe("Automations list", () => {
     expect(callService).toHaveBeenCalledWith("automation", "trigger", {
       entity_id: "automation.lock_all_doors",
     });
+    // The invisible action gets visible feedback.
+    expect(await screen.findByText("Ran just now")).toBeInTheDocument();
+  });
+
+  it("toggles optimistically — the button flips before any echo", async () => {
+    const user = userEvent.setup();
+    seedAutomation("on");
+    renderScreen();
+    const btn = screen.getByRole("button", { name: "Disable" });
+    expect(btn).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(btn);
+    // Store still says "on"; the control already reflects the intent.
+    expect(screen.getByRole("button", { name: "Enable" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("surfaces an error and snaps back when the toggle fails", async () => {
+    const user = userEvent.setup();
+    callService.mockImplementation(() => Promise.reject(new Error("down")));
+    seedAutomation("on");
+    renderScreen();
+
+    await user.click(screen.getByRole("button", { name: "Disable" }));
+
+    expect(await screen.findByText("Couldn't reach Home Assistant.")).toBeInTheDocument();
+    // Snapped back to enabled.
+    expect(screen.getByRole("button", { name: "Disable" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });

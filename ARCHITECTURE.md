@@ -91,6 +91,10 @@ change deploy files, that test is the spec**; update both together.
 
 ## Testing map (all real seams covered without real hardware)
 
+- Loading/empty states across the secondary screens use the shared `Skeleton` (web) / `Modifier.shimmer`
+  (Android): Rooms (connecting → room-card skeletons, empty state), History (timeline-row skeletons),
+  and the camera/history-chart uses from earlier. Automations toggles render optimistically and
+  "Run now" flashes a confirmation (the effect is otherwise invisible).
 - `npm run test` — vitest: screens, stores, protocol, `deploy.test.ts`.
 - `npm run test:e2e` — Playwright against **`mock-ha/`**, a scriptable fake HA speaking the real
   WebSocket protocol (auth, reconnect, doorbell, lock pending/jam/rejected flows) with a

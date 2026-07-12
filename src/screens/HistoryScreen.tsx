@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { PanelCard } from "../components/PanelCard";
+import { Skeleton } from "../components/Skeleton";
 import { EventTimeline } from "../components/history/EventTimeline";
 import {
   HistoryFilterBar,
@@ -34,6 +35,24 @@ function presentDomains(events: LogEvent[]): string[] {
     const bi = DOMAIN_ORDER.indexOf(b);
     return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi) || a.localeCompare(b);
   });
+}
+
+/** Loading placeholder: a column of PULSE-toned timeline-row skeletons. */
+function HistorySkeleton() {
+  return (
+    <PanelCard className="divide-y divide-hairline">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-md px-lg py-md">
+          <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-xs">
+            <Skeleton className="h-3.5 rounded-sm" style={{ width: `${55 - i * 4}%` }} />
+            <Skeleton className="h-3 w-24 rounded-sm" />
+          </div>
+          <Skeleton className="h-3 w-12 shrink-0 rounded-sm" />
+        </div>
+      ))}
+    </PanelCard>
+  );
 }
 
 /**
@@ -104,9 +123,7 @@ export function HistoryScreen() {
           <span className="font-body text-body text-streak">{error}</span>
         </PanelCard>
       ) : loading && events.length === 0 ? (
-        <PanelCard className="p-xl text-center">
-          <span className="font-body text-body text-ink-dim">Loading history…</span>
-        </PanelCard>
+        <HistorySkeleton />
       ) : (
         <EventTimeline events={shown} />
       )}

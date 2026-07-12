@@ -1,5 +1,6 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Pencil, Play, Plus, Power, Workflow } from "lucide-react";
+import { Check, Loader, Pencil, Play, Plus, Power, Workflow } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
 import { SectionHeader } from "../components/SectionHeader";
@@ -28,11 +29,13 @@ function IconButton({
   label,
   onClick,
   active = false,
+  disabled = false,
   children,
 }: {
   label: string;
   onClick: () => void;
   active?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -40,9 +43,10 @@ function IconButton({
       type="button"
       aria-label={label}
       aria-pressed={active}
+      disabled={disabled}
       onClick={onClick}
       className={[
-        "inline-flex h-9 w-9 items-center justify-center rounded-sm border transition-colors duration-fast",
+        "inline-flex h-9 w-9 items-center justify-center rounded-sm border transition-colors duration-fast disabled:opacity-50",
         active
           ? "border-recovery/40 bg-recovery-dim text-recovery"
           : "border-hairline text-ink-dim hover:text-ink",
@@ -56,16 +60,46 @@ function IconButton({
 function AutomationRow({ entity }: { entity: HassEntity }) {
   const navigate = useNavigate();
   const name = resolveName(entity);
-  const enabled = entity.state === "on";
+  const actualEnabled = entity.state === "on";
   const id = configId(entity);
 
+  // Optimistic enable state: the toggle button follows the tap, HA's echo
+  // reconciles, a failed call snaps back with a message.
+  const [target, setTarget] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => setTarget(null), [entity.state]);
+  const enabled = target ?? actualEnabled;
+
+  // "Run now" feedback: HA triggers the automation but nothing visibly happens,
+  // so flash a confirmation on the row (idle → running → ran, then back).
+  const [runState, setRunState] = useState<"idle" | "running" | "ran">("idle");
+  useEffect(() => {
+    if (runState !== "ran") return;
+    const t = window.setTimeout(() => setRunState("idle"), 1600);
+    return () => window.clearTimeout(t);
+  }, [runState]);
+
   function toggle() {
-    void callService("automation", enabled ? "turn_off" : "turn_on", {
+    const next = !enabled;
+    setError(null);
+    setTarget(next);
+    void callService("automation", next ? "turn_on" : "turn_off", {
       entity_id: entity.entity_id,
+    }).catch(() => {
+      setTarget(null);
+      setError("Couldn't reach Home Assistant.");
     });
   }
+
   function run() {
-    void callService("automation", "trigger", { entity_id: entity.entity_id });
+    setError(null);
+    setRunState("running");
+    void callService("automation", "trigger", { entity_id: entity.entity_id })
+      .then(() => setRunState("ran"))
+      .catch(() => {
+        setRunState("idle");
+        setError("Couldn't run this automation.");
+      });
   }
 
   return (
@@ -76,13 +110,30 @@ function AutomationRow({ entity }: { entity: HassEntity }) {
       />
       <div className="min-w-0">
         <div className="truncate font-body text-body-lg text-ink">{name}</div>
-        <div className="font-body text-caption text-ink-faint">
-          {enabled ? "Enabled" : "Disabled"} · {lastTriggeredLabel(entity)}
+        <div
+          className={[
+            "font-body text-caption",
+            error ? "text-streak" : runState === "ran" ? "text-recovery" : "text-ink-faint",
+          ].join(" ")}
+        >
+          {error
+            ? error
+            : runState === "running"
+              ? "Running…"
+              : runState === "ran"
+                ? "Ran just now"
+                : `${enabled ? "Enabled" : "Disabled"} · ${lastTriggeredLabel(entity)}`}
         </div>
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-xs">
-        <IconButton label="Run now" onClick={run}>
-          <Play size={18} />
+        <IconButton label="Run now" onClick={run} disabled={runState === "running"}>
+          {runState === "running" ? (
+            <Loader size={18} className="animate-spin" />
+          ) : runState === "ran" ? (
+            <Check size={18} className="text-recovery" />
+          ) : (
+            <Play size={18} />
+          )}
         </IconButton>
         <IconButton
           label={enabled ? "Disable" : "Enable"}
@@ -107,7 +158,8 @@ function AutomationRow({ entity }: { entity: HassEntity }) {
 /**
  * Automations — the list of service "linkages". Each row is a real Home
  * Assistant automation (surfaced as an `automation.*` entity); HA runs them,
- * Hawksnest just lists, toggles, runs, and links into the editor.
+ * Hawksnest just lists, toggles, runs, and links into the editor. Toggle is
+ * optimistic; "Run now" flashes a confirmation since the effect is invisible.
  */
 export function AutomationsScreen() {
   const navigate = useNavigate();

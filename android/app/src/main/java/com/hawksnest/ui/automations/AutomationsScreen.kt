@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -16,9 +18,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -26,6 +33,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.PulseButton
 import com.hawksnest.ui.components.SectionHeader
+import com.hawksnest.ui.components.rememberHaptics
+import com.hawksnest.ui.components.rememberOptimisticOnOff
 import com.hawksnest.ui.theme.HawksnestTheme
 
 /**
@@ -102,12 +111,7 @@ fun AutomationsScreen(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        PulseButton(
-                            text = "Run",
-                            onClick = { viewModel.run(a.entityId) },
-                            tonal = true,
-                            compact = true,
-                        )
+                        RunButton(onRun = { viewModel.run(a.entityId) })
                         if (a.configId != null) {
                             IconButton(onClick = { onEdit(a.configId) }) {
                                 Icon(
@@ -117,14 +121,62 @@ fun AutomationsScreen(
                                 )
                             }
                         }
+                        // Optimistic enable: the switch follows the tap, the entity echo reconciles.
+                        val haptics = rememberHaptics()
+                        val (shown, setTarget) = rememberOptimisticOnOff(a.enabled, pending = false)
                         Switch(
-                            checked = a.enabled,
-                            onCheckedChange = { desired -> viewModel.setEnabled(a.entityId, desired) },
+                            checked = shown,
+                            onCheckedChange = { desired ->
+                                if (desired) haptics.toggleOn() else haptics.toggleOff()
+                                setTarget(desired)
+                                viewModel.setEnabled(a.entityId, desired)
+                            },
                             colors = SwitchDefaults.colors(checkedTrackColor = pulse.effort),
                         )
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * "Run now" with feedback: an automation's effect is invisible, so the button
+ * flips to a check + "Ran" for ~1.6s after firing, then returns to "Run".
+ */
+@Composable
+private fun RunButton(onRun: () -> Unit) {
+    var ran by remember { mutableStateOf(false) }
+    LaunchedEffect(ran) {
+        if (ran) {
+            kotlinx.coroutines.delay(1600)
+            ran = false
+        }
+    }
+    if (ran) {
+        PulseButton(
+            text = "Ran",
+            onClick = {},
+            tonal = true,
+            compact = true,
+            channel = HawksnestTheme.pulse.recovery,
+            onChannel = HawksnestTheme.pulse.onRecovery,
+            dimChannel = HawksnestTheme.pulse.recoveryDim,
+            leadingIcon = {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = HawksnestTheme.pulse.recovery,
+                    modifier = Modifier.size(16.dp),
+                )
+            },
+        )
+    } else {
+        PulseButton(
+            text = "Run",
+            onClick = { onRun(); ran = true },
+            tonal = true,
+            compact = true,
+        )
     }
 }

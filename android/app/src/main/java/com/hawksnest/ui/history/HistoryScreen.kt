@@ -4,6 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import com.hawksnest.ui.components.shimmer
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,7 +83,7 @@ fun HistoryScreen(
         }
 
         when (val f = feed) {
-            is HistoryFeed.Loading -> InfoCard("Loading history…")
+            is HistoryFeed.Loading -> HistorySkeleton()
             is HistoryFeed.Error -> InfoCard("Couldn't load history.")
             is HistoryFeed.Loaded -> {
                 val domains = presentDomains(f.events)
@@ -229,3 +233,29 @@ private fun dayLabel(ms: Long): String {
 
 private fun clockTime(ms: Long): String =
     Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(TIME_FMT)
+
+/** Loading placeholder: a column of shimmering timeline-row skeletons in one panel. */
+@Composable
+private fun HistorySkeleton() {
+    PanelCard {
+        repeat(6) { i ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = HawksnestTheme.spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
+            ) {
+                Box(Modifier.size(32.dp).shimmer(CircleShape))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
+                ) {
+                    Box(Modifier.height(14.dp).width((160 - i * 12).dp).shimmer(RoundedCornerShape(4.dp)))
+                    Box(Modifier.height(11.dp).width(96.dp).shimmer(RoundedCornerShape(4.dp)))
+                }
+                Box(Modifier.height(11.dp).width(40.dp).shimmer(RoundedCornerShape(4.dp)))
+            }
+        }
+    }
+}
