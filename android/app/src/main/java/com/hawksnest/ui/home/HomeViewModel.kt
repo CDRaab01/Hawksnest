@@ -7,7 +7,6 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.DeviceIndex
 import com.hawksnest.core.ha.HassEntity
-import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.AlarmView
 import com.hawksnest.core.logic.DoorbellPress
@@ -112,14 +111,16 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { connection.start() }
     }
 
-    /** Arm/disarm. Non-optimistic — the store reconciles from the source echo. Disarm sends no
+    /** Entity ids with a control in flight — the security hero renders arming spinners from this. */
+    val pending: StateFlow<Set<String>> = connection.pendingControls
+
+    /** Arm/disarm — crash-safe via the control gate (failures land on the app snackbar), pending
+     *  on [pending]. Non-optimistic — the store reconciles from the source echo. Disarm sends no
      *  code: the in-app PIN keypad was removed, so a panel that enforces `code_format` must allow
      *  codeless disarm from a trusted device (HA `code_arm_required: false` / no code on disarm). */
     fun arm(service: String) {
         val id = uiState.value.alarmEntityId ?: return
-        viewModelScope.launch {
-            connection.callService("alarm_control_panel", service, ServiceData(entityId = id))
-        }
+        connection.control(id, service, label = "Alarm", domain = "alarm_control_panel")
     }
 
     private fun buildUi(
