@@ -73,6 +73,15 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   be a bare `100.x` Tailscale IP, which a scoped domain-config cannot match. The fix is TLS on
   the proxy first (ROADMAP #1), then flip `cleartextTrafficPermitted="false"` — not a manifest
   tweak on its own.
+- **Push** (`push/`) — self-hosted **ntfy**, no FCM/Google. `NtfyPushService` is a `specialUse`
+  foreground service holding one streaming connection to `<base>/<topic>/json`; each frame is
+  parsed (`NtfyMessage`, pure/tested), routed (`PushRoute`: doorbell→cameras, alarm→home), and
+  raised via `PushNotifier` (per-kind channels). Off by default — opt in from Settings, which
+  requests `POST_NOTIFICATIONS`; `PushSettings` (DataStore) persists it; `BootReceiver` restarts
+  the listener after a reboot only if enabled. The server side (ntfy Deployment + the HA doorbell/
+  alarm automations that publish to it) lives in the `hawksnest-automation` repo
+  (`docs/ntfy-push.md`). On-device runtime (delivery with the app closed, battery, reconnect) is
+  the one part unit tests can't cover — see that repo's checklist / the camera smoke checklist.
 - Suite membership: signed with the suite key (secrets are `HAWKSNEST_`-prefixed), released by
   `android-release.yml` on `android/**` pushes, tagged `android-vX.Y.Z` (clear of web `v*`).
   Managed by the Dragonfly hub for updates — but **no** SuiteConfigReader/AppAuth (nothing to

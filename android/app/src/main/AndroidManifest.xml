@@ -2,8 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Push (Phase 4); declared early, used later. -->
+    <!-- Push: POST_NOTIFICATIONS (runtime, Android 13+); the ntfy listener runs as a
+         specialUse foreground service and restarts after a reboot. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Two-way audio ("talk"): captures the mic to stream to the camera back-channel. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
@@ -32,5 +36,28 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Holds the streaming connection to self-hosted ntfy so doorbell/alarm
+             pushes arrive with the app closed. specialUse = "connection to a
+             self-hosted server" (the honest type; app is sideloaded, not on Play). -->
+        <service
+            android:name=".push.NtfyPushService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps a connection to the household's self-hosted ntfy server for doorbell and alarm push notifications." />
+        </service>
+
+        <!-- Restart the listener after a reboot (only if push is enabled). -->
+        <receiver
+            android:name=".push.BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
