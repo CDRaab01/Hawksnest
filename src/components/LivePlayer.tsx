@@ -7,6 +7,7 @@ import {
   streamUrl as mjpegUrl,
   snapshotUrlAt,
   snapshotUrl,
+  canStreamWebRtc,
 } from "../lib/cameraUrl";
 import { HlsPlayer } from "./HlsPlayer";
 import { WebRtcPlayer } from "./WebRtcPlayer";
@@ -16,10 +17,11 @@ import { WebRtcPlayer } from "./WebRtcPlayer";
  *
  *   WebRTC (go2rtc, <1s) → HLS/video → MJPEG proxy → snapshot poll → unavailable
  *
- * WebRTC is tried first only when the camera advertises it (`frontend_stream_type
- * === "web_rtc"`, as ring-mqtt's go2rtc cameras do) and the live source can
- * negotiate it; otherwise we start at the HLS/demo video tier. Each tier steps
- * down on error. Nothing streams in the background — this only runs while mounted
+ * WebRTC is tried first whenever the camera is STREAM-capable (or doesn't say —
+ * see `canStreamWebRtc`; modern HA dropped the old `frontend_stream_type`
+ * attribute this used to gate on) and the live source can negotiate it;
+ * otherwise we start at the HLS/demo video tier. Each tier steps down on error.
+ * Nothing streams in the background — this only runs while mounted
  * ("Tap to Go Live").
  */
 type Mode = "webrtc" | "video" | "mjpeg" | "poll" | "dead";
@@ -28,21 +30,28 @@ export function LivePlayer({ entity }: { entity: HassEntity }) {
   const baseUrl = useHaBaseUrl();
   const mjpeg = mjpegUrl(entity, baseUrl);
   const hasSnapshot = snapshotUrl(entity, baseUrl) !== null;
-  const canWebRtc =
-    entity.attributes.frontend_stream_type === "web_rtc" && supportsWebRtc();
+  const canWebRtc = canStreamWebRtc(entity) && supportsWebRtc();
 
   const [src, setSrc] = useState<string | null>(null);
   const [srcResolved, setSrcResolved] = useState(false);
   const [mode, setMode] = useState<Mode>(canWebRtc ? "webrtc" : "video");
   const [tick, setTick] = useState(0);
 
-  // Resolve the HLS/demo stream URL on mount (used by the "video" tier, and the
-  // fallback target when WebRTC drops). Resets when the camera changes.
+  // Reset the ladder when the camera changes.
   useEffect(() => {
-    let active = true;
     setSrc(null);
     setSrcResolved(false);
     setMode(canWebRtc ? "webrtc" : "video");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entity.entity_id]);
+
+  // Resolve the HLS/demo stream URL only once the "video" tier is actually
+  // active — NOT eagerly on mount. `camera/stream` makes HA spin up an HLS
+  // pipeline, which on a battery camera wakes it / competes for its single live
+  // session in parallel with the WebRTC negotiation above it on the ladder.
+  useEffect(() => {
+    if (mode !== "video" || srcResolved) return;
+    let active = true;
     fetchStreamUrl(entity.entity_id)
       .then((url) => {
         if (!active) return;
@@ -58,7 +67,7 @@ export function LivePlayer({ entity }: { entity: HassEntity }) {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entity.entity_id]);
+  }, [mode, srcResolved, entity.entity_id]);
 
   // Once the stream URL resolves to nothing while we're on the video tier, step down.
   useEffect(() => {

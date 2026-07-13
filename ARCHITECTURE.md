@@ -38,8 +38,16 @@ Channel hues intentionally shift between themes so a vivid accent still clears c
 | `public/` + service worker (vite config) | PWA shell. **The SW never caches `/api` and never touches the HA token** — offline = shell + Offline/Demo state, never stale entity data. Updates are **prompt**, not silent (`registerType:"prompt"`): `UpdateToast` (useRegisterSW) surfaces a "reload" prompt when a new shell is waiting, so a wall tablet that never navigates isn't stranded on a stale build |
 
 Camera streaming: WebRTC negotiates over the existing `/api/websocket`; media flows UDP direct to
-go2rtc. Recorded playback = the last ~5 Ring events via the event-selector entity (not continuous
-VOD; a Frigate seam exists in `cameraEvents.ts`, unused).
+go2rtc. The live transport ladder (`LivePlayer`) is WebRTC → HLS → MJPEG → snapshot-poll: WebRTC
+is gated on the camera's STREAM `supported_features` bit with **absent treated as "try"**
+(`canStreamWebRtc` in `lib/cameraUrl.ts` — modern HA dropped the old `frontend_stream_type`
+attribute, and a battery cam's entity churns attribute-less mid-negotiation), holds a 20 s
+watchdog + "Connecting…" overlay for battery-camera wake, and the HLS tier resolves its
+`camera/stream` URL **only when that tier is active** (an eager resolve wakes the camera twice)
+with a 15 s bound in `haSource`. Tile age badges use `snapshotFreshnessMs` (`timestamp` attr →
+`last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras. Recorded
+playback = the last ~5 Ring events via the event-selector entity (not continuous VOD; a Frigate
+seam exists in `cameraEvents.ts`, unused).
 
 ## 2. Android app (`android/`, package `com.hawksnest`)
 

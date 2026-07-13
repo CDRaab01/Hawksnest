@@ -6,8 +6,8 @@ import { useSnapshotBucket } from "../components/snapshotBucketContext";
 import { useCameraOverlay, viewTransitionNameFor } from "../store/cameraOverlay";
 import { useHaBaseUrl } from "../store/entityStore";
 import { resolveName } from "../lib/resolve";
-import { snapshotUrlAt, isCameraLive } from "../lib/cameraUrl";
-import { relativeTime, parseHaTime } from "../lib/relativeTime";
+import { snapshotUrlAt, isCameraLive, snapshotFreshnessMs } from "../lib/cameraUrl";
+import { relativeTime } from "../lib/relativeTime";
 import type { CardProps } from "./types";
 
 /**
@@ -46,7 +46,10 @@ export function CameraTile({
   const transitionName =
     transitionId && openId !== transitionId ? viewTransitionNameFor(transitionId) : undefined;
   const src = live ? snapshotUrlAt(entity, bucket, baseUrl) : null;
-  const changedMs = parseHaTime(entity.last_changed);
+  // Age badge: freshest snapshot signal, not last_changed — a camera's state
+  // rarely transitions, so last_changed reads hours-stale even on a live feed
+  // (the "15h ago" bug, already fixed the same way on Android).
+  const changedMs = snapshotFreshnessMs(entity);
   // Show the freshest frame we've successfully decoded; the placeholder only wins
   // when we've never loaded one (first paint, offline, or a fetch error before any frame).
   const visible = loaded ?? (failed ? null : src);
