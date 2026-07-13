@@ -17,6 +17,7 @@ import com.hawksnest.core.logic.recordingUrlAt as buildRecordingUrl
 import com.hawksnest.core.logic.eventClipUrl as buildEventClipUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -34,6 +35,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.Instant
 import kotlin.coroutines.coroutineContext
+
+/** How long we give HA to produce an HLS stream URL before stepping down (see [HaSource.streamUrl]). */
+private const val STREAM_URL_TIMEOUT_MS = 15_000L
 
 /**
  * The live Home Assistant source over the WebSocket. Mirrors `src/store/haSource.ts`: connect +
@@ -120,16 +124,22 @@ class HaSource(
      * Ask HA for an on-demand HLS stream URL (`camera/stream`). HA returns a signed, root-relative
      * playlist path served under the same `/api` the nginx pod proxies; resolved against the origin
      * like camera snapshots. Null on any failure so the player falls back to MJPEG/snapshot.
+     *
+     * Bounded at 15s: HA answers only once the camera's stream pipeline is up, and a battery Ring
+     * camera being woken by go2rtc can block this for the better part of a minute. Null already
+     * means "step down the transport ladder", so a timeout degrades instead of hanging the player.
      */
     override suspend fun streamUrl(entityId: String): String? {
         val c = conn ?: return null
         return try {
-            val frame = c.request("camera/stream") {
-                put("entity_id", entityId)
-                put("format", "hls")
+            withTimeoutOrNull(STREAM_URL_TIMEOUT_MS) {
+                val frame = c.request("camera/stream") {
+                    put("entity_id", entityId)
+                    put("format", "hls")
+                }
+                val url = (frame["result"] as? JsonObject)?.get("url")?.jsonPrimitive?.contentOrNull
+                url?.let { withBase(it, baseUrl) }
             }
-            val url = (frame["result"] as? JsonObject)?.get("url")?.jsonPrimitive?.contentOrNull
-            url?.let { withBase(it, baseUrl) }
         } catch (_: Exception) {
             null
         }
