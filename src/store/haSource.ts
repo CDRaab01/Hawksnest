@@ -181,11 +181,19 @@ function withBase(path: string, baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}${path}`;
 }
 
+/** How long we give HA to produce an HLS stream URL before stepping down. */
+const STREAM_URL_TIMEOUT_MS = 15_000;
+
 /**
  * Ask HA for an on-demand stream URL for a camera. `camera/stream` returns a
  * signed, root-relative HLS playlist path (`/api/hls/<token>/master.m3u8`) that
  * HA serves under the same `/api` the nginx pod already proxies. Resolved
  * against the connected origin like camera snapshots.
+ *
+ * Bounded at 15s: HA answers only after the camera's stream pipeline is up, and
+ * a battery Ring camera being woken by go2rtc can block this for the better
+ * part of a minute. Null already means "step down the transport ladder" to the
+ * caller, so a timeout degrades to MJPEG/snapshot instead of hanging the player.
  */
 async function fetchStreamUrl(
   conn: Connection,
@@ -194,11 +202,16 @@ async function fetchStreamUrl(
   format: "hls",
 ): Promise<string | null> {
   try {
-    const res = await conn.sendMessagePromise<{ url?: string }>({
-      type: "camera/stream",
-      entity_id: entityId,
-      format,
-    });
+    const res = await Promise.race([
+      conn.sendMessagePromise<{ url?: string }>({
+        type: "camera/stream",
+        entity_id: entityId,
+        format,
+      }),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), STREAM_URL_TIMEOUT_MS),
+      ),
+    ]);
     return res?.url ? withBase(res.url, baseUrl) : null;
   } catch {
     // Camera can't produce a stream (or HA lacks the stream integration) — the

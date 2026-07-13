@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   ERR_INVALID_AUTH,
   type Connection,
@@ -227,6 +227,31 @@ describe("createHaSource", () => {
       format: "hls",
     });
     expect(url).toBe("http://ha/api/hls/tok/master.m3u8");
+  });
+
+  it("bounds camera/stream at 15s so a waking battery cam can't hang the player", async () => {
+    vi.useFakeTimers();
+    try {
+      const { conn } = makeFakeConn();
+      // HA never answers (battery camera waking, HLS pipeline spinning up).
+      conn.sendMessagePromise = ((msg: { type: string }) =>
+        msg.type === "camera/stream"
+          ? new Promise(() => {})
+          : Promise.resolve(REGISTRIES[msg.type])) as typeof conn.sendMessagePromise;
+      const deps: HaSourceDeps = {
+        connect: async () => conn,
+        subscribe: () => () => {},
+      };
+      const source = createHaSource({ url: "http://ha", token: "t" }, deps);
+      await source.start();
+
+      const pending = source.streamUrl!("camera.front_door");
+      await vi.advanceTimersByTimeAsync(15_000);
+      // Null = "step down the ladder" — the player degrades instead of hanging.
+      await expect(pending).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("builds Frigate recording/clip URLs against the HA origin", async () => {

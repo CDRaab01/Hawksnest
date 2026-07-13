@@ -138,4 +138,19 @@ describe("CameraTile", () => {
     );
     expect(screen.getByText("10m ago")).toBeInTheDocument();
   });
+
+  it("badge prefers snapshot freshness (last_updated) over hours-stale last_changed", () => {
+    // The "15h ago" bug: a camera's state rarely transitions, so last_changed is
+    // ancient even while ring-mqtt republishes the snapshot (bumping last_updated).
+    const entity: HassEntity = {
+      entity_id: "camera.back",
+      state: "idle",
+      attributes: { friendly_name: "Back", entity_picture: "/a.svg" },
+      last_changed: String(Math.floor(Date.now() / 1000) - 15 * 3600),
+      last_updated: String(Math.floor(Date.now() / 1000) - 30),
+    };
+    render(<CameraTile entity={entity} overrides={{}} name="Back" />);
+    expect(screen.getByText("30s ago")).toBeInTheDocument();
+    expect(screen.queryByText("15h ago")).toBeNull();
+  });
 });

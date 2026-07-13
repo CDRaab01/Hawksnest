@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { webrtcOffer, webrtcCandidate } from "../store/connection";
 
 /**
@@ -22,6 +22,9 @@ export function WebRtcPlayer({
   // Keep onFail current without re-running the negotiation effect on each render.
   const onFailRef = useRef(onFail);
   onFailRef.current = onFail;
+  // True until the first decoded frame plays — drives the "Connecting…" overlay
+  // so a battery camera's multi-second wake reads as progress, not a hang.
+  const [connecting, setConnecting] = useState(true);
 
   useEffect(() => {
     if (typeof RTCPeerConnection === "undefined") {
@@ -85,11 +88,16 @@ export function WebRtcPlayer({
       }
     })();
 
-    // Watchdog: if we haven't connected in 10s, fall back rather than hang.
+    // Watchdog: if we haven't connected in 20s, fall back rather than hang.
+    // 20s (not 10) because a battery camera has to wake from sleep before it
+    // can negotiate, which takes longer than 10s — cutting to HLS too early
+    // just trades one black screen for a slower one (mirrors the Android
+    // player's deliberate 20s).
     const watchdog = setTimeout(() => {
       if (pc && pc.connectionState !== "connected") fail();
-    }, 10_000);
+    }, 20_000);
 
+    setConnecting(true);
     return () => {
       cancelled = true;
       clearTimeout(watchdog);
@@ -100,14 +108,30 @@ export function WebRtcPlayer({
   }, [entityId]);
 
   return (
-    <video
-      ref={videoRef}
-      autoPlay
-      muted
-      playsInline
-      poster={poster}
-      aria-label="Live camera view"
-      className="aspect-video w-full rounded-lg bg-black object-contain"
-    />
+    <div className="relative">
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        poster={poster}
+        onPlaying={() => setConnecting(false)}
+        aria-label="Live camera view"
+        className="aspect-video w-full rounded-lg bg-black object-contain"
+      />
+      {connecting && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-black/40">
+          <div className="flex items-center gap-sm rounded-full bg-panel-high/90 px-lg py-sm backdrop-blur">
+            <span
+              aria-hidden="true"
+              className="h-3 w-3 rounded-full bg-effort animate-breathe motion-reduce:animate-none"
+            />
+            <span className="caption-label text-ink" role="status">
+              Connecting…
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
