@@ -18,6 +18,14 @@ data class NtfyEnvelope(
     val tags: List<String> = emptyList(),
     val priority: Int = 3,
     val click: String? = null,
+    val attachment: NtfyAttachment? = null,
+)
+
+/** ntfy attachment metadata — for us, the doorbell snapshot (an external `url`). */
+@Serializable
+data class NtfyAttachment(
+    val name: String = "",
+    val url: String = "",
 )
 
 /**
@@ -32,6 +40,8 @@ data class NtfyMessage(
     val tags: List<String>,
     val priority: Int,
     val click: String?,
+    /** External image URL (the doorbell snapshot) to show as a big-picture, or null. */
+    val attachUrl: String?,
 ) {
     companion object {
         fun parse(line: String, json: Json): NtfyMessage? {
@@ -51,6 +61,7 @@ data class NtfyMessage(
                 tags = env.tags,
                 priority = env.priority,
                 click = env.click?.takeIf { it.isNotBlank() },
+                attachUrl = env.attachment?.url?.takeIf { it.isNotBlank() },
             )
         }
     }

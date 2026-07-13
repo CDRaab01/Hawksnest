@@ -10,7 +10,7 @@ class PushRouteTest {
         title: String = "x",
         tags: List<String> = emptyList(),
         click: String? = null,
-    ) = NtfyMessage(id = "1", title = title, body = "b", tags = tags, priority = 3, click = click)
+    ) = NtfyMessage(id = "1", title = title, body = "b", tags = tags, priority = 3, click = click, attachUrl = null)
 
     @Test
     fun `bell tag classifies as doorbell`() {

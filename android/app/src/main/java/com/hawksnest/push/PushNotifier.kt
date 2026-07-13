@@ -6,10 +6,14 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.hawksnest.MainActivity
 import dagger.hilt.android.qualifiers.ApplicationContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -17,11 +21,13 @@ import javax.inject.Singleton
  * Owns the notification channels and turns an [NtfyMessage] into a posted
  * notification (or the persistent foreground notification the service runs
  * under). Channel + importance + tap destination are derived from [PushRoute],
- * so a doorbell buzzes loudly and opens the cameras, an alarm change opens Home.
+ * so a doorbell buzzes loudly and deep-links to its camera, an alarm change
+ * opens Home. A doorbell that carries a snapshot renders it as a big picture.
  */
 @Singleton
 class PushNotifier @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val okHttpClient: OkHttpClient,
 ) {
     /** Create the channels once (idempotent). Called from the Application. */
     fun createChannels() {
@@ -66,22 +72,44 @@ class PushNotifier @Inject constructor(
             PushKind.Alarm -> CHANNEL_ALARM
             PushKind.Generic -> CHANNEL_GENERIC
         }
-        val notification = NotificationCompat.Builder(context, channel)
+        // Doorbell snapshot: fetch best-effort (the camera_proxy URL is self-authing via its
+        // signed token). Runs on the service's IO coroutine, so a blocking fetch is fine.
+        val snapshot = msg.attachUrl?.let { fetchBitmap(it) }
+        val builder = NotificationCompat.Builder(context, channel)
             .setContentTitle(msg.title)
             .setContentText(msg.body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(msg.body))
             .setSmallIcon(context.applicationInfo.icon)
             .setAutoCancel(true)
             .setCategory(if (kind == PushKind.Alarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(if (msg.priority >= 4) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(contentIntent(PushRoute.cameraOf(msg)))
-            .build()
+        if (snapshot != null) {
+            builder.setLargeIcon(snapshot)
+                .setStyle(
+                    NotificationCompat.BigPictureStyle()
+                        .bigPicture(snapshot)
+                        .bigLargeIcon(null as Bitmap?), // hide the thumbnail when expanded
+                )
+        } else {
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(msg.body))
+        }
+        val notification = builder.build()
         try {
             // Stable-ish id per message so repeats replace rather than stack endlessly.
             nm.notify(msg.id.hashCode(), notification)
         } catch (e: SecurityException) {
             // POST_NOTIFICATIONS revoked between the check and here — ignore.
         }
+    }
+
+    /** Best-effort image fetch for the notification snapshot; null on any failure. */
+    private fun fetchBitmap(url: String): Bitmap? = try {
+        okHttpClient.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+            if (!resp.isSuccessful) null
+            else resp.body?.byteStream()?.use { BitmapFactory.decodeStream(it) }
+        }
+    } catch (e: Exception) {
+        null
     }
 
     /**

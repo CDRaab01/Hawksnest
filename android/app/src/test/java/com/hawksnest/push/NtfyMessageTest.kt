@@ -47,6 +47,22 @@ class NtfyMessageTest {
     }
 
     @Test
+    fun `parses an attachment url (doorbell snapshot)`() {
+        val line = """
+            {"id":"1","event":"message","topic":"t","message":"ding","tags":["bell"],
+             "attachment":{"name":"front.jpg","url":"https://h/api/camera_proxy/camera.x?token=z"}}
+        """.trimIndent().replace("\n", "")
+        val msg = NtfyMessage.parse(line, json)!!
+        assertEquals("https://h/api/camera_proxy/camera.x?token=z", msg.attachUrl)
+    }
+
+    @Test
+    fun `attachUrl is null when there is no attachment`() {
+        val msg = NtfyMessage.parse("""{"event":"message","topic":"t","message":"hi"}""", json)!!
+        assertNull(msg.attachUrl)
+    }
+
+    @Test
     fun `falls back to defaults for title and id`() {
         val msg = NtfyMessage.parse("""{"event":"message","topic":"t","message":"hi"}""", json)!!
         assertEquals("Hawksnest", msg.title)
