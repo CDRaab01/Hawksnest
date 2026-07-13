@@ -73,10 +73,6 @@ fun CameraPlayer(
             }
         }.getOrDefault(emptyList())
     }
-    val liveUrl: String? by produceState<String?>(null, cam.id) {
-        value = viewModel.liveStreamUrl(cam.entityId)
-    }
-
     // null playhead = live; reset to live whenever the camera changes.
     var playhead by remember(cam.id) { mutableStateOf<Long?>(null) }
     var paused by remember(cam.id) { mutableStateOf(false) }
@@ -85,6 +81,15 @@ fun CameraPlayer(
     // churn their attributes) can't flip the transport off WebRTC and drop us to the stale snapshot.
     val canWebRtc = remember(cam.id) { viewModel.canWebRtc(cam.entityId) }
     var webRtcFailed by remember(cam.id) { mutableStateOf(false) }
+
+    // Resolve the HLS stream URL only once the HLS tier could actually render — NOT eagerly on
+    // open. `camera/stream` makes HA spin up a stream pipeline, which on a battery camera wakes
+    // it / competes for its single live session in parallel with the WebRTC negotiation above it
+    // on the ladder (the request itself is bounded at 15s in HaSource).
+    val wantsHls = !canWebRtc || webRtcFailed
+    val liveUrl: String? by produceState<String?>(null, cam.id, wantsHls) {
+        value = if (wantsHls) viewModel.liveStreamUrl(cam.entityId) else null
+    }
 
     val isLive = playhead == null
     val headTime = playhead ?: endMs
