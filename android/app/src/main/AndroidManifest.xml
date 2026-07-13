@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Offer to exempt the push listener from battery optimization (One UI dozes long-idle
+         foreground services); requested only from Settings when the user enables push. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Two-way audio ("talk"): captures the mic to stream to the camera back-channel. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 

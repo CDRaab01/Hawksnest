@@ -9,8 +9,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +64,14 @@ fun SettingsScreen(
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted -> if (granted) viewModel.setPushEnabled(true) }
+
+    // Battery-optimization exemption: One UI kills long-idle foreground services, so the ntfy
+    // listener can go silent after days. Offer a one-tap exemption; re-check on return from the
+    // system dialog via the launcher's result callback (no lifecycle observer needed).
+    var batteryExempt by remember { mutableStateOf(isIgnoringBattery(context)) }
+    val batteryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { batteryExempt = isIgnoringBattery(context) }
 
     val defaultUrl = savedUrl ?: BuildConfig.HA_DEFAULT_URL
     var url by remember(defaultUrl) { mutableStateOf(defaultUrl) }
@@ -187,6 +201,24 @@ fun SettingsScreen(
                     modifier = Modifier.testTag("settingsPushSwitch"),
                 )
             }
+            // Only when push is on and Android is still allowed to doze the listener.
+            if (pushEnabled && !batteryExempt) {
+                Text(
+                    "Battery optimization is on — Android may stop delivering alerts after the " +
+                        "app sits idle for a while. Allow background activity for reliable pushes.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = HawksnestTheme.pulse.streak,
+                    modifier = Modifier.padding(top = HawksnestTheme.spacing.md),
+                )
+                PulseButton(
+                    text = "Allow background delivery",
+                    onClick = { batteryLauncher.launch(batteryExemptionIntent(context)) },
+                    tonal = true,
+                    modifier = Modifier
+                        .padding(top = HawksnestTheme.spacing.sm)
+                        .testTag("settingsBatteryButton"),
+                )
+            }
         }
 
         SectionHeader("About")
@@ -199,3 +231,17 @@ fun SettingsScreen(
         }
     }
 }
+
+/** Whether Android is already letting the push listener run unthrottled. */
+private fun isIgnoringBattery(context: Context): Boolean {
+    val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
+    return pm.isIgnoringBatteryOptimizations(context.packageName)
+}
+
+// Opens the system "allow background activity?" prompt for this app. Lint flags this action as
+// Play-restricted (BatteryLife); Hawksnest is sideloaded (suite app), and reliable doorbell
+// delivery is exactly the sanctioned use case, so the suppression is deliberate.
+@SuppressLint("BatteryLife")
+private fun batteryExemptionIntent(context: Context): Intent =
+    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+        .setData(Uri.parse("package:${context.packageName}"))

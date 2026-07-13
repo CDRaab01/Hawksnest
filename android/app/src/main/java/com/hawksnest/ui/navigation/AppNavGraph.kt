@@ -9,6 +9,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -44,12 +45,30 @@ private val bottomBarRoutes = TopLevelDestination.entries.map { it.route }.toSet
 @Composable
 fun AppNavGraph(
     startDestination: String = Screen.Home.route,
+    pushNav: com.hawksnest.push.PushNav? = null,
     feedback: ControlFeedbackViewModel = hiltViewModel(),
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val showBottomBar = currentRoute in bottomBarRoutes
+
+    // Doorbell notification tap: a specific camera opens in HomeScreen's lightbox overlay,
+    // so bring Home forward (from any tab) when a deep-link arrives — HomeScreen then opens
+    // the camera and consumes the target. Only navigates if we're not already on Home.
+    val pushCameraFlow = remember(pushNav) {
+        pushNav?.cameraTarget ?: kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    }
+    val pushCamera by pushCameraFlow.collectAsState()
+    LaunchedEffect(pushCamera) {
+        if (pushCamera != null && currentRoute != Screen.Home.route) {
+            navController.navigate(Screen.Home.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
 
     // The one snackbar for control failures — the control gate makes every failed tap/slide land
     // here instead of crashing the coroutine, with a reject buzz so it's felt, not just seen.
