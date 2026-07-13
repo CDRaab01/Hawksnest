@@ -33,7 +33,7 @@ android {
         // CI passes VERSION_CODE (the run number) so each signed release installs cleanly over the
         // previous one; defaults to 1 for local/debug builds.
         versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = System.getenv("VERSION_NAME") ?: "0.1.0"
+        versionName = System.getenv("VERSION_NAME") ?: "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Optional default Home Assistant base URL (the Hawksnest proxy host, reachable over
         // Tailscale, e.g. http://hawksnest.tailnet:8080). Empty by default — the user enters it in
