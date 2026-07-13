@@ -83,13 +83,19 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   tweak on its own.
 - **Push** (`push/`) — self-hosted **ntfy**, no FCM/Google. `NtfyPushService` is a `specialUse`
   foreground service holding one streaming connection to `<base>/<topic>/json`; each frame is
-  parsed (`NtfyMessage`, pure/tested), routed (`PushRoute`: doorbell→cameras, alarm→home), and
-  raised via `PushNotifier` (per-kind channels). Off by default — opt in from Settings, which
-  requests `POST_NOTIFICATIONS`; `PushSettings` (DataStore) persists it; `BootReceiver` restarts
-  the listener after a reboot only if enabled. The server side (ntfy Deployment + the HA doorbell/
-  alarm automations that publish to it) lives in the `hawksnest-automation` repo
-  (`docs/ntfy-push.md`). On-device runtime (delivery with the app closed, battery, reconnect) is
-  the one part unit tests can't cover — see that repo's checklist / the camera smoke checklist.
+  parsed (`NtfyMessage`, pure/tested), classified (`PushRoute.kindOf`: doorbell/alarm/generic),
+  and raised via `PushNotifier` (per-kind channels). **Tap → deep-link:** a doorbell notification's
+  `click` URL carries `?camera=camera.<base>`; `PushRoute.cameraOf` extracts it, the tap intent
+  carries it (`EXTRA_CAMERA`), and `PushNav` (an app-scoped bus) hands it to the nav shell —
+  which brings Home forward (`onNewIntent` covers a warm tap) and opens that camera's lightbox.
+  A specific camera opens in an overlay, not a NavHost route, which is why this goes through
+  `PushNav` rather than a start destination. Off by default — opt in from Settings, which requests
+  `POST_NOTIFICATIONS` and offers the **battery-optimization exemption** (One UI dozes long-idle
+  foreground services); `PushSettings` (DataStore) persists it; `BootReceiver` restarts the
+  listener after a reboot only if enabled. The server side (ntfy Deployment + the HA doorbell/alarm
+  automations that publish to it) lives in the `hawksnest-automation` repo (`docs/ntfy-push.md`).
+  On-device runtime (delivery with the app closed, battery, reconnect, the tap deep-link) is the
+  one part unit tests can't cover — smoke-test it on the phone.
 - Suite membership: signed with the suite key (secrets are `HAWKSNEST_`-prefixed), released by
   `android-release.yml` on `android/**` pushes, tagged `android-vX.Y.Z` (clear of web `v*`).
   Managed by the Dragonfly hub for updates — but **no** SuiteConfigReader/AppAuth (nothing to

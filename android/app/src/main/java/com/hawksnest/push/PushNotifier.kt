@@ -52,7 +52,7 @@ class PushNotifier @Inject constructor(
             .setContentText("Listening for alerts")
             .setSmallIcon(context.applicationInfo.icon)
             .setOngoing(true)
-            .setContentIntent(contentIntent(PushRoute.ROUTE_HOME))
+            .setContentIntent(contentIntent(null))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
@@ -74,7 +74,7 @@ class PushNotifier @Inject constructor(
             .setAutoCancel(true)
             .setCategory(if (kind == PushKind.Alarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(if (msg.priority >= 4) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(contentIntent(PushRoute.routeFor(kind)))
+            .setContentIntent(contentIntent(PushRoute.cameraOf(msg)))
             .build()
         try {
             // Stable-ish id per message so repeats replace rather than stack endlessly.
@@ -84,13 +84,19 @@ class PushNotifier @Inject constructor(
         }
     }
 
-    private fun contentIntent(route: String): PendingIntent {
+    /**
+     * The tap intent. Always brings the app to Home (`FLAG_ACTIVITY_SINGLE_TOP`, so a
+     * running app gets `onNewIntent` rather than a fresh task); a doorbell additionally
+     * carries the camera id so Home opens its live view. Distinct request code per
+     * camera so a doorbell PendingIntent doesn't overwrite an alarm one.
+     */
+    private fun contentIntent(cameraId: String?): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            .putExtra(EXTRA_ROUTE, route)
+        if (cameraId != null) intent.putExtra(EXTRA_CAMERA, cameraId)
         return PendingIntent.getActivity(
             context,
-            route.hashCode(),
+            (cameraId ?: "home").hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -102,7 +108,7 @@ class PushNotifier @Inject constructor(
         const val CHANNEL_GENERIC = "alerts"
         const val CHANNEL_SERVICE = "push_service"
 
-        /** Intent extra carrying the nav route a tapped notification should open. */
-        const val EXTRA_ROUTE = "com.hawksnest.push.EXTRA_ROUTE"
+        /** Intent extra carrying the logical camera id a doorbell tap should open. */
+        const val EXTRA_CAMERA = "com.hawksnest.push.EXTRA_CAMERA"
     }
 }

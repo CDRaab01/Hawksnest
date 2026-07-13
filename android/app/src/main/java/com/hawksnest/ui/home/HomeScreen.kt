@@ -93,6 +93,20 @@ fun HomeScreen(
     }
     var lightbox by remember { mutableStateOf<CameraUi?>(null) }
 
+    // Deep-link from a tapped doorbell notification: open that camera's lightbox once the
+    // camera list has loaded. Consume it either way so it fires exactly once (a not-yet-known
+    // camera just lands on Home rather than looping).
+    val pushCamera by viewModel.pushCameraTarget.collectAsState()
+    LaunchedEffect(pushCamera, ui.cameras) {
+        val target = pushCamera
+        // Wait for the camera list before acting; once we can, open the match (if any)
+        // and consume so it fires exactly once (unknown camera → just lands on Home).
+        if (target != null && ui.cameras.isNotEmpty()) {
+            ui.cameras.firstOrNull { it.id == target }?.let { lightbox = it }
+            viewModel.consumePushTarget()
+        }
+    }
+
     // Doorbell banner: show the latest ring until dismissed or auto-timeout.
     var doorbellDismissedAt by remember { mutableStateOf(0L) }
     val ring = ui.doorbell
