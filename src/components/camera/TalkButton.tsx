@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff } from "lucide-react";
+import { go2rtcWsUrl } from "../../lib/go2rtc";
 
 /**
  * Push-to-talk for a Ring camera, over the DEDICATED go2rtc (native `ring:`
@@ -17,11 +18,6 @@ import { Mic, MicOff } from "lucide-react";
  * unavailable the button disables itself rather than failing on press.
  */
 type State = "idle" | "connecting" | "talking" | "error";
-
-function wsUrl(src: string): string {
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.host}/go2rtc/api/ws?src=${encodeURIComponent(src)}`;
-}
 
 export function TalkButton({ src }: { src: string }) {
   const [state, setState] = useState<State>("idle");
@@ -58,7 +54,7 @@ export function TalkButton({ src }: { src: string }) {
       // Send the mic up; we don't need the camera's media back for talk.
       for (const track of mic.getTracks()) pc.addTrack(track, mic);
 
-      const ws = new WebSocket(wsUrl(src));
+      const ws = new WebSocket(go2rtcWsUrl(src));
       wsRef.current = ws;
 
       pc.onicecandidate = (e) => {
