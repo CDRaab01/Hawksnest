@@ -159,6 +159,9 @@ until HA confirms.
 
 ## Next phases
 
-OAuth (replacing the long-lived token), light theme, live camera streams, and more first-class
-domains. (Phase 4 delivered entity detail + history, cover/climate/media_player/fan cards,
-drag-and-drop favorites reordering, and the installable PWA.)
+The sequenced 1.0 plan lives in [V1.md](V1.md); remaining before the 1.0 bump: ntfy push
+prod-apply + on-device smoke, then the version bump. v1.1: OAuth to HA (replacing the
+long-lived token), wall-tablet kiosk mode. (Phase 4 delivered entity detail + history,
+cover/climate/media_player/fan cards, drag-and-drop favorites reordering, and the installable
+PWA; the V1 gates added TLS + cleartext-off, Keystore-wrapped token, light theme, the PWA
+update toast, and the camera smoke checklist.)
