@@ -14,6 +14,12 @@ is the V1.md merge train in its stated order: ntfy backend prod-apply → on-dev
 Android push PR → **the 1.0 version bump last**. v1.1 holds OAuth (#2) and wall-tablet kiosk
 mode (#7).
 
+**Gap review 2026-07-14 (host ROADMAP3): one v1.1 candidate added — two-way talk on the
+doorbell.** go2rtc supports two-way audio and it's Ring's core feature; it's the difference
+between a camera *viewer* and a *doorbell*. Run a feasibility spike against ring-mqtt first
+(whether the Ring device's speaker path is actually exposed) before committing — if the spike
+fails, record why here and drop it deliberately.
+
 ## Security posture (do these before features)
 
 1. ✓ **TLS on the proxy, then kill cleartext — DONE** (V1.md Gate 2: Tailscale Serve `:8443` +
