@@ -65,6 +65,15 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   mirroring the web) and the Devices sectioning model (`DeviceSections.kt`: per-room three-tier
   rhythm — FEATURED lock/climate/alarm cards, CONTROL rows with inline switches, READONLY rows).
 - `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
+- **Camera live ladder** (`ui/cameras/CameraPlayer.kt`): recorded VOD (when scrubbed) →
+  **go2rtc-direct** (Ring cams only) → HA WebRTC → HLS → MJPEG → snapshot. The go2rtc-direct
+  tier (`Go2rtcPlayer.kt`) negotiates recvonly WebRTC straight against the dedicated go2rtc over
+  its WS API (`/go2rtc/api/ws?src=<base>`, same signaling `TalkButton` speaks — both share
+  `Go2rtc.kt`'s `go2rtcWsUrl`), skipping the ring-mqtt/ffmpeg hop for ~1–2 s first frame. Media
+  is WebRTC to go2rtc's `:8555`; when that's unreachable (§7c host forwarder down / off-tailnet)
+  the 8 s watchdog fails over to HA WebRTC and `Go2rtcHealth` (process-wide circuit-breaker)
+  makes every later camera skip the tier. Shares `WebRtcCore` (process EGL/factory — never
+  disposed per-session) and `LiveFrameStore` tile capture with `WebRtcPlayer`.
 - **Devices v2** (`ui/devices/`): single-column list in the three-tier rhythm, PULSE segment
   chips (not stock M3), room summaries ("N devices · M on"), search, and long-press → rename/hide
   persisted in `util/DevicePrefsStore` (DataStore) with a hidden-devices shelf. Display names

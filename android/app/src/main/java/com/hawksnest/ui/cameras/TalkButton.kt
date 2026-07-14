@@ -147,17 +147,6 @@ fun TalkButton(
     }
 }
 
-/** Build the go2rtc WS URL from the connected origin: http→ws, https→wss, + the proxied path. */
-private fun buildWsUrl(baseUrl: String, src: String): String {
-    val origin = baseUrl.trimEnd('/')
-    val wsOrigin = when {
-        origin.startsWith("https://") -> "wss://" + origin.removePrefix("https://")
-        origin.startsWith("http://") -> "ws://" + origin.removePrefix("http://")
-        else -> origin
-    }
-    return "$wsOrigin/go2rtc/api/ws?src=${java.net.URLEncoder.encode(src, "UTF-8")}"
-}
-
 /**
  * One push-to-talk negotiation: open the go2rtc WebSocket, offer a sendonly-audio peer connection,
  * apply the answer + trickle ICE, and stream the mic. Lives outside composition so org.webrtc's
@@ -174,7 +163,7 @@ private class TalkSession(
     private var ws: WebSocket? = null
     private var audioSource: AudioSource? = null
     private val httpClient = OkHttpClient()
-    private val wsUrl = buildWsUrl(baseUrl, src)
+    private val wsUrl = go2rtcWsUrl(baseUrl, src)
     private val lock = Any()
     private var closed = false
 

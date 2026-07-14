@@ -81,12 +81,18 @@ fun CameraPlayer(
     // churn their attributes) can't flip the transport off WebRTC and drop us to the stale snapshot.
     val canWebRtc = remember(cam.id) { viewModel.canWebRtc(cam.entityId) }
     var webRtcFailed by remember(cam.id) { mutableStateOf(false) }
+    // Ring cameras get an even faster tier ABOVE HA WebRTC: WebRTC straight to the dedicated
+    // go2rtc (native `ring:` source, ~1-2s). Snapshot the circuit-breaker at mount (mirrors
+    // canWebRtc); it's skipped once media is known-unreachable (before the §7c :8555 forwarder).
+    val canGo2rtc = remember(cam.id) { isRing && Go2rtcHealth.maybeAvailable() }
+    var go2rtcFailed by remember(cam.id) { mutableStateOf(false) }
 
     // Resolve the HLS stream URL only once the HLS tier could actually render — NOT eagerly on
     // open. `camera/stream` makes HA spin up a stream pipeline, which on a battery camera wakes
     // it / competes for its single live session in parallel with the WebRTC negotiation above it
-    // on the ladder (the request itself is bounded at 15s in HaSource).
-    val wantsHls = !canWebRtc || webRtcFailed
+    // on the ladder (the request itself is bounded at 15s in HaSource). Both live-WebRTC tiers
+    // (go2rtc-direct, then HA) must be exhausted before we resolve HLS.
+    val wantsHls = !(canGo2rtc && !go2rtcFailed) && !(canWebRtc && !webRtcFailed)
     val liveUrl: String? by produceState<String?>(null, cam.id, wantsHls) {
         value = if (wantsHls) viewModel.liveStreamUrl(cam.entityId) else null
     }
@@ -170,6 +176,13 @@ fun CameraPlayer(
         when {
             !isLive && recordingUrl != null ->
                 VideoPlayer(recordingUrl, frame, paused = paused, seekToMs = seekToMs)
+            isLive && canGo2rtc && !go2rtcFailed -> Go2rtcPlayer(
+                src = cameraName,
+                cameraId = cam.id,
+                baseUrl = viewModel.baseUrl(),
+                onFail = { go2rtcFailed = true },
+                modifier = frame,
+            )
             isLive && canWebRtc && !webRtcFailed -> WebRtcPlayer(
                 entityId = cam.entityId,
                 cameraId = cam.id,
