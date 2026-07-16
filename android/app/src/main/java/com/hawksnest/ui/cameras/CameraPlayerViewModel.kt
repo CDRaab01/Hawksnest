@@ -3,11 +3,14 @@ package com.hawksnest.ui.cameras
 import androidx.lifecycle.ViewModel
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.ha.HistoryPoint
 import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.ha.WebRtcHandle
 import com.hawksnest.core.ha.WebRtcSignal
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.mergePlayable
+import com.hawksnest.core.logic.motionBlocksFromHistory
 import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
 import com.hawksnest.core.logic.ringEventsFromOptions
@@ -88,6 +91,32 @@ class CameraPlayerViewModel @Inject constructor(
             .filter { it in startMs..endMs }
             .sortedDescending()
         return ringEventsFromOptions(options, timesDesc, cameraName, endMs)
+    }
+
+    /**
+     * The full Ring-style timeline for a ring camera: the whole day's motion/ding "moments of action"
+     * (folded from the binary_sensor **recorder history** — ring-mqtt's selector only carries the last
+     * ~5) with the handful that still have a playable clip marked `hasClip` (their id swapped to the
+     * `Motion N` handle the player streams). Degrades to just the playable events when there's no
+     * motion history (older HA, no recorder, or no motion sensor) — never worse than before.
+     */
+    suspend fun ringTimeline(
+        eventSelectId: String,
+        motionId: String?,
+        dingId: String?,
+        cameraName: String,
+        startMs: Long,
+        endMs: Long,
+    ): List<CameraEvent> {
+        val playable = ringEvents(eventSelectId, cameraName, startMs, endMs)
+        val hours = ((endMs - startMs) / 3_600_000L).toInt().coerceAtLeast(1)
+        suspend fun history(id: String?): List<HistoryPoint> =
+            id?.let { runCatching { connection.fetchHistory(it, hours) }.getOrDefault(emptyList()) }
+                ?: emptyList()
+        val blocks = motionBlocksFromHistory(history(motionId), cameraName, "motion") +
+            motionBlocksFromHistory(history(dingId), cameraName, "ding")
+        return if (blocks.isEmpty()) playable
+        else mergePlayable(blocks.sortedBy { it.startMs }, playable)
     }
 
     fun recordingUrl(camera: String, startMs: Long, endMs: Long): String? =

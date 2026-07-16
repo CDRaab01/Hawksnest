@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -63,11 +64,12 @@ fun CameraPlayer(
     val window = remember { System.currentTimeMillis().let { it - DAY_MS to it } }
     val (startMs, endMs) = window
 
-    // Demo/Frigate events come from the source; ring events come off the selector.
+    // Demo/Frigate events come from the source; ring builds the day's motion "moments" from sensor
+    // history and marks the ~5 that still have a playable clip.
     val events: List<CameraEvent> by produceState<List<CameraEvent>>(emptyList(), cam.id) {
         value = runCatching {
             if (isRing) {
-                viewModel.ringEvents(cam.eventSelectId!!, cameraName, startMs, endMs)
+                viewModel.ringTimeline(cam.eventSelectId!!, cam.motionId, cam.dingId, cameraName, startMs, endMs)
             } else {
                 viewModel.events(cameraName, startMs, endMs)
             }
@@ -118,7 +120,7 @@ fun CameraPlayer(
     // uncaught throw here (it runs in produceState's coroutine) would crash the whole player, so
     // swallow it to null: the transport ladder then steps down to a snapshot instead of dying.
     val ringSrc: String? by produceState<String?>(null, isLive, selected?.id) {
-        value = if (isRing && !isLive && selected != null &&
+        value = if (isRing && !isLive && selected != null && selected.hasClip &&
             cam.eventSelectId != null && cam.eventStreamId != null
         ) {
             runCatching {
@@ -176,6 +178,14 @@ fun CameraPlayer(
         when {
             !isLive && recordingUrl != null ->
                 VideoPlayer(recordingUrl, frame, paused = paused, seekToMs = seekToMs)
+            // Scrubbed to a past moment. If it's a playable clip the URL is still resolving; otherwise
+            // Ring didn't keep a recording for it — show the snapshot with an honest note rather than
+            // snapping the frame back to the live feed ("show all, play recent").
+            !isLive -> ScrubbedPlaceholder(
+                snapshotUrl = cam.snapshotUrl,
+                resolving = selected?.hasClip == true,
+                modifier = frame,
+            )
             isLive && canGo2rtc && !go2rtcFailed -> Go2rtcPlayer(
                 src = cameraName,
                 cameraId = cam.id,
@@ -219,6 +229,33 @@ fun CameraPlayer(
             onNext = { if (next != null) seek(next.startMs) else playhead = null },
             onTogglePlay = { paused = !paused },
             onLive = { playhead = null },
+        )
+    }
+}
+
+/**
+ * The frame shown when the timeline is scrubbed to a past moment that has no playable footage — the
+ * camera's snapshot, dimmed, with an honest note. Ring/ring-mqtt only keeps recordings for the last
+ * handful of events, so most of the day's "moments of action" are markers, not clips: [resolving]
+ * distinguishes "a playable clip is still loading" from "this moment was never kept".
+ */
+@Composable
+private fun ScrubbedPlaceholder(
+    snapshotUrl: String?,
+    resolving: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        CameraSnapshot(model = snapshotUrl, modifier = Modifier.fillMaxSize())
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.45f)),
+        )
+        Text(
+            if (resolving) "Loading recording…" else "No saved recording for this moment",
+            style = MaterialTheme.typography.labelMedium,
+            color = Color.White,
         )
     }
 }

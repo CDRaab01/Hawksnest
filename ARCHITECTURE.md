@@ -47,7 +47,14 @@ watchdog + "Connecting…" overlay for battery-camera wake, and the HLS tier res
 with a 15 s bound in `haSource`. Tile age badges use `snapshotFreshnessMs` (`timestamp` attr →
 `last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras. Recorded
 playback = the last ~5 Ring events via the event-selector entity (not continuous VOD; a Frigate
-seam exists in `cameraEvents.ts`, unused).
+seam exists in `cameraEvents.ts`, unused). The **timeline itself** shows the whole day of "moments of
+action", not just those ~5: `motionBlocks.ts` (`motionBlocksFromHistory` + `mergePlayable`, mirrored
+in `core/logic/SensorBlocks.kt`) folds the camera's motion/ding **binary_sensor recorder history**
+(`fetchHistory`) into duration blocks, and marks the handful that still have a kept clip as playable.
+Scrubbing to a block with no clip shows the snapshot with an honest "no saved recording" note (Ring/HA
+only retain recent recordings). Rendered Ring-style — solid `effort`-blue blocks (dimmer when
+history-only), a triangle playhead, a dim "Live" region right of now, a "TODAY" header
+(`Timeline24h`) — over the tested `timelineViewport` math.
 
 ## 2. Android app (`android/`, package `com.hawksnest`)
 
