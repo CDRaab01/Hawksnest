@@ -55,11 +55,13 @@ function dayHeader(ms: number): string {
 /**
  * Ring-style scrubbable timeline: a center-anchored, zoomable + pannable strip.
  * Drag left/right to move through time; pinch / mouse-wheel to zoom (≈10 min →
- * 24 h). The day's "moments of action" render as solid effort-blue blocks —
- * full-strength when a playable clip is kept, dimmer when history-only. The
- * playhead is Ring's triangle marker; everything right of *now* is the dimmed
- * "Live" region. A clean tap seeks to the tapped time; tapping a block jumps to
- * it. All the mapping/clamp math lives in `lib/timelineViewport`.
+ * 24 h). The recordings render as solid effort-blue blocks (every block is a
+ * playable clip). The playhead is Ring's triangle marker; everything right of
+ * *now* is the dimmed "Live" region. While dragging, `onScrub` streams the time
+ * under the center playhead (rAF-throttled) so the parent can preview footage
+ * live; release still commits through `onSeek`/`onLive`. A clean tap seeks to
+ * the tapped time; tapping a block jumps to it. All the mapping/clamp math
+ * lives in `lib/timelineViewport`.
  */
 export function Timeline24h({
   events,
@@ -67,6 +69,7 @@ export function Timeline24h({
   endMs,
   playhead,
   onSeek,
+  onScrub,
   onLive,
 }: {
   events: CameraEvent[];
@@ -74,6 +77,9 @@ export function Timeline24h({
   endMs: number;
   playhead: number | "live";
   onSeek: (ms: number) => void;
+  /** Streams the time under the playhead during an active drag (throttled to
+   *  one call per animation frame). Release always follows with onSeek/onLive. */
+  onScrub?: (ms: number) => void;
   /** Snap back to live — fired when a tap/drag lands in the "Live" region right of now. */
   onLive?: () => void;
 }) {
@@ -81,6 +87,25 @@ export function Timeline24h({
   const [width, setWidth] = useState(0);
   const [vp, setVp] = useState<Viewport | null>(null);
   const drag = useRef<{ startX: number; startVp: Viewport; moved: boolean } | null>(null);
+  // rAF-throttled scrub emission: at most one onScrub per frame, cancelled on release/unmount.
+  const scrubRaf = useRef<number | null>(null);
+  const pendingScrubMs = useRef(0);
+  const onScrubRef = useRef(onScrub);
+  onScrubRef.current = onScrub;
+  useEffect(
+    () => () => {
+      if (scrubRaf.current !== null) cancelAnimationFrame(scrubRaf.current);
+    },
+    [],
+  );
+  function scheduleScrub(ms: number) {
+    pendingScrubMs.current = ms;
+    if (scrubRaf.current !== null) return;
+    scrubRaf.current = requestAnimationFrame(() => {
+      scrubRaf.current = null;
+      onScrubRef.current?.(pendingScrubMs.current);
+    });
+  }
 
   const scrubTime = playhead === "live" ? endMs : playhead;
 
@@ -139,7 +164,10 @@ export function Timeline24h({
     if (!d) return;
     const dx = e.clientX - d.startX;
     if (Math.abs(dx) > TAP_SLOP_PX) d.moved = true;
-    setVp(pan(d.startVp, dx, width, paddedWindow(startMs, endMs, d.startVp, width)));
+    const next = pan(d.startVp, dx, width, paddedWindow(startMs, endMs, d.startVp, width));
+    setVp(next);
+    // Live scrub: stream the center time while panning (clamped out of the Live region).
+    if (d.moved) scheduleScrub(Math.min(next.centerMs, endMs));
   }
 
   /** Commit a scrub/tap time: at/past *now* means the Live region — snap back to live. */
@@ -153,6 +181,11 @@ export function Timeline24h({
     if (!d) return;
     drag.current = null;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
+    // The release commits below — a trailing frame-throttled scrub would be stale.
+    if (scrubRaf.current !== null) {
+      cancelAnimationFrame(scrubRaf.current);
+      scrubRaf.current = null;
+    }
     if (d.moved) {
       // Commit the pan: the time now under the center playhead.
       if (vp) commit(vp.centerMs);
@@ -204,9 +237,8 @@ export function Timeline24h({
             );
           })}
 
-        {/* Action blocks — solid effort-blue "moments", tall like Ring's. Full strength when a
-            playable clip is kept; dimmer when it's a history-only marker. (All rendered;
-            off-screen ones are clipped by overflow-hidden.) */}
+        {/* Recording blocks — solid effort-blue, tall like Ring's; every block is a
+            playable clip. (All rendered; off-screen ones are clipped by overflow-hidden.) */}
         {vp &&
           events.map((ev) => {
             const left = timeToX(ev.startMs, vp, width);
@@ -217,16 +249,14 @@ export function Timeline24h({
                 key={ev.id}
                 type="button"
                 data-chip
-                title={`${ev.label} · ${clockTime(ev.startMs)}${ev.hasClip ? "" : " · no saved recording"}`}
+                title={`${ev.label} · ${clockTime(ev.startMs)}`}
                 aria-label={`${ev.label} at ${clockTime(ev.startMs)}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   onSeek(ev.startMs);
                 }}
                 style={{ left: `${left}px`, width: `${w}px` }}
-                className={`absolute bottom-2.5 top-2.5 rounded-sm bg-effort transition-opacity hover:opacity-100 ${
-                  ev.hasClip ? "opacity-100" : "opacity-60"
-                }`}
+                className="absolute bottom-2.5 top-2.5 rounded-sm bg-effort"
               />
             );
           })}

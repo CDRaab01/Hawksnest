@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LogicalCamera } from "../../lib/cameraModel";
 import {
   fetchCameraEvents,
-  fetchHistory,
   recordingUrlAt,
   streamUrl,
   callService,
@@ -10,7 +9,7 @@ import {
 import { useEntity } from "../../store/entityStore";
 import type { CameraEvent } from "../../lib/cameraEvents";
 import { vodPositionSeconds } from "../../lib/cameraEvents";
-import { mergePlayable, motionBlocksFromHistory } from "../../lib/motionBlocks";
+import { clipContaining, offsetInClipSeconds, clipSpanEndMs } from "../../lib/clipSeek";
 import { ringEventsFromSelect } from "../../lib/ringEvents";
 import { snapshotUrl } from "../../lib/cameraUrl";
 import { LivePlayer } from "../LivePlayer";
@@ -23,21 +22,40 @@ import { TransportBar } from "./TransportBar";
 
 const DAY_MS = 24 * 3600_000;
 
+/** How long a clip switch is held off while the user is actively scrubbing, so
+ *  dragging across several clips doesn't fire a select_option + stream per clip. */
+const SCRUB_CLIP_DEBOUNCE_MS = 300;
+
 function cameraNameOf(camera: LogicalCamera): string {
   return camera.id.split(".")[1] ?? camera.id;
 }
 
+/** Where the player is with the selected ring clip's stream URL. `failed` is a
+ *  terminal, *visible* state (HA timed out / errored / the event rotated out of
+ *  ring-mqtt's ~5-slot selector) — never left looking like it's still loading. */
+type RingClipState =
+  | { status: "idle" }
+  | { status: "resolving"; clipId: string }
+  | { status: "ready"; clipId: string; url: string }
+  | { status: "failed"; clipId: string };
+
 /**
  * Ring-style camera player: live feed + a scrubbable 24h timeline of recorded
  * events, an in-player camera switcher, and transport controls. The playhead is
- * `"live"` or an epoch-ms time.
+ * `"live"` or an epoch-ms time. Dragging the timeline scrubs live: the playhead
+ * follows the drag and, when it's inside a kept recording, the video seeks in
+ * real time (forward and reverse); releasing keeps playing from that moment.
  *
- * Recorded events come from one of two backends, transparently:
+ * The timeline shows **only playable recordings** (Ring-style: every block is
+ * watchable). Recorded events come from one of two backends, transparently:
  * - **ring-mqtt** (`camera.eventSelectId` present): the last ~5 events from the
- *   event-selector entity; seeking snaps to an event, sets the selector
- *   (`select.select_option`), and plays the `camera.<base>_event` stream.
- * - **Frigate / demo**: `fetchCameraEvents` + a continuous `recordingUrlAt` VOD
- *   (demo synthesizes both and plays the bundled clip).
+ *   event-selector entity; seeking inside one sets the selector
+ *   (`select.select_option`) and plays the `camera.<base>_event` stream at the
+ *   in-clip offset. A clip's real span is learned from the loaded media's
+ *   duration (`endMs` arrives null).
+ * - **Frigate / demo**: `fetchCameraEvents` (clip-bearing events only) + a
+ *   continuous `recordingUrlAt` VOD (demo synthesizes both and plays the
+ *   bundled clip).
  */
 export function CameraPlayer({
   camera,
@@ -59,13 +77,35 @@ export function CameraPlayer({
 
   const [playhead, setPlayhead] = useState<number | "live">("live");
   const [paused, setPaused] = useState(false);
+  // True while a timeline drag is in flight — clip switches debounce against it.
+  const scrubbing = useRef(false);
+  // The clip currently loaded in the player and its real media duration, once
+  // known — refines timeline containment for open-ended (`endMs: null`) clips.
+  const [loadedClip, setLoadedClip] = useState<{ id: string; durationMs: number } | null>(
+    null,
+  );
+  // Where the selected ring clip's stream resolution is (see RingClipState).
+  const [ringClip, setRingClip] = useState<RingClipState>({ status: "idle" });
+  const [retryNonce, setRetryNonce] = useState(0);
+  const ringClipRef = useRef(ringClip);
+  ringClipRef.current = ringClip;
+
+  // Reset playback state when the camera changes (the component is reused).
+  // ringClip must reset too: ring-mqtt option ids ("Motion 1"…) repeat across
+  // cameras, so a cached ready URL from the last camera would otherwise match.
+  useEffect(() => {
+    setPlayhead("live");
+    setPaused(false);
+    setLoadedClip(null);
+    setRingClip({ status: "idle" });
+    scrubbing.current = false;
+  }, [camera.id]);
 
   // Demo/Frigate events come from the source; ring events come off the selector.
   const [fetched, setFetched] = useState<CameraEvent[]>([]);
   useEffect(() => {
     if (isRing) return;
     let active = true;
-    setPlayhead("live");
     fetchCameraEvents(cameraName, window.start, window.end)
       .then((e) => active && setFetched(e))
       .catch(() => active && setFetched([]));
@@ -74,43 +114,25 @@ export function CameraPlayer({
     };
   }, [isRing, cameraName, window.start, window.end]);
 
-  // Ring: the whole day's motion/ding "moments of action", folded from the binary_sensor
-  // recorder history (ring-mqtt's selector only carries the last ~5 playable clips).
-  // Best-effort — no history (older HA / no sensor) leaves this empty and the timeline
-  // degrades to just the playable events, never worse than before.
-  const [blocks, setBlocks] = useState<CameraEvent[]>([]);
-  useEffect(() => {
-    if (!isRing) return;
-    let active = true;
-    setPlayhead("live");
-    setBlocks([]);
-    const hours = Math.max(1, Math.round((window.end - window.start) / 3_600_000));
-    const history = (id: string | null, label: string) =>
-      id
-        ? fetchHistory(id, hours)
-            .then((pts) => motionBlocksFromHistory(pts, cameraName, label))
-            .catch(() => [] as CameraEvent[])
-        : Promise.resolve([] as CameraEvent[]);
-    void Promise.all([history(camera.motionId, "motion"), history(camera.dingId, "ding")]).then(
-      ([motion, ding]) => {
-        if (active) setBlocks([...motion, ...ding].sort((a, b) => a.startMs - b.startMs));
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [isRing, cameraName, camera.motionId, camera.dingId, window.start, window.end]);
-
+  // Only real recordings make the timeline (Ring-style: every block is watchable —
+  // no history-derived "maybe" markers).
   const events = useMemo(() => {
-    if (!isRing) return fetched;
-    // The playable set (the ~5 clips Ring still keeps) overlaid on the day's motion blocks.
-    const playable = ringEventsFromSelect(ringSelect, cameraName, window.end);
-    return blocks.length ? mergePlayable(blocks, playable) : playable;
-  }, [isRing, ringSelect, cameraName, window.end, fetched, blocks]);
+    if (!isRing) return fetched.filter((e) => e.hasClip);
+    return ringEventsFromSelect(ringSelect, cameraName, window.end);
+  }, [isRing, ringSelect, cameraName, window.end, fetched]);
 
   const isLive = playhead === "live";
   const headTime = isLive ? window.end : playhead;
-  const selected = isLive ? undefined : events.find((e) => e.startMs === headTime);
+  // The clip under the playhead (containment, not nearest): scrubbing can rest
+  // anywhere, and gaps honestly show "no saved recording".
+  const selected = useMemo(
+    () =>
+      isLive || !isRing
+        ? undefined
+        : (clipContaining(events, headTime, loadedClip?.id ?? null, loadedClip?.durationMs ?? null) ??
+          undefined),
+    [isLive, isRing, events, headTime, loadedClip],
+  );
 
   const { prev, next } = useMemo(() => {
     const before = events.filter((e) => e.startMs < headTime);
@@ -122,67 +144,136 @@ export function CameraPlayer({
   }, [events, headTime]);
 
   function seek(ms: number) {
-    if (isRing && events.length) {
-      // No continuous VOD on ring — snap to the nearest recorded event.
-      const nearest = events.reduce((best, e) =>
-        Math.abs(e.startMs - ms) < Math.abs(best.startMs - ms) ? e : best,
-      );
-      setPlayhead(nearest.startMs);
-    } else {
-      setPlayhead(Math.round(Math.min(window.end, Math.max(window.start, ms))));
-    }
+    scrubbing.current = false;
+    setPlayhead(Math.round(Math.min(window.end, Math.max(window.start, ms))));
     setPaused(false);
   }
 
-  // ring recorded playback: select the event, then stream the `_event` camera. Only playable
-  // moments (hasClip — a recording Ring still keeps) resolve a stream; history-only motion
-  // markers render the honest "no saved recording" state instead.
-  const [ringSrc, setRingSrc] = useState<string | null>(null);
+  /** Live scrub: the playhead follows the drag; commit semantics stay on release (seek/onLive). */
+  function scrub(ms: number) {
+    scrubbing.current = true;
+    setPlayhead(Math.round(Math.min(window.end, Math.max(window.start, ms))));
+  }
+
+  function goLive() {
+    scrubbing.current = false;
+    setPlayhead("live");
+  }
+
+  // ring recorded playback: select the event, then stream the `_event` camera.
+  // Tri-state per clip — resolving / ready / failed — so a stream HA can't
+  // produce (15s timeout, sleeping battery cam, rotated-out event) surfaces as
+  // an honest error with a Retry, never a permanent "Loading…".
   useEffect(() => {
-    if (
-      !isRing ||
-      isLive ||
-      !selected ||
-      !selected.hasClip ||
-      !camera.eventSelectId ||
-      !camera.eventStreamId
-    ) {
-      setRingSrc(null);
+    if (!isRing || isLive || !selected || !camera.eventSelectId || !camera.eventStreamId) {
+      return;
+    }
+    const clipId = selected.id;
+    // Already resolving/ready for this clip (e.g. scrub within its span, or a
+    // scrub that left and re-entered it) — don't re-fire select_option/stream.
+    const cur = ringClipRef.current;
+    if ((cur.status === "resolving" || cur.status === "ready") && cur.clipId === clipId) {
       return;
     }
     let active = true;
-    setRingSrc(null);
-    (async () => {
+    let done = false;
+    const run = async () => {
+      setRingClip({ status: "resolving", clipId });
+      setLoadedClip((lc) => (lc && lc.id === clipId ? lc : null));
       try {
         await callService("select", "select_option", {
           entity_id: camera.eventSelectId!,
-          option: selected.id,
+          option: clipId,
         });
       } catch {
         /* selecting failed — still try to read whatever the event stream has */
       }
-      const url = await streamUrl(camera.eventStreamId!);
-      if (active) setRingSrc(url);
-    })();
+      let url: string | null = null;
+      try {
+        url = await streamUrl(camera.eventStreamId!);
+      } catch {
+        url = null;
+      }
+      if (!active) return;
+      done = true;
+      setRingClip(url ? { status: "ready", clipId, url } : { status: "failed", clipId });
+    };
+    const timer = setTimeout(() => void run(), scrubbing.current ? SCRUB_CLIP_DEBOUNCE_MS : 0);
     return () => {
       active = false;
+      clearTimeout(timer);
+      // A resolution cancelled mid-flight (scrubbed away / camera changed) must
+      // not leave the state looking like it's still loading — reset so a return
+      // to this clip re-resolves instead of skipping on a stale "resolving".
+      if (!done) {
+        setRingClip((s) =>
+          s.status === "resolving" && s.clipId === clipId ? { status: "idle" } : s,
+        );
+      }
     };
     // selected is intentionally tracked by id only — its object identity changes
     // each render, but re-selecting the same event would re-trigger the stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRing, isLive, selected?.id, camera.eventSelectId, camera.eventStreamId]);
+  }, [isRing, isLive, selected?.id, retryNonce, camera.eventSelectId, camera.eventStreamId]);
 
   // Continuous (Frigate) VOD spans the WHOLE window and is built once — scrubbing seeks within it
   // (see `seekSeconds`) rather than rebuilding a new playlist per seek, which used to tear down and
   // re-init the player on every scrub (the stutter, and the backwards-seek crash).
+  const ringReady =
+    selected && ringClip.status === "ready" && ringClip.clipId === selected.id
+      ? ringClip
+      : null;
   const recordingSrc = isLive
     ? null
     : isRing
-      ? ringSrc
+      ? (ringReady?.url ?? null)
       : recordingUrlAt(cameraName, window.start, window.end);
-  // In-media seek position for the continuous VOD (ring snaps to discrete event streams instead).
-  const seekSeconds =
-    isLive || isRing ? undefined : vodPositionSeconds(headTime, window.start);
+  // In-media seek position: the continuous VOD seeks from the window start; a
+  // ring clip seeks from ITS start (so scrubbing inside a clip previews live).
+  const seekSeconds = isLive
+    ? undefined
+    : isRing
+      ? ringReady && selected
+        ? offsetInClipSeconds(selected, headTime)
+        : undefined
+      : vodPositionSeconds(headTime, window.start);
+
+  // Learn the loaded ring clip's real duration from the media, refining the
+  // timeline block width + containment span for its open-ended event.
+  const onDuration = useCallback((seconds: number) => {
+    const cur = ringClipRef.current;
+    if (cur.status !== "ready") return;
+    const durationMs = Math.round(seconds * 1000);
+    setLoadedClip((lc) =>
+      lc && lc.id === cur.clipId && lc.durationMs === durationMs
+        ? lc
+        : { id: cur.clipId, durationMs },
+    );
+  }, []);
+  // An HLS error after the URL resolved is a failure too (dead playlist, expired token).
+  const onPlaybackError = useCallback(() => {
+    setRingClip((s) => (s.status === "ready" ? { status: "failed", clipId: s.clipId } : s));
+  }, []);
+
+  // Give the timeline the loaded clip's real span so chip width agrees with containment.
+  const displayEvents = useMemo(
+    () =>
+      loadedClip
+        ? events.map((e) =>
+            e.id === loadedClip.id && e.endMs === null
+              ? { ...e, endMs: clipSpanEndMs(e, loadedClip.id, loadedClip.durationMs) }
+              : e,
+          )
+        : events,
+    [events, loadedClip],
+  );
+
+  const placeholderState: "resolving" | "failed" | "none" =
+    isRing && selected
+      ? ringClip.status === "failed" && ringClip.clipId === selected.id
+        ? "failed"
+        : "resolving"
+      : "none";
 
   return (
     <div className="space-y-md">
@@ -216,24 +307,29 @@ export function CameraPlayer({
           paused={paused}
           loop={!isRing}
           seekSeconds={seekSeconds}
+          onDuration={isRing ? onDuration : undefined}
+          onError={isRing ? onPlaybackError : undefined}
         />
       ) : (
-        // Scrubbed to a past moment with no footage yet: either a playable clip is still
-        // resolving, or Ring never kept a recording for it — say so over the snapshot rather
-        // than snapping the frame back to the live feed ("show all, play recent").
+        // Scrubbed to a past moment with no footage on screen: a clip is
+        // resolving, resolution failed (Retry), or there's simply no recording
+        // kept for this time — say so over the snapshot rather than snapping
+        // the frame back to the live feed.
         <ScrubbedPlaceholder
           snapshot={snapshotUrl(camera.snapshotEntity)}
-          resolving={selected?.hasClip === true}
+          state={placeholderState}
+          onRetry={() => setRetryNonce((n) => n + 1)}
         />
       )}
 
       <Timeline24h
-        events={events}
+        events={displayEvents}
         startMs={window.start}
         endMs={window.end}
         playhead={playhead}
         onSeek={seek}
-        onLive={() => setPlayhead("live")}
+        onScrub={scrub}
+        onLive={goLive}
       />
 
       <TransportBar
@@ -242,26 +338,29 @@ export function CameraPlayer({
         canPrev={prev !== null}
         canNext={next !== null || !isLive}
         onPrev={() => prev && seek(prev.startMs)}
-        onNext={() => (next ? seek(next.startMs) : setPlayhead("live"))}
+        onNext={() => (next ? seek(next.startMs) : goLive())}
         onTogglePlay={() => setPaused((p) => !p)}
-        onLive={() => setPlayhead("live")}
+        onLive={goLive}
       />
     </div>
   );
 }
 
 /**
- * The frame shown when the timeline is scrubbed to a past moment that has no playable footage —
- * the camera's snapshot, dimmed, with an honest note. Ring/ring-mqtt only keeps recordings for
- * the last handful of events, so most of the day's "moments of action" are markers, not clips:
- * `resolving` distinguishes "a playable clip is still loading" from "this moment was never kept".
+ * The frame shown when the timeline is scrubbed to a moment with no footage on
+ * screen — the camera's snapshot, dimmed, with an honest note. `resolving` means
+ * a playable clip's stream is still being produced; `failed` means HA couldn't
+ * produce it (timeout / error / the event rotated out of ring-mqtt's selector)
+ * and offers a Retry; `none` means no recording is kept for this time.
  */
 function ScrubbedPlaceholder({
   snapshot,
-  resolving,
+  state,
+  onRetry,
 }: {
   snapshot: string | null;
-  resolving: boolean;
+  state: "resolving" | "failed" | "none";
+  onRetry?: () => void;
 }) {
   return (
     <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-panel">
@@ -272,10 +371,27 @@ function ScrubbedPlaceholder({
           className="absolute inset-0 h-full w-full object-cover"
         />
       )}
-      <div className="absolute inset-0 flex items-center justify-center bg-black/45">
-        <span className="font-body text-body text-ink">
-          {resolving ? "Loading recording…" : "No saved recording for this moment"}
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-sm bg-black/45">
+        <span
+          className={["font-body text-body", state === "failed" ? "text-streak" : "text-ink"].join(
+            " ",
+          )}
+        >
+          {state === "resolving"
+            ? "Loading recording…"
+            : state === "failed"
+              ? "Couldn't load this recording"
+              : "No saved recording for this moment"}
         </span>
+        {state === "failed" && onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-full bg-panel-high px-lg py-sm font-body text-body text-ink transition-colors duration-fast hover:bg-panel"
+          >
+            Retry
+          </button>
+        )}
       </div>
     </div>
   );

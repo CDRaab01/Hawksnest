@@ -36,6 +36,16 @@ class MockControl(private val base: String) {
                 .apply { entityId?.let { put("entity_id", it) } },
         )
 
+    /** Script how `camera/stream` resolves for an entity (or `"default"` for all):
+     *  `ok`, `error`, or `timeout` (never replies — the client's 15s bound steps down). */
+    fun streamOutcome(outcome: String, entityId: String? = null, delayMs: Int? = null) =
+        post(
+            "/__scenario/stream-outcome",
+            JSONObject().put("outcome", outcome)
+                .apply { entityId?.let { put("entity_id", it) } }
+                .apply { delayMs?.let { put("delayMs", it) } },
+        )
+
     /** The recorded `call_service` log. */
     fun calls(): List<ServiceCall> {
         val arr = JSONArray(get("/__scenario/calls"))

@@ -5,11 +5,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.RawResourceDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -34,8 +39,15 @@ fun VideoPlayer(
     live: Boolean = false,
     /** Scrub position (ms into the media). Seeks the prepared player — no re-prepare/reload. */
     seekToMs: Long? = null,
+    /** Reports the media duration (ms) once known — and again when it grows (an HLS event
+     *  playlist's duration extends as segments append). */
+    onDurationMs: ((Long) -> Unit)? = null,
+    /** Fired on a fatal playback error (dead playlist, expired token) so the host can step down. */
+    onError: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val currentOnDurationMs by rememberUpdatedState(onDurationMs)
+    val currentOnError by rememberUpdatedState(onError)
     val uri: Uri = if (url == DEMO_CLIP_URI) {
         RawResourceDataSource.buildRawResourceUri(R.raw.camera_loop)
     } else {
@@ -50,7 +62,26 @@ fun VideoPlayer(
     }
 
     DisposableEffect(Unit) {
-        onDispose { player.release() }
+        val listener = object : Player.Listener {
+            fun reportDuration() {
+                val d = player.duration
+                if (d != C.TIME_UNSET && d > 0) currentOnDurationMs?.invoke(d)
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) reportDuration()
+            }
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                reportDuration()
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                currentOnError?.invoke()
+            }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
     }
 
     // Prepare only when the media (or loop mode) actually changes. Scrubbing keeps the same VOD

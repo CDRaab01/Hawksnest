@@ -81,6 +81,17 @@ export interface ServiceCall {
   target?: { entity_id?: string | string[] };
 }
 
+/**
+ * How a `camera/stream` request resolves. `ok` returns the mock HLS URL (after
+ * an optional delay); `error` fails the command (HA can't produce a stream);
+ * `timeout` never replies — the client's own 15s bound steps down, so specs
+ * should prefer `error` for speed and keep `timeout` for protocol tests.
+ */
+export interface StreamOutcome {
+  outcome: "ok" | "error" | "timeout";
+  delayMs?: number;
+}
+
 export interface Scenario {
   haVersion: string;
   /** Expected token; null = accept any non-empty token. */
@@ -93,6 +104,8 @@ export interface Scenario {
   logbook: unknown[];
   /** Per `domain.service` default outcomes for this scenario. */
   outcomes?: Record<string, ServiceOutcome>;
+  /** Per entity_id `camera/stream` outcomes (`"default"` applies to the rest). */
+  streamOutcomes?: Record<string, StreamOutcome>;
   defaultDelayMs?: number;
 }
 
@@ -161,8 +174,15 @@ export class MockHub {
   private historyData!: Record<string, RawHistorySample[]>;
   private logbookData!: unknown[];
   private outcomes = new Map<string, ServiceOutcome>();
+  private streamOutcomes = new Map<string, StreamOutcome>();
   private defaultDelayMs = 600;
+  /** Echo timers in flight — cleared on load so a delayed echo from one test
+   *  can't fire into the next test's freshly-reset scenario. */
+  private pendingEchoes = new Set<ReturnType<typeof setTimeout>>();
   readonly calls: ServiceCall[] = [];
+  /** Entity ids of every `camera/stream` request — lets retry tests assert the
+   *  re-request happened without racing the (unplayable) mock HLS payload. */
+  readonly streamRequests: string[] = [];
   /** Total sockets ever accepted — lets reconnect tests assert deterministically. */
   connections = 0;
   private sessions = new Set<Session>();
@@ -177,6 +197,8 @@ export class MockHub {
 
   /** Load a scenario as the new ground truth (does not touch live sessions). */
   load(scenario: Scenario): void {
+    for (const t of this.pendingEchoes) clearTimeout(t);
+    this.pendingEchoes.clear();
     this.haVersion = scenario.haVersion;
     this.token = scenario.token;
     this.rejectAuth = scenario.rejectAuth ?? false;
@@ -185,8 +207,10 @@ export class MockHub {
     this.historyData = structuredClone(scenario.history);
     this.logbookData = structuredClone(scenario.logbook);
     this.outcomes = new Map(Object.entries(scenario.outcomes ?? {}));
+    this.streamOutcomes = new Map(Object.entries(scenario.streamOutcomes ?? {}));
     this.defaultDelayMs = scenario.defaultDelayMs ?? 600;
     this.calls.length = 0;
+    this.streamRequests.length = 0;
   }
 
   /** Reset to a fresh scenario AND push the new full state to any live sessions. */
@@ -239,6 +263,25 @@ export class MockHub {
     });
   }
 
+  /** Control API: script how `camera/stream` resolves for an entity (or `"default"` for all). */
+  setStreamOutcome(input: {
+    entity_id?: string;
+    outcome: "ok" | "error" | "timeout";
+    delayMs?: number;
+  }): void {
+    this.streamOutcomes.set(input.entity_id ?? "default", {
+      outcome: input.outcome,
+      delayMs: input.delayMs,
+    });
+  }
+
+  streamOutcomeFor(entityId: string): StreamOutcome {
+    return (
+      this.streamOutcomes.get(entityId) ??
+      this.streamOutcomes.get("default") ?? { outcome: "ok" }
+    );
+  }
+
   /** Control API: drop all live sockets (the app then auto-reconnects). */
   disconnectAll(): void {
     for (const s of [...this.sessions]) s.closeSocket();
@@ -264,8 +307,15 @@ export class MockHub {
       const updated = this.setEntityState(entityId, state);
       for (const s of this.sessions) s.pushEntities([updated]);
     };
-    if (delayMs <= 0) void Promise.resolve().then(apply);
-    else setTimeout(apply, delayMs);
+    if (delayMs <= 0) {
+      void Promise.resolve().then(apply);
+    } else {
+      const timer = setTimeout(() => {
+        this.pendingEchoes.delete(timer);
+        apply();
+      }, delayMs);
+      this.pendingEchoes.add(timer);
+    }
   }
 
   private outcomeKey(domain: string, service: string, entityId?: string): string {
@@ -303,6 +353,8 @@ interface Msg {
   target?: { entity_id?: string | string[] };
   access_token?: string;
   event_type?: string;
+  /** `camera/stream` carries the camera entity here. */
+  entity_id?: string;
 }
 
 export class Session {
@@ -413,7 +465,7 @@ export class Session {
         this.result(msg.id, this.hub.logbook());
         break;
       case "camera/stream":
-        this.result(msg.id, { url: "/api/hls/mock/master.m3u8" });
+        this.handleCameraStream(msg);
         break;
       case "call_service":
         this.handleCallService(msg);
@@ -432,6 +484,29 @@ export class Session {
           error: { code: "unknown_command", message: `Unknown command ${msg.type ?? "?"}` },
         });
     }
+  }
+
+  /** `camera/stream` per the scripted outcome: ok (mock HLS URL, optionally
+   *  delayed), error (HA can't produce a stream), or timeout (never reply —
+   *  the client's own 15s bound steps down). */
+  private handleCameraStream(msg: Msg): void {
+    this.hub.streamRequests.push(msg.entity_id ?? "");
+    const oc = this.hub.streamOutcomeFor(msg.entity_id ?? "");
+    if (oc.outcome === "timeout") return;
+    const reply = () => {
+      if (oc.outcome === "error") {
+        this.transport.send({
+          type: "result",
+          id: msg.id,
+          success: false,
+          error: { code: "start_stream_failed", message: "Timeout getting stream source" },
+        });
+      } else {
+        this.result(msg.id, { url: "/api/hls/mock/master.m3u8" });
+      }
+    };
+    if (oc.delayMs && oc.delayMs > 0) setTimeout(reply, oc.delayMs);
+    else reply();
   }
 
   private handleCallService(msg: Msg): void {

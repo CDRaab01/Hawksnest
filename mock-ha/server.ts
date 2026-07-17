@@ -95,6 +95,15 @@ async function handleHttp(req: IncomingMessage, res: ServerResponse): Promise<vo
     });
     return json(res, 200, { ok: true });
   }
+  if (path === "/__scenario/stream-outcome" && method === "POST") {
+    const b = asRecord(await readBody(req));
+    hub.setStreamOutcome({
+      entity_id: b.entity_id ? str(b.entity_id) : undefined,
+      outcome: str(b.outcome) as "ok" | "error" | "timeout",
+      delayMs: typeof b.delayMs === "number" ? b.delayMs : undefined,
+    });
+    return json(res, 200, { ok: true });
+  }
   if (path === "/__scenario/disconnect" && method === "POST") {
     hub.disconnectAll();
     return json(res, 200, { ok: true });
@@ -103,7 +112,11 @@ async function handleHttp(req: IncomingMessage, res: ServerResponse): Promise<vo
     return json(res, 200, hub.calls);
   }
   if (path === "/__scenario/stats" && method === "GET") {
-    return json(res, 200, { connections: hub.connections, sessions: hub.sessionCount });
+    return json(res, 200, {
+      connections: hub.connections,
+      sessions: hub.sessionCount,
+      streamRequests: hub.streamRequests,
+    });
   }
 
   // ---- REST the app touches ----
