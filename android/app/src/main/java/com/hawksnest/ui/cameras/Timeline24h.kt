@@ -91,14 +91,32 @@ fun Timeline24h(
     playhead: Long?,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    /** Snap back to live — fired when a tap/drag lands in the "Live" region right of now. */
+    onLive: () -> Unit = {},
 ) {
     val pulse = HawksnestTheme.pulse
     val measurer = rememberTextMeasurer()
-    val window = TimeWindow(startMs, endMs)
     val scrubTime = playhead ?: endMs
 
     var trackWidth by remember { mutableStateOf(0f) }
     var vp by remember { mutableStateOf<Viewport?>(null) }
+
+    // The clamp window is padded past *now* by half the visible span, so "now" can sit at CENTER
+    // with the "Live" region filling the right half — the Ring layout. (Unpadded, the clamp pins
+    // now to the right edge and the Live region could never show.) Panning right naturally stops
+    // when now reaches center. Mirrors the web `paddedWindow`.
+    fun padded(v: Viewport?): TimeWindow {
+        val half = (
+            (v?.takeIf { trackWidth > 0f }?.let { visibleSpanMs(it, trackWidth) }
+                ?: DEFAULT_SPAN_MS.toDouble()) / 2
+            ).toLong()
+        return TimeWindow(startMs, endMs + half)
+    }
+
+    // Commit a scrub/tap time: at/past *now* means the Live region — snap back to live.
+    fun commit(ms: Long) {
+        if (ms >= endMs) onLive() else onSeek(minOf(ms, endMs))
+    }
 
     // Ring look: every moment is the same effort-blue. A playable clip (a recording Ring still keeps)
     // is drawn at full strength; a history-only marker is a touch dimmer so you can see what will play.
@@ -109,7 +127,7 @@ fun Timeline24h(
     LaunchedEffect(playhead, trackWidth, startMs, endMs) {
         if (trackWidth > 0f) {
             val span = vp?.let { visibleSpanMs(it, trackWidth).toLong() } ?: DEFAULT_SPAN_MS
-            vp = viewportForSpan(scrubTime, span, trackWidth, window)
+            vp = viewportForSpan(scrubTime, span, trackWidth, padded(vp))
         }
     }
 
@@ -144,11 +162,11 @@ fun Timeline24h(
                             vp?.let { cur ->
                                 var nv = cur
                                 if (zoomChange != 1f) {
-                                    nv = zoom(nv, zoomChange, trackWidth, window)
+                                    nv = zoom(nv, zoomChange, trackWidth, padded(cur))
                                     moved = true
                                 }
                                 if (panChange.x != 0f) {
-                                    nv = pan(nv, panChange.x, trackWidth, window)
+                                    nv = pan(nv, panChange.x, trackWidth, padded(cur))
                                     totalDx += panChange.x
                                     if (abs(totalDx) > TAP_SLOP_PX) moved = true
                                 }
@@ -158,7 +176,7 @@ fun Timeline24h(
                         }
                         val v = vp
                         if (v != null) {
-                            if (moved) onSeek(v.centerMs) else onSeek(xToTime(down.position.x, v, trackWidth))
+                            if (moved) commit(v.centerMs) else commit(xToTime(down.position.x, v, trackWidth))
                         }
                     }
                 },

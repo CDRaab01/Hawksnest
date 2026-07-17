@@ -14,31 +14,52 @@ import {
   zoom,
 } from "../../lib/timelineViewport";
 
-/** Object label → PULSE channel tint (explicit classes so Tailwind keeps them). */
-const LABEL_COLOR: Record<string, string> = {
-  person: "bg-strength",
-  car: "bg-effort",
-  truck: "bg-effort",
-  dog: "bg-recovery",
-  cat: "bg-recovery",
-};
-const DEFAULT_COLOR = "bg-streak"; // motion / anything else
-
-function colorFor(label: string): string {
-  return LABEL_COLOR[label] ?? DEFAULT_COLOR;
-}
-
-/** Opening zoom: ~3h visible, clamped into the [10min, 24h] range. */
-const DEFAULT_SPAN_MS = 3 * HOUR_MS;
+/** Opening zoom: ~8h visible so the day reads at a glance (Ring-like), clamped into [10min, 24h]. */
+const DEFAULT_SPAN_MS = 8 * HOUR_MS;
 /** Movement under this many px counts as a tap (seek), not a pan. */
 const TAP_SLOP_PX = 6;
 
 /**
+ * The clamp window, padded past *now* by half the visible span, so "now" can sit at CENTER with
+ * the "Live" region filling the right half — the Ring layout. (Unpadded, the clamp pins now to
+ * the right edge and the Live region could never show.) Panning right naturally stops when now
+ * reaches center.
+ */
+function paddedWindow(
+  startMs: number,
+  endMs: number,
+  v: Viewport | null,
+  width: number,
+): TimeWindow {
+  const half = (v && width > 0 ? visibleSpanMs(v, width) : DEFAULT_SPAN_MS) / 2;
+  return { startMs, endMs: endMs + half };
+}
+
+/** Ring's centered header: "TODAY" for today, otherwise the scrubbed day's date. */
+function dayHeader(ms: number): string {
+  const day = new Date(ms);
+  const today = new Date();
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  if (sameDay(day, today)) return "TODAY";
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (sameDay(day, yesterday)) return "YESTERDAY";
+  return day
+    .toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
+    .toUpperCase();
+}
+
+/**
  * Ring-style scrubbable timeline: a center-anchored, zoomable + pannable strip.
  * Drag left/right to move through time; pinch / mouse-wheel to zoom (≈10 min →
- * 24 h). The playhead marks the current time — pinned at center while scrubbing,
- * at the right edge while live. A clean tap seeks to the tapped time; tapping an
- * event chip jumps to it. All the mapping/clamp math lives in `lib/timelineViewport`.
+ * 24 h). The day's "moments of action" render as solid effort-blue blocks —
+ * full-strength when a playable clip is kept, dimmer when history-only. The
+ * playhead is Ring's triangle marker; everything right of *now* is the dimmed
+ * "Live" region. A clean tap seeks to the tapped time; tapping a block jumps to
+ * it. All the mapping/clamp math lives in `lib/timelineViewport`.
  */
 export function Timeline24h({
   events,
@@ -46,19 +67,21 @@ export function Timeline24h({
   endMs,
   playhead,
   onSeek,
+  onLive,
 }: {
   events: CameraEvent[];
   startMs: number;
   endMs: number;
   playhead: number | "live";
   onSeek: (ms: number) => void;
+  /** Snap back to live — fired when a tap/drag lands in the "Live" region right of now. */
+  onLive?: () => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [vp, setVp] = useState<Viewport | null>(null);
   const drag = useRef<{ startX: number; startVp: Viewport; moved: boolean } | null>(null);
 
-  const win: TimeWindow = { startMs, endMs };
   const scrubTime = playhead === "live" ? endMs : playhead;
 
   // Measure the track width (and keep it current on resize).
@@ -81,7 +104,7 @@ export function Timeline24h({
         scrubTime,
         cur ? visibleSpanMs(cur, width) : DEFAULT_SPAN_MS,
         width,
-        { startMs, endMs },
+        paddedWindow(startMs, endMs, cur, width),
       ),
     );
     // scrubTime is derived from playhead/endMs — those cover it.
@@ -97,7 +120,7 @@ export function Timeline24h({
       if (width <= 0) return;
       e.preventDefault();
       const factor = Math.exp(-e.deltaY * 0.0015);
-      setVp((cur) => (cur ? zoom(cur, factor, width, { startMs, endMs }) : cur));
+      setVp((cur) => (cur ? zoom(cur, factor, width, paddedWindow(startMs, endMs, cur, width)) : cur));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -116,7 +139,13 @@ export function Timeline24h({
     if (!d) return;
     const dx = e.clientX - d.startX;
     if (Math.abs(dx) > TAP_SLOP_PX) d.moved = true;
-    setVp(pan(d.startVp, dx, width, win));
+    setVp(pan(d.startVp, dx, width, paddedWindow(startMs, endMs, d.startVp, width)));
+  }
+
+  /** Commit a scrub/tap time: at/past *now* means the Live region — snap back to live. */
+  function commit(ms: number) {
+    if (ms >= endMs && onLive) onLive();
+    else onSeek(Math.min(ms, endMs));
   }
 
   function onPointerUp(e: React.PointerEvent) {
@@ -126,25 +155,22 @@ export function Timeline24h({
     e.currentTarget.releasePointerCapture?.(e.pointerId);
     if (d.moved) {
       // Commit the pan: the time now under the center playhead.
-      if (vp) onSeek(vp.centerMs);
+      if (vp) commit(vp.centerMs);
     } else if (vp) {
       // Clean tap → seek to the tapped time.
       const rect = trackRef.current?.getBoundingClientRect();
-      if (rect) onSeek(xToTime(e.clientX - rect.left, vp, width));
+      if (rect) commit(xToTime(e.clientX - rect.left, vp, width));
     }
   }
 
   const scrubX = vp ? timeToX(scrubTime, vp, width) : width / 2;
+  const nowX = vp ? timeToX(endMs, vp, width) : width;
   const tickTimes = vp ? ticks(vp, width) : [];
-  const spanLabel = vp ? formatSpan(visibleSpanMs(vp, width)) : "";
 
   return (
     <div className="space-y-xs">
-      <div className="flex items-center justify-between">
-        <span className="caption-label text-ink-faint">
-          {playhead === "live" ? "Live" : clockTime(scrubTime)}
-        </span>
-        <span className="caption-label text-ink-faint">{events.length} events</span>
+      <div className="text-center font-display text-body font-bold tracking-wide text-ink">
+        {dayHeader(scrubTime)}
       </div>
 
       <div
@@ -159,7 +185,7 @@ export function Timeline24h({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        className="relative h-14 w-full cursor-ew-resize touch-none select-none overflow-hidden rounded-md bg-panel-high"
+        className="relative h-16 w-full cursor-ew-resize touch-none select-none overflow-hidden rounded-md bg-panel-high"
       >
         {/* Hour/minute ticks */}
         {vp &&
@@ -178,7 +204,9 @@ export function Timeline24h({
             );
           })}
 
-        {/* Event chips (all rendered; off-screen ones are clipped by overflow-hidden) */}
+        {/* Action blocks — solid effort-blue "moments", tall like Ring's. Full strength when a
+            playable clip is kept; dimmer when it's a history-only marker. (All rendered;
+            off-screen ones are clipped by overflow-hidden.) */}
         {vp &&
           events.map((ev) => {
             const left = timeToX(ev.startMs, vp, width);
@@ -189,40 +217,50 @@ export function Timeline24h({
                 key={ev.id}
                 type="button"
                 data-chip
-                title={`${ev.label} · ${clockTime(ev.startMs)}`}
+                title={`${ev.label} · ${clockTime(ev.startMs)}${ev.hasClip ? "" : " · no saved recording"}`}
                 aria-label={`${ev.label} at ${clockTime(ev.startMs)}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   onSeek(ev.startMs);
                 }}
                 style={{ left: `${left}px`, width: `${w}px` }}
-                className={`absolute bottom-1.5 top-6 rounded-sm ${colorFor(ev.label)} opacity-80 transition-opacity hover:opacity-100`}
+                className={`absolute bottom-2.5 top-2.5 rounded-sm bg-effort transition-opacity hover:opacity-100 ${
+                  ev.hasClip ? "opacity-100" : "opacity-60"
+                }`}
               />
             );
           })}
 
-        {/* Playhead — at center while scrubbing, at the right edge while live. */}
+        {/* "Live" region — everything right of now (endMs) is the not-yet-recorded future; dim it
+            and label it, so the centered playhead reads as "now" (the Ring layout). */}
+        {vp && nowX < width && (
+          <div
+            style={{ left: `${nowX}px`, width: `${width - nowX}px` }}
+            className="pointer-events-none absolute top-0 flex h-full items-center justify-center border-l border-recovery bg-black/35"
+          >
+            {width - nowX > 44 && (
+              <span className="font-body text-caption font-medium text-recovery">Live</span>
+            )}
+          </div>
+        )}
+
+        {/* Playhead — Ring's inward triangles top & bottom on a hairline; at center while
+            scrubbing, at the right edge (now) while live. */}
         <div
           style={{ left: `${scrubX}px` }}
-          className="pointer-events-none absolute top-0 h-full w-0.5 -translate-x-1/2 bg-white"
+          className="pointer-events-none absolute top-0 h-full w-0.5 -translate-x-1/2 bg-white/90"
         >
-          <div className="absolute -top-0.5 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-white" />
+          <div className="absolute -top-px left-1/2 h-0 w-0 -translate-x-1/2 border-x-[6px] border-t-[7px] border-x-transparent border-t-white" />
+          <div className="absolute -bottom-px left-1/2 h-0 w-0 -translate-x-1/2 border-x-[6px] border-b-[7px] border-x-transparent border-b-white" />
         </div>
       </div>
 
       <div className="flex items-center justify-between">
-        <span className="font-mono text-caption text-ink-faint">Drag to scrub · pinch to zoom</span>
-        <span className="font-mono text-caption text-ink-faint">{spanLabel} view</span>
+        <span className="caption-label text-ink-faint">
+          {playhead === "live" ? "Live" : clockTime(scrubTime)}
+        </span>
+        <span className="caption-label text-ink-faint">{events.length} moments</span>
       </div>
     </div>
   );
-}
-
-/** Compact span label for the zoom indicator ("45m", "3h", "1h 30m"). */
-function formatSpan(ms: number): string {
-  const totalMin = Math.max(1, Math.round(ms / 60_000));
-  if (totalMin < 60) return `${totalMin}m`;
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }

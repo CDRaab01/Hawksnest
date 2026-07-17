@@ -218,6 +218,7 @@ fun CameraPlayer(
             endMs = endMs,
             playhead = playhead,
             onSeek = ::seek,
+            onLive = { playhead = null },
         )
 
         TransportBar(

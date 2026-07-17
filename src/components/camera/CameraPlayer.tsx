@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { LogicalCamera } from "../../lib/cameraModel";
 import {
   fetchCameraEvents,
+  fetchHistory,
   recordingUrlAt,
   streamUrl,
   callService,
@@ -9,7 +10,9 @@ import {
 import { useEntity } from "../../store/entityStore";
 import type { CameraEvent } from "../../lib/cameraEvents";
 import { vodPositionSeconds } from "../../lib/cameraEvents";
+import { mergePlayable, motionBlocksFromHistory } from "../../lib/motionBlocks";
 import { ringEventsFromSelect } from "../../lib/ringEvents";
+import { snapshotUrl } from "../../lib/cameraUrl";
 import { LivePlayer } from "../LivePlayer";
 import { HlsPlayer } from "../HlsPlayer";
 import { CameraSwitcher } from "./CameraSwitcher";
@@ -71,10 +74,39 @@ export function CameraPlayer({
     };
   }, [isRing, cameraName, window.start, window.end]);
 
-  const events = useMemo(
-    () => (isRing ? ringEventsFromSelect(ringSelect, cameraName, window.end) : fetched),
-    [isRing, ringSelect, cameraName, window.end, fetched],
-  );
+  // Ring: the whole day's motion/ding "moments of action", folded from the binary_sensor
+  // recorder history (ring-mqtt's selector only carries the last ~5 playable clips).
+  // Best-effort — no history (older HA / no sensor) leaves this empty and the timeline
+  // degrades to just the playable events, never worse than before.
+  const [blocks, setBlocks] = useState<CameraEvent[]>([]);
+  useEffect(() => {
+    if (!isRing) return;
+    let active = true;
+    setPlayhead("live");
+    setBlocks([]);
+    const hours = Math.max(1, Math.round((window.end - window.start) / 3_600_000));
+    const history = (id: string | null, label: string) =>
+      id
+        ? fetchHistory(id, hours)
+            .then((pts) => motionBlocksFromHistory(pts, cameraName, label))
+            .catch(() => [] as CameraEvent[])
+        : Promise.resolve([] as CameraEvent[]);
+    void Promise.all([history(camera.motionId, "motion"), history(camera.dingId, "ding")]).then(
+      ([motion, ding]) => {
+        if (active) setBlocks([...motion, ...ding].sort((a, b) => a.startMs - b.startMs));
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [isRing, cameraName, camera.motionId, camera.dingId, window.start, window.end]);
+
+  const events = useMemo(() => {
+    if (!isRing) return fetched;
+    // The playable set (the ~5 clips Ring still keeps) overlaid on the day's motion blocks.
+    const playable = ringEventsFromSelect(ringSelect, cameraName, window.end);
+    return blocks.length ? mergePlayable(blocks, playable) : playable;
+  }, [isRing, ringSelect, cameraName, window.end, fetched, blocks]);
 
   const isLive = playhead === "live";
   const headTime = isLive ? window.end : playhead;
@@ -102,10 +134,19 @@ export function CameraPlayer({
     setPaused(false);
   }
 
-  // ring recorded playback: select the event, then stream the `_event` camera.
+  // ring recorded playback: select the event, then stream the `_event` camera. Only playable
+  // moments (hasClip — a recording Ring still keeps) resolve a stream; history-only motion
+  // markers render the honest "no saved recording" state instead.
   const [ringSrc, setRingSrc] = useState<string | null>(null);
   useEffect(() => {
-    if (!isRing || isLive || !selected || !camera.eventSelectId || !camera.eventStreamId) {
+    if (
+      !isRing ||
+      isLive ||
+      !selected ||
+      !selected.hasClip ||
+      !camera.eventSelectId ||
+      !camera.eventStreamId
+    ) {
       setRingSrc(null);
       return;
     }
@@ -167,14 +208,22 @@ export function CameraPlayer({
         </div>
       </div>
 
-      {isLive || !recordingSrc ? (
+      {isLive ? (
         <LivePlayer entity={camera.liveEntity} />
-      ) : (
+      ) : recordingSrc ? (
         <HlsPlayer
           src={recordingSrc}
           paused={paused}
           loop={!isRing}
           seekSeconds={seekSeconds}
+        />
+      ) : (
+        // Scrubbed to a past moment with no footage yet: either a playable clip is still
+        // resolving, or Ring never kept a recording for it — say so over the snapshot rather
+        // than snapping the frame back to the live feed ("show all, play recent").
+        <ScrubbedPlaceholder
+          snapshot={snapshotUrl(camera.snapshotEntity)}
+          resolving={selected?.hasClip === true}
         />
       )}
 
@@ -184,6 +233,7 @@ export function CameraPlayer({
         endMs={window.end}
         playhead={playhead}
         onSeek={seek}
+        onLive={() => setPlayhead("live")}
       />
 
       <TransportBar
@@ -196,6 +246,37 @@ export function CameraPlayer({
         onTogglePlay={() => setPaused((p) => !p)}
         onLive={() => setPlayhead("live")}
       />
+    </div>
+  );
+}
+
+/**
+ * The frame shown when the timeline is scrubbed to a past moment that has no playable footage —
+ * the camera's snapshot, dimmed, with an honest note. Ring/ring-mqtt only keeps recordings for
+ * the last handful of events, so most of the day's "moments of action" are markers, not clips:
+ * `resolving` distinguishes "a playable clip is still loading" from "this moment was never kept".
+ */
+function ScrubbedPlaceholder({
+  snapshot,
+  resolving,
+}: {
+  snapshot: string | null;
+  resolving: boolean;
+}) {
+  return (
+    <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-panel">
+      {snapshot && (
+        <img
+          src={snapshot}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+      <div className="absolute inset-0 flex items-center justify-center bg-black/45">
+        <span className="font-body text-body text-ink">
+          {resolving ? "Loading recording…" : "No saved recording for this moment"}
+        </span>
+      </div>
     </div>
   );
 }

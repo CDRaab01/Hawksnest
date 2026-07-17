@@ -55,21 +55,23 @@ describe("CameraPlayer (demo data)", () => {
     // Live by default — the demo clip plays in a <video> (after the async
     // stream URL resolves; until then a snapshot placeholder holds the frame).
     expect(await screen.findByLabelText("Camera footage")).toBeInTheDocument();
-    // The 24h scrubber renders and populates with synthesized events.
+    // The 24h scrubber renders and populates with synthesized events, under the Ring-style
+    // day header.
     expect(screen.getByRole("slider", { name: "Recording timeline" })).toBeInTheDocument();
-    expect(await screen.findByText(/\d+ events/)).toBeInTheDocument();
-    expect(Number((await screen.findByText(/\d+ events/)).textContent!.split(" ")[0]))
+    expect(screen.getByText("TODAY")).toBeInTheDocument();
+    expect(await screen.findByText(/\d+ moments/)).toBeInTheDocument();
+    expect(Number((await screen.findByText(/\d+ moments/)).textContent!.split(" ")[0]))
       .toBeGreaterThan(0);
     // Transport controls present.
-    expect(screen.getByRole("button", { name: "Previous event" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Next event" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous moment" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next moment" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Go live" })).toBeInTheDocument();
   });
 
   it("seeking to an event enters recorded mode; Live snaps back", async () => {
     const user = userEvent.setup();
     renderPlayer();
-    await screen.findByText(/\d+ events/);
+    await screen.findByText(/\d+ moments/);
 
     // Click the first event marker on the timeline → recorded playback.
     const markers = screen.getAllByRole("button", { name: /at / });
