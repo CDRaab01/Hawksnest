@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
 import { existsSync, readdirSync } from "node:fs";
+import { MOCK_HA_PORT } from "./mock-ha/port";
 
 const CI = !!process.env.CI;
 
@@ -53,7 +54,10 @@ export default defineConfig({
   webServer: [
     {
       command: "npm run mock-ha",
-      url: "http://localhost:8765/__scenario/health",
+      url: `http://localhost:${MOCK_HA_PORT}/__scenario/health`,
+      // Pass the port down so the spawned mock binds where the fixtures + control
+      // client expect it — override MOCK_HA_PORT to dodge a host-port collision.
+      env: { MOCK_HA_PORT: String(MOCK_HA_PORT) },
       reuseExistingServer: !CI,
       stdout: "ignore",
     },

@@ -78,3 +78,60 @@ export const baseEntities: HaStateObj[] = [
     attributes: { friendly_name: "Alarm" },
   },
 ];
+
+/** Option strings for the ring event selector — a kind word + parseable time,
+ *  like ring-mqtt's, so the app can plot the events at their real times. */
+export const ringEventOptions = (): string[] => [
+  `Motion ${ago(60)}`,
+  `Motion ${ago(150)}`,
+  `Ding ${ago(300)}`,
+];
+
+/**
+ * A ring-mqtt camera ("Front Gate") as its split HA entities: `_live`/`_snapshot`
+ * streams, the `_event` recorded-playback stream, the event selector (last ~3
+ * recordings), and motion/ding sensors. The app's `cameraModel` collapses these
+ * into one logical camera; used by the `ring-camera` scenario to exercise
+ * recorded-event playback. A factory so selector times stay fresh per reset.
+ */
+export const ringEntities = (): HaStateObj[] => {
+  const options = ringEventOptions();
+  return [
+    {
+      entity_id: "camera.front_gate_live",
+      state: "streaming",
+      attributes: { friendly_name: "Front Gate Live", icon: "mdi:cctv", entity_picture: "/demo-cam-1.svg" },
+      last_changed: ago(1),
+    },
+    {
+      entity_id: "camera.front_gate_snapshot",
+      state: "idle",
+      attributes: { friendly_name: "Front Gate Snapshot", entity_picture: "/demo-cam-1.svg" },
+      last_changed: ago(5),
+    },
+    {
+      entity_id: "camera.front_gate_event",
+      state: "idle",
+      attributes: { friendly_name: "Front Gate Event" },
+      last_changed: ago(60),
+    },
+    {
+      entity_id: "select.front_gate_event_select",
+      state: options[0],
+      attributes: { friendly_name: "Front Gate Event Select", options },
+      last_changed: ago(60),
+    },
+    {
+      entity_id: "binary_sensor.front_gate_motion",
+      state: "off",
+      attributes: { friendly_name: "Front Gate Motion", device_class: "motion" },
+      last_changed: ago(60),
+    },
+    {
+      entity_id: "binary_sensor.front_gate_ding",
+      state: "off",
+      attributes: { friendly_name: "Front Gate Ding", device_class: "occupancy" },
+      last_changed: ago(300),
+    },
+  ];
+};

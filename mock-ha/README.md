@@ -7,9 +7,13 @@ protocol to drive Hawksnest's **real** `haSource` against scripted scenarios —
 same process + contract is meant to be reused by the Android instrumented tests.
 
 ```bash
-npm run mock-ha                      # PORT=8765 (override with PORT=…)
+npm run mock-ha                      # port 8765 (override with MOCK_HA_PORT= or PORT=)
 curl localhost:8765/__scenario/health
 ```
+
+The port is defined once in `mock-ha/port.ts` (default 8765) and read by the server, the
+control client, the Playwright `webServer`, and the E2E fixtures — set `MOCK_HA_PORT` to move
+them all together (needed on the Dragonfly host, where 8765 is taken by the kidbot container).
 
 The app connects when its credentials point at the mock, e.g.
 `localStorage["hawksnest.ha"] = {"url":"http://localhost:8765","token":"e2e-token"}`
@@ -33,6 +37,7 @@ Named, requested via the control API. Each is a fresh, isolated copy on reset.
 | `default` | Everything healthy; locks confirm after `delayMs` (600 default). |
 | `lock-jam` | `lock.lock` echoes `jammed` — never reaches `locked`. |
 | `bad-token` | Auth always fails → app shows "Invalid access token." |
+| `ring-camera` | Adds a ring-mqtt split camera (Front Gate: `_live`/`_snapshot`/`_event` + event selector + motion/ding) for recorded-playback specs. Pair with `/stream-outcome` to script failures. |
 
 ## Control API
 
@@ -45,11 +50,18 @@ origin can reach the REST endpoints.
 | `POST /reset` | `{scenario}` | Load a scenario; push its full state to live clients. |
 | `POST /state` | `{entity_id, state, attributes?}` | Push one state change over the live subscription (e.g. fire a doorbell `_ding`). |
 | `POST /service-outcome` | `{domain, service, entity_id?, outcome, delayMs?, state?}` | Script how the next matching `call_service` resolves. |
+| `POST /stream-outcome` | `{entity_id?, outcome, delayMs?}` | Script how `camera/stream` resolves for an entity (omit `entity_id` to apply to all). |
 | `POST /disconnect` | — | Drop all live sockets; the app auto-reconnects. |
 | `GET /calls` | — | The recorded `call_service` log (round-trip assertions). |
+| `GET /stats` | — | `{connections, sessions, streamRequests}` — reconnect + stream-retry assertions. |
 
 `outcome` ∈ `confirm` (echo the resulting state) · `jammed` (echo `jammed`) ·
 `reject` (fail the call → card error) · `silent` (ack, never echo → pending hangs).
+
+Stream `outcome` ∈ `ok` (mock HLS URL, optionally after `delayMs`) · `error` (fail the
+command) · `timeout` (never reply — the app's own 15 s bound steps down; prefer `error`
+in specs for speed). Delayed service echoes are cancelled on `reset`, so one test's
+in-flight echo can never land in the next test's scenario.
 
 ## Protocol notes
 

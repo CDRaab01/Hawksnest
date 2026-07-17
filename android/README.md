@@ -9,7 +9,7 @@ Home Assistant stays the backend/brain. The app talks to HA's WebSocket + REST A
 (no Hawksnest server of its own), reaching HA through the existing Hawksnest reverse-proxy host
 over Tailscale, authenticated with a HA **long-lived access token**.
 
-## Status — Phases 0–3 done; Phase 4 (push) pending
+## Status — Phases 0–4 code-complete (push on-device verify pending)
 
 What's here today: a live HA client, not a scaffold. The full PULSE theme (`ui/theme/`) and core
 components (`ui/components/`) are in place, plus:
@@ -21,8 +21,28 @@ components (`ui/components/`) are in place, plus:
 - **Phase 3** ✅ — camera snapshots + live MJPEG (`ui/cameras/`). (An earlier biometric gate + alarm
   PIN keypad on unlock/disarm were removed — the home owner found the friction unwanted; disarm/unlock
   now fire directly. A panel that enforces HA `code_format` must allow codeless disarm from the app.)
-- **Phase 4** ⏳ — push notifications (custom FCM pipeline + owner-authored HA automation). Not yet
-  built.
+- **Control feel** ✅ — every user-facing control call goes through `core/ha/ControlGate`
+  (crash-safe: failures land on one app-level snackbar with a reject buzz; honest pending via
+  `pendingControls`). Locks are a **slide-to-act** track (`ui/components/SlideToAct.kt` — the drag
+  is the confirmation; the thumb holds a spinner until HA's echo; no accidental unlocks).
+  Lights/switches/fans are **optimistic** (the thumb follows the finger; the echo reconciles;
+  failures snap back). Semantic haptics throughout (`ui/components/Haptics.kt`).
+- **Devices v2** ✅ — the Devices tab redesigned as a single-column, three-tier rhythm per room
+  (featured lock/climate/alarm cards; compact control rows with inline optimistic switches;
+  read-only state rows), PULSE segment chips, room summaries, search, and long-press →
+  rename/hide (persisted on-device, `DevicePrefsStore`). The Ring-vs-ring-mqtt double exposure
+  is deduped centrally at the source layer (`core/logic/Dedupe.kt`) so every screen sees one
+  entity per physical device.
+- **Phase 4** ✅ (code) — push notifications via **self-hosted ntfy** (not FCM: no Google
+  dependency, tailnet-only). `push/NtfyPushService` is a `specialUse` foreground service that holds
+  one streaming connection to `<base>/<topic>/json` and raises per-kind notifications
+  (`PushNotifier`); `NtfyMessage`/`PushRoute` (parse + doorbell→cameras / alarm→home routing) are
+  pure and JVM-unit-tested. Off by default — opt in under **Settings → Notifications** (requests
+  `POST_NOTIFICATIONS`); `BootReceiver` restarts it after a reboot if enabled. The ntfy server +
+  the HA automations that publish doorbell/alarm events live in the **`hawksnest-automation`** repo
+  (`docs/ntfy-push.md`). **On-device runtime** (delivery with the app closed, battery, reconnect,
+  the notification tap) is the one seam unit tests can't cover — smoke-test it on the phone before
+  relying on it (see the camera smoke checklist's "push fires" item).
 
 > Coverage today is strongest on the pure logic (`core/logic`, `core/ha`), which is JVM-unit-tested.
 > The Compose UI also runs through the **Sift design-slop audit** (below).
@@ -119,15 +139,15 @@ needed if the Sift repo is ever made private.
 
 ## Networking note
 
-Hawksnest reaches HA as cleartext HTTP to a private tailnet host, which Android blocks by default.
-`res/xml/network_security_config.xml` permits cleartext via a broad `base-config`.
+Hawksnest reaches HA **only over HTTPS**. `res/xml/network_security_config.xml` sets
+`cleartextTrafficPermitted="false"` — cleartext HTTP is disallowed in release builds.
 
-This is a **deliberate Phase-0 choice, not an oversight**: the HA host is user-entered and may be a
-MagicDNS name (`*.ts.net`) *or* a raw CGNAT IP (`100.x.y.z`). A scoped `<domain-config>` can match
-the hostname form but **not** a bare IP, so tightening it risks silently breaking lock/disarm
-connectivity for IP-based setups — unacceptable for a security app. Recommended hardening, in order:
-1. Front the proxy with TLS (`https`/`wss`) and set `cleartextTrafficPermitted="false"` — best.
-2. If staying cleartext, switch to the scoped `<domain-config>` example in the file **and** always
-   use the MagicDNS hostname (never the bare IP).
+The proxy is fronted by **Tailscale Serve** (TLS at `https://<host>.ts.net:8443`, a real
+Let's Encrypt cert, tailnet-only; see `deploy/windows/hawksnest-serve.ps1`). Point **Settings →
+HA URL** at that HTTPS address. (A `100.x` Tailscale IP won't work now — cleartext is off and the
+cert is issued for the MagicDNS name — so always use the `*.ts.net:8443` hostname.)
 
-See the comments in `res/xml/network_security_config.xml`.
+The earlier deliberate `cleartext=true` existed because the HA host could be a bare CGNAT IP a
+scoped `<domain-config>` can't match; TLS fronting the proxy removed that constraint. A
+**debug-only** override (`src/debug/res/xml/network_security_config.xml`) still permits cleartext to
+`10.0.2.2`/`localhost` for the instrumented mock-HA — it never ships in a release APK.

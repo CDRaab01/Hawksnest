@@ -1,7 +1,51 @@
 import type { HassEntity } from "./ha";
+import { parseHaTime } from "./relativeTime";
 
 const PROXY = "/api/camera_proxy/";
 const STREAM = "/api/camera_proxy_stream/";
+
+/** HA camera `supported_features` bit: the camera can produce a stream. */
+const CAMERA_FEATURE_STREAM = 2;
+
+/**
+ * True when a WebRTC live session is worth attempting for this camera.
+ *
+ * Modern HA (2024+) dropped the `frontend_stream_type` state attribute and
+ * serves WebRTC via its bundled go2rtc for any STREAM-capable camera, so gate
+ * on the STREAM feature bit — not the now-absent attribute (gating on it made
+ * the web player skip WebRTC entirely and crawl down the HLS→MJPEG ladder:
+ * the ~60s live-view paint). Crucially, attempt WebRTC when
+ * `supported_features` is present-with-STREAM OR absent, and only bail on a
+ * definite image-only value: a battery camera's entity churns and momentarily
+ * publishes without attributes, and treating "absent" as "no" flickers the
+ * transport off WebRTC mid-negotiation (the Android port hit exactly this —
+ * see CameraPlayerViewModel.canWebRtc). A genuinely failed negotiation still
+ * steps down via the player's watchdog.
+ */
+export function canStreamWebRtc(entity: HassEntity): boolean {
+  const f = entity.attributes.supported_features;
+  if (f === undefined || f === null) return true; // absent → worth a try
+  const n = Number(f);
+  if (!Number.isFinite(n)) return true;
+  return (n & CAMERA_FEATURE_STREAM) !== 0;
+}
+
+/**
+ * Epoch-ms of the freshest thing we know about this camera's snapshot.
+ * `last_changed` is useless here — a camera's *state* rarely transitions, so it
+ * reads hours-stale even on a live feed (the "15h ago" bug, fixed on Android in
+ * HomeViewModel). Prefer a `timestamp` attribute IF the capture time is ever
+ * exposed on the entity (today ring-mqtt doesn't), then `last_updated` (bumps
+ * on each snapshot republish), then `last_changed` as the final fallback.
+ */
+export function snapshotFreshnessMs(entity: HassEntity): number | null {
+  const ts = entity.attributes.timestamp;
+  return (
+    parseHaTime(typeof ts === "string" || typeof ts === "number" ? ts : null) ??
+    parseHaTime(entity.last_updated) ??
+    parseHaTime(entity.last_changed)
+  );
+}
 
 /**
  * Resolve a root-relative HA path (`/api/...`) against the connected Home

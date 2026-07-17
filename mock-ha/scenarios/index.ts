@@ -1,5 +1,5 @@
 import type { Scenario } from "../wsProtocol";
-import { baseEntities } from "./entities";
+import { baseEntities, ringEntities } from "./entities";
 import { buildRegistries, buildHistory } from "./registries";
 
 const HA_VERSION = "2024.12.0";
@@ -34,6 +34,17 @@ export const scenarios: Record<string, () => Scenario> = {
 
   /** Auth always fails — drives the "Invalid access token." path. */
   "bad-token": () => base({ rejectAuth: true }),
+
+  /** Adds a ring-mqtt split camera (Front Gate) with an event selector, for the
+   *  recorded-playback specs (pair with `setStreamOutcome` to script failures). */
+  "ring-camera": () => {
+    const entities = [...baseEntities, ...ringEntities()];
+    return base({
+      entities,
+      registries: buildRegistries(entities),
+      history: buildHistory(entities),
+    });
+  },
 };
 
 export function getScenario(name: string): Scenario {

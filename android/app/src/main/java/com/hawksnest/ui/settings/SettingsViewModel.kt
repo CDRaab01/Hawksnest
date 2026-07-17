@@ -2,10 +2,14 @@ package com.hawksnest.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.content.Context
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
+import com.hawksnest.push.NtfyPushService
+import com.hawksnest.push.PushSettings
 import com.hawksnest.util.CredentialStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,11 +32,29 @@ enum class Reachability { Idle, Checking, Reachable, Unreachable }
 class SettingsViewModel @Inject constructor(
     private val credentialStore: CredentialStore,
     private val connectionManager: ConnectionManager,
+    private val pushSettings: PushSettings,
+    @ApplicationContext private val appContext: Context,
     okHttpClient: OkHttpClient,
 ) : ViewModel() {
 
     val status: StateFlow<ConnectionStatus> = connectionManager.state.status
     val error: StateFlow<String?> = connectionManager.state.error
+
+    /** Whether push notifications are enabled (the foreground ntfy listener). */
+    val pushEnabled: StateFlow<Boolean> = pushSettings.enabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /**
+     * Persist the push preference and start/stop the listener. The caller (the
+     * Settings UI) is responsible for having obtained POST_NOTIFICATIONS first
+     * when turning on — without it the service runs but its notifications no-op.
+     */
+    fun setPushEnabled(on: Boolean) {
+        viewModelScope.launch {
+            pushSettings.setEnabled(on)
+            if (on) NtfyPushService.start(appContext) else NtfyPushService.stop(appContext)
+        }
+    }
 
     val savedUrl: StateFlow<String?> = credentialStore.haUrl
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)

@@ -169,4 +169,91 @@ describe("mock HA ws protocol", () => {
     expect(event.id).toBe(2);
     expect(event.event.a["light.living_room"].s).toBe("on");
   });
+
+  it("a reset cancels in-flight delayed service echoes (no cross-scenario bleed)", async () => {
+    const h = authed();
+    h.session.handleMessage({ type: "subscribe_entities", id: 2 });
+    // Schedule a delayed echo, then reset before it lands.
+    h.hub.setServiceOutcome({ domain: "light", service: "turn_on", outcome: "confirm", delayMs: 5 });
+    h.session.handleMessage({
+      type: "call_service",
+      id: 3,
+      domain: "light",
+      service: "turn_on",
+      target: { entity_id: "light.living_room" },
+    });
+    h.hub.reset(getScenario("default"));
+    await new Promise((r) => setTimeout(r, 15));
+    h.session.handleMessage({ type: "get_states", id: 4 });
+    const result = h.last("result") as { result: { entity_id: string; state: string }[] };
+    expect(result.result.find((e) => e.entity_id === "light.living_room")?.state).toBe("off");
+  });
+
+  describe("camera/stream outcomes", () => {
+    it("succeeds with the mock HLS url by default", () => {
+      const h = authed();
+      h.session.handleMessage({ type: "camera/stream", id: 9, entity_id: "camera.front_door" });
+      expect(h.last("result")).toMatchObject({
+        id: 9,
+        success: true,
+        result: { url: "/api/hls/mock/master.m3u8" },
+      });
+    });
+
+    it("a scripted `error` outcome fails the command for that entity only", () => {
+      const h = authed();
+      h.hub.setStreamOutcome({ entity_id: "camera.front_gate_event", outcome: "error" });
+      h.session.handleMessage({ type: "camera/stream", id: 10, entity_id: "camera.front_gate_event" });
+      expect(h.last("result")).toMatchObject({
+        id: 10,
+        success: false,
+        error: { code: "start_stream_failed" },
+      });
+      h.session.handleMessage({ type: "camera/stream", id: 11, entity_id: "camera.front_door" });
+      expect(h.last("result")).toMatchObject({ id: 11, success: true });
+    });
+
+    it("a scripted `timeout` outcome never replies (the client's own bound steps down)", async () => {
+      const h = authed();
+      h.hub.setStreamOutcome({ entity_id: "camera.front_gate_event", outcome: "timeout" });
+      const before = h.sent.length;
+      h.session.handleMessage({ type: "camera/stream", id: 12, entity_id: "camera.front_gate_event" });
+      await tick();
+      expect(h.sent.slice(before)).toHaveLength(0);
+    });
+
+    it("a `default`-keyed outcome applies to any entity, and a reset restores ok", () => {
+      const h = authed();
+      h.hub.setStreamOutcome({ outcome: "error" });
+      h.session.handleMessage({ type: "camera/stream", id: 13, entity_id: "camera.backyard" });
+      expect(h.last("result")).toMatchObject({ id: 13, success: false });
+      h.hub.reset(getScenario("default"));
+      h.session.handleMessage({ type: "camera/stream", id: 14, entity_id: "camera.backyard" });
+      expect(h.last("result")).toMatchObject({ id: 14, success: true });
+    });
+  });
+
+  it("the ring-camera scenario carries the split entities + a populated event selector", () => {
+    const h = authed("ring-camera");
+    h.session.handleMessage({ type: "get_states", id: 20 });
+    const result = h.last("result") as { result: { entity_id: string; attributes: Record<string, unknown> }[] };
+    const ids = result.result.map((e) => e.entity_id);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "camera.front_gate_live",
+        "camera.front_gate_snapshot",
+        "camera.front_gate_event",
+        "select.front_gate_event_select",
+        "binary_sensor.front_gate_motion",
+        "binary_sensor.front_gate_ding",
+      ]),
+    );
+    const select = result.result.find((e) => e.entity_id === "select.front_gate_event_select")!;
+    const options = select.attributes.options as string[];
+    expect(options.length).toBeGreaterThanOrEqual(3);
+    // Times must be parseable so the app plots events at their real times.
+    for (const opt of options) {
+      expect(Number.isFinite(Date.parse(opt.replace(/^[A-Za-z\s-]+/, "").trim()))).toBe(true);
+    }
+  });
 });

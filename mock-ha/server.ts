@@ -3,7 +3,7 @@
  * (driven by wsProtocol.ts), the REST surface the app touches under `/api/...`,
  * and a `/__scenario/*` control API the E2E specs use to script behaviour.
  *
- *   npm run mock-ha            # PORT=8765 by default
+ *   npm run mock-ha            # port 8765 by default (override: MOCK_HA_PORT or PORT)
  *   curl localhost:8765/__scenario/health
  *
  * No imports from `src/` — this is a faithful generic HA stand-in that the web
@@ -14,8 +14,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { WebSocketServer } from "ws";
 import { MockHub, Session, type Transport } from "./wsProtocol";
 import { getScenario } from "./scenarios";
+import { MOCK_HA_PORT } from "./port";
 
-const PORT = Number(process.env.PORT ?? 8765);
+const PORT = MOCK_HA_PORT;
 const hub = new MockHub(getScenario(process.env.MOCK_SCENARIO ?? "default"));
 
 // --- helpers ---------------------------------------------------------------
@@ -94,6 +95,15 @@ async function handleHttp(req: IncomingMessage, res: ServerResponse): Promise<vo
     });
     return json(res, 200, { ok: true });
   }
+  if (path === "/__scenario/stream-outcome" && method === "POST") {
+    const b = asRecord(await readBody(req));
+    hub.setStreamOutcome({
+      entity_id: b.entity_id ? str(b.entity_id) : undefined,
+      outcome: str(b.outcome) as "ok" | "error" | "timeout",
+      delayMs: typeof b.delayMs === "number" ? b.delayMs : undefined,
+    });
+    return json(res, 200, { ok: true });
+  }
   if (path === "/__scenario/disconnect" && method === "POST") {
     hub.disconnectAll();
     return json(res, 200, { ok: true });
@@ -102,7 +112,11 @@ async function handleHttp(req: IncomingMessage, res: ServerResponse): Promise<vo
     return json(res, 200, hub.calls);
   }
   if (path === "/__scenario/stats" && method === "GET") {
-    return json(res, 200, { connections: hub.connections, sessions: hub.sessionCount });
+    return json(res, 200, {
+      connections: hub.connections,
+      sessions: hub.sessionCount,
+      streamRequests: hub.streamRequests,
+    });
   }
 
   // ---- REST the app touches ----

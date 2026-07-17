@@ -4,6 +4,8 @@ import {
   snapshotUrlAt,
   streamUrl,
   isCameraLive,
+  canStreamWebRtc,
+  snapshotFreshnessMs,
 } from "../cameraUrl";
 import type { HassEntity } from "../ha";
 
@@ -75,5 +77,63 @@ describe("cameraUrl", () => {
     expect(isCameraLive(cam())).toBe(true);
     expect(isCameraLive(cam({ state: "unavailable" }))).toBe(false);
     expect(isCameraLive(cam({ attributes: {} }))).toBe(false);
+  });
+});
+
+describe("canStreamWebRtc", () => {
+  const withFeatures = (supported_features?: unknown) =>
+    cam({
+      attributes: {
+        entity_picture: "/api/camera_proxy/camera.front_door?token=abc123",
+        ...(supported_features !== undefined ? { supported_features } : {}),
+      },
+    });
+
+  it("attempts WebRTC when the STREAM bit is set", () => {
+    expect(canStreamWebRtc(withFeatures(2))).toBe(true);
+    expect(canStreamWebRtc(withFeatures(3))).toBe(true);
+    expect(canStreamWebRtc(withFeatures("2"))).toBe(true);
+  });
+
+  it("bails only on a definite image-only camera", () => {
+    expect(canStreamWebRtc(withFeatures(0))).toBe(false);
+    expect(canStreamWebRtc(withFeatures(1))).toBe(false); // ON_OFF only
+  });
+
+  it("treats an absent or junk attribute as worth a try (battery-cam churn)", () => {
+    // Modern HA dropped frontend_stream_type; battery cams also momentarily
+    // publish without attributes — absent must never disable the tier.
+    expect(canStreamWebRtc(withFeatures(undefined))).toBe(true);
+    expect(canStreamWebRtc(withFeatures(null))).toBe(true);
+    expect(canStreamWebRtc(withFeatures("banana"))).toBe(true);
+  });
+});
+
+describe("snapshotFreshnessMs", () => {
+  it("prefers a timestamp attribute when present", () => {
+    const e = cam({
+      attributes: {
+        entity_picture: "/x",
+        timestamp: "2026-07-13T10:00:00+00:00",
+      },
+      last_updated: "2026-07-13T09:00:00+00:00",
+      last_changed: "2026-07-13T08:00:00+00:00",
+    });
+    expect(snapshotFreshnessMs(e)).toBe(Date.parse("2026-07-13T10:00:00+00:00"));
+  });
+
+  it("falls back to last_updated over last_changed (snapshot republish bumps it)", () => {
+    const e = cam({
+      last_updated: "2026-07-13T09:00:00+00:00",
+      last_changed: "2026-07-13T01:00:00+00:00",
+    });
+    expect(snapshotFreshnessMs(e)).toBe(Date.parse("2026-07-13T09:00:00+00:00"));
+  });
+
+  it("uses last_changed as the final fallback and null when nothing parses", () => {
+    expect(snapshotFreshnessMs(cam({ last_changed: "2026-07-13T01:00:00+00:00" }))).toBe(
+      Date.parse("2026-07-13T01:00:00+00:00"),
+    );
+    expect(snapshotFreshnessMs(cam())).toBeNull();
   });
 });

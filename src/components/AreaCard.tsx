@@ -82,16 +82,31 @@ interface AreaCardProps {
  * few at-a-glance highlight chips (unlocked / motion / lights on / cameras / temp). Drills into the
  * area detail. Diagnostic entities are excluded so counts + highlights reflect real controls.
  */
+/** States that read as "active" for the room summary (mirrors Devices v2). */
+const ACTIVE_STATES = new Set([
+  "on",
+  "unlocked",
+  "open",
+  "opening",
+  "playing",
+  "heat",
+  "cool",
+]);
+
 export function AreaCard({ group, index }: AreaCardProps) {
   const channel = channelForIndex(index);
   const categories = useEntityCategories();
   const entities = group.entities.filter((e) => !(e.entity_id in categories));
   const count = entities.length;
+  const activeCount = entities.filter((e) => ACTIVE_STATES.has(e.state)).length;
   const highlights = roomHighlights(entities);
   const RoomIcon = ROOM_ICON[roomIconKey(group.area)] ?? ROOM_ICON.default;
 
   return (
-    <Link to={`/area/${encodeURIComponent(group.area)}`}>
+    <Link
+      to={`/area/${encodeURIComponent(group.area)}`}
+      className="block transition-transform duration-fast ease-ease active:scale-[0.98]"
+    >
       <PanelCard tint={channel} className="p-lg">
         <div className="flex items-center gap-md">
           <div
@@ -106,6 +121,9 @@ export function AreaCard({ group, index }: AreaCardProps) {
             <div className="truncate font-display text-title text-ink">{group.area}</div>
             <div className="font-body text-caption text-ink-dim">
               {count} {count === 1 ? "device" : "devices"}
+              {activeCount > 0 && (
+                <span className={CHANNEL_TEXT[channel]}> · {activeCount} on</span>
+              )}
             </div>
             {highlights.length > 0 && (
               <div className="flex flex-wrap gap-xs pt-xs">

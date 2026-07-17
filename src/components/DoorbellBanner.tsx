@@ -45,7 +45,11 @@ export function DoorbellBanner() {
 
   return (
     <div className="fixed inset-x-0 top-0 z-[60] flex justify-center p-md">
-      <div className="flex w-full max-w-md items-center gap-md rounded-lg border border-hairline bg-panel-high px-lg py-md shadow-lg">
+      {/* Keyed by the press time so a fresh ding re-runs the spring entrance. */}
+      <div
+        key={press.whenMs}
+        className="flex w-full max-w-md items-center gap-md rounded-lg border border-hairline bg-panel-high px-lg py-md shadow-lg animate-banner-in motion-reduce:animate-none"
+      >
         <BellRing className="shrink-0 text-recovery" size={22} />
         <div className="min-w-0 flex-1">
           <div className="font-display text-body text-ink">Doorbell</div>

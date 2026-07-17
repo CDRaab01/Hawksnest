@@ -1,5 +1,6 @@
 import { test as base, expect, type Page } from "@playwright/test";
 import { MockControl } from "../mock-ha/controlClient";
+import { MOCK_HA_PORT } from "../mock-ha/port";
 
 /** localStorage key the app reads credentials from (src/store/credentials.ts). */
 const CREDS_KEY = "hawksnest.ha";
@@ -35,7 +36,7 @@ export const test = base.extend<Fixtures>({
       ({ key, creds }) => {
         window.localStorage.setItem(key, creds);
       },
-      { key: CREDS_KEY, creds: JSON.stringify({ url: "http://localhost:8765", token: "e2e-token" }) },
+      { key: CREDS_KEY, creds: JSON.stringify({ url: `http://localhost:${MOCK_HA_PORT}`, token: "e2e-token" }) },
     );
     await run(page);
   },

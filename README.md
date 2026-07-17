@@ -59,9 +59,10 @@ labels** (HA's raw "Lock Current status …" → "Front Door"):
 
 - **Home** (`/`) — pinned favorites (large cards) above an **area hub** (`src/config/favorites.ts`).
 - **Cameras** — a **Ring-style player** (tap any camera): on-demand low-latency live
-  (**WebRTC** via `camera/webrtc/offer` → HLS → MJPEG → snapshot), a scrubbable **timeline** of
-  recorded events, an in-player camera switcher, and transport (prev/next event, play/pause,
-  snap-to-Live). Plus an app-wide **doorbell banner** that fires on a camera's `_ding` and opens its
+  (**WebRTC** via `camera/webrtc/offer` → HLS → MJPEG → snapshot), a **live-scrub timeline** of
+  recorded events (dragging previews the footage in real time, forward and reverse; every block
+  is a playable recording), an in-player camera switcher, and transport (prev/next moment,
+  play/pause, snap-to-Live). Plus an app-wide **doorbell banner** that fires on a camera's `_ding` and opens its
   live view. The camera backend is **ring-mqtt** (Ring devices over MQTT + go2rtc): its split
   entities (`_live`/`_snapshot`/`_event` + event-selector/ding/motion) are collapsed into one
   logical camera (`src/lib/cameraModel.ts`), and recorded playback uses the **event selector**
@@ -121,6 +122,12 @@ Playwright drives the real app in Chromium against two backends:
 `npm run test:e2e` starts both servers automatically. In the cloud sandbox it uses the
 pre-installed Chromium; in CI the advisory `e2e` job installs Playwright's managed browser.
 
+### Camera live path (manual)
+
+The one seam automation can't reach — WebRTC (web) / LL-HLS (Android) live playback against real
+go2rtc — has a per-release smoke checklist in [`docs/CAMERA-SMOKE.md`](docs/CAMERA-SMOKE.md). Run it
+before releasing anything that touched the camera stack or the nginx camera proxy.
+
 ## Layout
 
 ```
@@ -153,6 +160,9 @@ until HA confirms.
 
 ## Next phases
 
-OAuth (replacing the long-lived token), light theme, live camera streams, and more first-class
-domains. (Phase 4 delivered entity detail + history, cover/climate/media_player/fan cards,
-drag-and-drop favorites reordering, and the installable PWA.)
+The sequenced 1.0 plan lives in [V1.md](V1.md); remaining before the 1.0 bump: ntfy push
+prod-apply + on-device smoke, then the version bump. v1.1: OAuth to HA (replacing the
+long-lived token), wall-tablet kiosk mode. (Phase 4 delivered entity detail + history,
+cover/climate/media_player/fan cards, drag-and-drop favorites reordering, and the installable
+PWA; the V1 gates added TLS + cleartext-off, Keystore-wrapped token, light theme, the PWA
+update toast, and the camera smoke checklist.)

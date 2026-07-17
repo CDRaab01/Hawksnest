@@ -4,9 +4,10 @@
  * outcome, drop the socket, read the call log). Mirrors the Android contract.
  */
 import type { Outcome, ServiceCall } from "./wsProtocol";
+import { MOCK_HA_PORT } from "./port";
 
 export class MockControl {
-  constructor(private base = "http://localhost:8765") {}
+  constructor(private base = `http://localhost:${MOCK_HA_PORT}`) {}
 
   private async post(path: string, body?: unknown): Promise<void> {
     const res = await fetch(`${this.base}${path}`, {
@@ -39,6 +40,15 @@ export class MockControl {
     return this.post("/__scenario/service-outcome", input);
   }
 
+  /** Script how `camera/stream` resolves for an entity (or `"default"` for all). */
+  setStreamOutcome(input: {
+    entity_id?: string;
+    outcome: "ok" | "error" | "timeout";
+    delayMs?: number;
+  }): Promise<void> {
+    return this.post("/__scenario/stream-outcome", input);
+  }
+
   /** Close all live sockets; the app auto-reconnects. */
   disconnect(): Promise<void> {
     return this.post("/__scenario/disconnect");
@@ -50,9 +60,14 @@ export class MockControl {
     return (await res.json()) as ServiceCall[];
   }
 
-  /** Live + total connection counts, for deterministic reconnect assertions. */
-  async stats(): Promise<{ connections: number; sessions: number }> {
+  /** Live + total connection counts and the `camera/stream` request log, for
+   *  deterministic reconnect/retry assertions. */
+  async stats(): Promise<{ connections: number; sessions: number; streamRequests: string[] }> {
     const res = await fetch(`${this.base}/__scenario/stats`);
-    return (await res.json()) as { connections: number; sessions: number };
+    return (await res.json()) as {
+      connections: number;
+      sessions: number;
+      streamRequests: string[];
+    };
   }
 }

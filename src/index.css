@@ -36,6 +36,14 @@
   }
 }
 
+/* Tile → player View Transition (camera overlay). Only the named pair morphs:
+   the root snapshot is pinned so the rest of the page doesn't cross-fade. The
+   overlay store skips the transition entirely under prefers-reduced-motion. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
 @layer components {
   /* Uppercase, wide-tracked instrument captions (Inter label style). */
   .caption-label {

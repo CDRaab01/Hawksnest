@@ -6,10 +6,10 @@ import com.hawksnest.config.overrides
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.HassEntity
-import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.resolveName
+import com.hawksnest.ui.devices.controlLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -65,22 +65,20 @@ class AutomationsViewModel @Inject constructor(
         state.status.map { it == ConnectionStatus.DEMO }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    /** Enable/disable the automation (non-optimistic — the entity echo flips the switch). */
+    /** Enable/disable the automation — crash-safe via the control gate (the entity echo flips
+     *  the switch; failures land on the app snackbar). */
     fun setEnabled(entityId: String, desired: Boolean) {
-        viewModelScope.launch {
-            connection.callService(
-                "automation",
-                if (desired) "turn_on" else "turn_off",
-                ServiceData(entityId = entityId),
-            )
-        }
+        connection.control(
+            entityId,
+            if (desired) "turn_on" else "turn_off",
+            label = controlLabel(connection, entityId),
+        )
     }
 
-    /** Run the automation now (HA's `automation.trigger`). */
+    /** Run the automation now (HA's `automation.trigger`), crash-safe. The `last_triggered`
+     *  attribute updating is the echo that clears pending. */
     fun run(entityId: String) {
-        viewModelScope.launch {
-            connection.callService("automation", "trigger", ServiceData(entityId = entityId))
-        }
+        connection.control(entityId, "trigger", label = controlLabel(connection, entityId))
     }
 
     /** Delete an automation via the Config API (live HA REST; in-memory in demo). */

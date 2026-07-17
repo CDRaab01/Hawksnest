@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff } from "lucide-react";
+import { go2rtcWsUrl } from "../../lib/go2rtc";
 
 /**
  * Push-to-talk for a Ring camera, over the DEDICATED go2rtc (native `ring:`
@@ -17,11 +18,6 @@ import { Mic, MicOff } from "lucide-react";
  * unavailable the button disables itself rather than failing on press.
  */
 type State = "idle" | "connecting" | "talking" | "error";
-
-function wsUrl(src: string): string {
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.host}/go2rtc/api/ws?src=${encodeURIComponent(src)}`;
-}
 
 export function TalkButton({ src }: { src: string }) {
   const [state, setState] = useState<State>("idle");
@@ -58,7 +54,7 @@ export function TalkButton({ src }: { src: string }) {
       // Send the mic up; we don't need the camera's media back for talk.
       for (const track of mic.getTracks()) pc.addTrack(track, mic);
 
-      const ws = new WebSocket(wsUrl(src));
+      const ws = new WebSocket(go2rtcWsUrl(src));
       wsRef.current = ws;
 
       pc.onicecandidate = (e) => {
@@ -136,7 +132,7 @@ export function TalkButton({ src }: { src: string }) {
       aria-label={micSupported ? "Hold to talk to the camera" : "Talk requires HTTPS"}
       aria-pressed={state === "talking"}
       className={[
-        "flex items-center gap-xs rounded-sm px-sm py-xs caption-label transition-colors duration-fast select-none",
+        "relative flex items-center gap-xs rounded-sm px-sm py-xs caption-label transition-colors duration-fast select-none",
         !micSupported
           ? "bg-panel text-ink-faint cursor-not-allowed"
           : active
@@ -146,6 +142,14 @@ export function TalkButton({ src }: { src: string }) {
               : "bg-panel text-ink-dim hover:text-ink",
       ].join(" ")}
     >
+      {/* Transmit ring: while the mic is live, a ring expands from the button so
+          "am I broadcasting into the yard?" is never ambiguous. */}
+      {state === "talking" && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 animate-ping rounded-sm bg-recovery opacity-30 motion-reduce:hidden"
+        />
+      )}
       {micSupported ? (
         <Mic size={14} className={state === "talking" ? "animate-pulse" : undefined} />
       ) : (

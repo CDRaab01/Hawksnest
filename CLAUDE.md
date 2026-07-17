@@ -18,19 +18,32 @@ This file adds the things that are easy to get wrong and the suite context.
 
 ## Architecture invariants (violating these has broken production before)
 
-- **nginx must NOT send `X-Forwarded-For` to HA.** With `use_x_forwarded_for` on and an
-  untrusted proxy IP, HA **400s the request** (it does not ignore the header) — this killed all
-  camera frames once. Either keep XFF off (current), or send it AND add the flannel pod CIDR
-  `10.42.0.0/16` to HA's `trusted_proxies`. Never half-do it. Details: deploy/README.md.
+- **nginx must actively CLEAR `X-Forwarded-For`/`X-Forwarded-Proto` to HA** (each HA-proxied
+  `location` sets them to `""`). HA has `use_x_forwarded_for` on and **400s the request**
+  from a proxy IP not in `trusted_proxies` — this killed all camera frames once. It was enough
+  to just *not add* XFF while the app was reached via a plain portproxy, but the TLS front
+  (Tailscale Serve, `https://<host>.ts.net:8443`) injects XFF and nginx passes inbound headers
+  through, so it must be stripped. Alternative: add the flannel pod CIDR `10.42.0.0/16` to HA's
+  `trusted_proxies`. Never half-do it. Details: deploy/README.md.
 - **The service worker never caches `/api`** and never touches the HA token (localStorage).
   Offline = app shell + Offline/Demo state, never stale entity data. Keep it that way when
   editing `vite.config`/SW code.
+- **Android HA token is encrypted at rest** (`util/TokenCipher`, AES-256-GCM key in the Android
+  Keystore) and **excluded from cloud-backup + device-transfer** (`res/xml/*_rules.xml`). The
+  stored value is ciphertext, undecryptable off-device. `CredentialStore.migrateLegacyToken()`
+  upgrades pre-encryption installs on start. Consequence: a clean reinstall / new phone requires
+  re-entering the token — deliberate for a door-unlocking credential. (Web still stores the token
+  in localStorage — a PWA can't Keystore-wrap; TLS + OAuth is its path.)
 - **Locks are non-optimistic UI** — they show pending until HA confirms. Security-critical;
   don't "fix" the lag. The mock-ha E2E suite covers pending/jam/rejected lock flows precisely so
   this stays testable without a real lock.
-- **Android cleartext config is deliberate** (`network_security_config.xml`): the HA host can be
-  a bare `100.x` Tailscale IP, which a scoped `<domain-config>` cannot match. Tighten only by
-  fronting the proxy with TLS. See the "Networking note" in android/README.md.
+- **Android cleartext is OFF** (`network_security_config.xml`, `cleartextTrafficPermitted="false"`):
+  the app reaches HA only over HTTPS, via the Tailscale Serve TLS front
+  (`https://<host>.ts.net:8443`). A **debug-only** override (`src/debug/res/xml/…`) re-permits
+  cleartext to `10.0.2.2`/`localhost` for the instrumented mock-HA — it never ships in a release
+  APK. Reverting to a plain-HTTP host means re-opening cleartext (and losing the win). (Earlier
+  this was deliberately `true` because the HA host could be a bare `100.x` IP a scoped
+  `<domain-config>` can't match — TLS fronting the proxy removed that constraint.)
 - **Camera model:** the backend is **ring-mqtt** (+ embedded go2rtc). Its split entities
   (`_live`/`_snapshot`/`_event` + selectors/ding/motion) are collapsed into one logical camera in
   `src/lib/cameraModel.ts` (web) / the Android equivalent. Recorded playback = last ~5 Ring
@@ -83,5 +96,4 @@ share of it:
 - Label/icon resolution is centralized (`src/lib/resolve.ts` + `src/config/overrides.ts`);
   add per-entity overrides there, not in components.
 - Phase 4 web shipped (entity detail/history, cover/climate/media_player/fan, drag-and-drop,
-  PWA). Android Phase 4 (push notifications via FCM + HA automation) is **not built**. Next web
-  ideas: OAuth to HA (replace the long-lived token), light theme.
+  PWA + prompt-to-update, light theme). Next web idea: OAuth to HA (replace the long-lived token).

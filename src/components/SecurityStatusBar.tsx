@@ -1,13 +1,13 @@
 import { useMemo } from "react";
-import { Home, Lock, ShieldOff, type LucideIcon } from "lucide-react";
+import { Home, Loader, Lock, ShieldOff, type LucideIcon } from "lucide-react";
 import { PanelCard } from "./PanelCard";
 import type { Channel } from "./PanelCard";
+import { useAlarmControl } from "./useAlarmControl";
 import { usePrimaryAlarm, useEntityStore } from "../store/entityStore";
 import { alarmView, ARM_BUTTONS } from "../lib/alarm";
 import { resolveName } from "../lib/resolve";
 import { overrides } from "../config/overrides";
 import { domainOf } from "../lib/ha";
-import { callService } from "../store/connection";
 
 const CHANNEL_BG: Record<Channel, string> = {
   effort: "bg-effort",
@@ -86,10 +86,9 @@ export function SecurityStatusBar() {
   const view = alarm ? alarmView(alarm.state) : null;
   const allSecure = securityLine === "All doors locked";
 
-  function arm(service: string) {
-    if (!alarm) return;
-    void callService("alarm_control_panel", service, { entity_id: alarm.entity_id });
-  }
+  // Non-optimistic arm/disarm: the tapped circle spins until HA's echo, failures
+  // surface (shared with the AlarmCard). Security-critical — never optimistic.
+  const { pending, error, arm } = useAlarmControl(alarm);
 
   return (
     <PanelCard tint={view?.triggered ? "streak" : undefined} raised className="p-lg">
@@ -99,24 +98,49 @@ export function SecurityStatusBar() {
             const active = alarm.state === b.state;
             const channel = alarmView(b.state).channel;
             const Icon = ARM_ICON[b.service] ?? ShieldOff;
+            const isPending = pending === b.service;
             return (
               <button
                 key={b.service}
                 type="button"
                 onClick={() => arm(b.service)}
+                disabled={pending !== null}
                 aria-pressed={active}
+                aria-busy={isPending}
                 aria-label={b.label}
-                className="flex flex-col items-center gap-sm transition-transform duration-fast active:scale-[0.96]"
+                className="flex flex-col items-center gap-sm transition-transform duration-fast active:scale-[0.96] disabled:cursor-not-allowed"
               >
+                {/* The disc is layered so activation reads as a radial fill-sweep:
+                    a channel-colored layer scales 0→1 from the center (emphasized/
+                    decel — PULSE's structural move), instead of an instant repaint.
+                    Non-optimistic as ever: the sweep only runs once HA's echo makes
+                    the mode `active`; while HA works, the spinner holds the disc. */}
                 <span
                   className={[
-                    "flex h-16 w-16 items-center justify-center rounded-full transition-colors",
-                    active
-                      ? `${CHANNEL_BG[channel]} text-bg`
-                      : "border border-hairline bg-panel text-ink-dim",
+                    "relative flex h-16 w-16 items-center justify-center overflow-hidden rounded-full",
+                    "border transition-colors duration-standard ease-ease",
+                    active ? "border-transparent text-bg" : "border-hairline bg-panel text-ink-dim",
                   ].join(" ")}
                 >
-                  <Icon size={26} />
+                  <span
+                    aria-hidden="true"
+                    className={[
+                      "absolute inset-0 rounded-full",
+                      CHANNEL_BG[channel],
+                      "transition-transform duration-emphasized ease-decel motion-reduce:transition-none",
+                      active ? "scale-100" : "scale-0",
+                    ].join(" ")}
+                  />
+                  <span className="relative">
+                    {isPending ? (
+                      <Loader
+                        className={["animate-spin", active ? "" : CHANNEL_TEXT[channel]].join(" ")}
+                        size={26}
+                      />
+                    ) : (
+                      <Icon size={26} />
+                    )}
+                  </span>
                 </span>
                 <span
                   className={[
@@ -134,18 +158,24 @@ export function SecurityStatusBar() {
         <div className="font-display text-headline text-ink-dim">No alarm panel</div>
       )}
 
-      {/* One plain-language security line + any offline notice. */}
+      {/* A failed arm/disarm, or the plain-language security line + any offline notice. */}
       <div className="mt-lg border-t border-hairline pt-md text-center">
-        <span
-          className={[
-            "font-body text-body",
-            allSecure ? "text-recovery" : "text-streak",
-          ].join(" ")}
-        >
-          {securityLine}
-        </span>
-        {offlineLabel && (
-          <span className="ml-sm font-body text-caption text-streak">· {offlineLabel}</span>
+        {error ? (
+          <span className="font-body text-body text-streak">{error}</span>
+        ) : (
+          <>
+            <span
+              className={[
+                "font-body text-body",
+                allSecure ? "text-recovery" : "text-streak",
+              ].join(" ")}
+            >
+              {securityLine}
+            </span>
+            {offlineLabel && (
+              <span className="ml-sm font-body text-caption text-streak">· {offlineLabel}</span>
+            )}
+          </>
         )}
       </div>
     </PanelCard>

@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { EntityCard } from "../components/EntityCard";
 import { PanelCard } from "../components/PanelCard";
 import { SectionHeader } from "../components/SectionHeader";
+import { Skeleton } from "../components/Skeleton";
 import { Sparkline } from "../components/Sparkline";
 import type { Channel } from "../components/PanelCard";
 import { overrides } from "../config/overrides";
@@ -195,7 +196,9 @@ export function EntityScreen() {
         />
         <PanelCard className="p-lg">
           {loading ? (
-            <p className="font-body text-body text-ink-dim">Loading history…</p>
+            // Chart-shaped skeleton (matches the Sparkline's 96px height) so the
+            // panel doesn't jump when the series lands.
+            <Skeleton className="h-[96px] rounded-sm" label="Loading history" />
           ) : historyError ? (
             <p className="font-body text-body text-ink-dim">{historyError}</p>
           ) : points.length < 2 ? (

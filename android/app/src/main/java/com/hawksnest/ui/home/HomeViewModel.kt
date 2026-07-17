@@ -7,7 +7,6 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.DeviceIndex
 import com.hawksnest.core.ha.HassEntity
-import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.AlarmView
 import com.hawksnest.core.logic.DoorbellPress
@@ -62,6 +61,8 @@ data class CameraUi(
     val eventStreamId: String? = null,
     /** Doorbell press sensor (`binary_sensor.<base>_ding`), or null. */
     val dingId: String? = null,
+    /** Motion sensor (`binary_sensor.<base>_motion`), or null — feeds the timeline's action blocks. */
+    val motionId: String? = null,
     /** ring-mqtt siren switch (`switch.<base>_siren`) on siren-capable cameras, or null. */
     val sirenSwitchId: String? = null,
 )
@@ -90,9 +91,16 @@ data class HomeUi(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val connection: ConnectionManager,
+    private val pushNav: com.hawksnest.push.PushNav,
 ) : ViewModel() {
 
     private val state = connection.state
+
+    /** Camera id a tapped doorbell notification wants opened in the lightbox (or null). */
+    val pushCameraTarget: StateFlow<String?> = pushNav.cameraTarget
+
+    /** Clear the deep-link once HomeScreen has opened (or failed to find) the camera. */
+    fun consumePushTarget() = pushNav.consume()
 
     val uiState: StateFlow<HomeUi> = combine(
         state.entities, state.areas, state.status, state.error, state.baseUrl, state.devices,
@@ -112,14 +120,16 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { connection.start() }
     }
 
-    /** Arm/disarm. Non-optimistic — the store reconciles from the source echo. Disarm sends no
+    /** Entity ids with a control in flight — the security hero renders arming spinners from this. */
+    val pending: StateFlow<Set<String>> = connection.pendingControls
+
+    /** Arm/disarm — crash-safe via the control gate (failures land on the app snackbar), pending
+     *  on [pending]. Non-optimistic — the store reconciles from the source echo. Disarm sends no
      *  code: the in-app PIN keypad was removed, so a panel that enforces `code_format` must allow
      *  codeless disarm from a trusted device (HA `code_arm_required: false` / no code on disarm). */
     fun arm(service: String) {
         val id = uiState.value.alarmEntityId ?: return
-        viewModelScope.launch {
-            connection.callService("alarm_control_panel", service, ServiceData(entityId = id))
-        }
+        connection.control(id, service, label = "Alarm", domain = "alarm_control_panel")
     }
 
     private fun buildUi(
@@ -170,6 +180,7 @@ class HomeViewModel @Inject constructor(
                 eventSelectId = lc.eventSelectId,
                 eventStreamId = lc.eventStreamId,
                 dingId = lc.dingId,
+                motionId = lc.motionId,
                 sirenSwitchId = lc.sirenSwitchId,
             )
         }

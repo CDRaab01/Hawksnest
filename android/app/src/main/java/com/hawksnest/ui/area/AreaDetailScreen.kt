@@ -24,7 +24,8 @@ import com.hawksnest.ui.theme.HawksnestTheme
 
 /**
  * Area detail — the devices in one room with their essential controls (via the shared
- * [DeviceControlCard]). Non-optimistic: the UI reflects HA's echo.
+ * [DeviceControlCard]). Security domains stay non-optimistic (pending until HA's echo); toggles
+ * render optimistically and reconcile. See the control model notes on [DeviceControlCard].
  */
 @Composable
 fun AreaDetailScreen(
@@ -33,6 +34,7 @@ fun AreaDetailScreen(
     viewModel: AreaDetailViewModel = hiltViewModel(),
 ) {
     val devices by viewModel.devices.collectAsState()
+    val pending by viewModel.pending.collectAsState()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -61,6 +63,7 @@ fun AreaDetailScreen(
                     device,
                     onCall = { service, extra -> viewModel.call(device.entityId, service, extra) },
                     onOpen = { onOpenEntity(device.entityId) },
+                    pending = device.entityId in pending,
                 )
             }
         }
