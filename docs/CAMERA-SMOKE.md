@@ -20,6 +20,11 @@ live Ring/go2rtc backend (a real doorbell + one other camera is enough).
 
 ## Web (WebRTC)
 
+- [ ] **go2rtc-direct tier (once §7c `:8555` is up).** Open a ring camera → first frame in ~1–2 s
+      (faster than the HA path). Confirm it's the go2rtc tier: `/go2rtc/api/streams` lists the
+      camera, and the browser makes a `wss://…/go2rtc/api/ws?src=<base>` connection (devtools →
+      Network → WS). With `:8555` **not** forwarded, it must fall back to the HA WebRTC tier within
+      ~8 s and the session circuit-breaker then skips go2rtc for other cameras (no repeated stall).
 - [ ] **Live paints < 3 s.** Open a camera tile → the live frame appears within ~3 seconds; the
       "Connecting…" overlay clears (no indefinite spinner).
 - [ ] **Lightbox live.** Tap the tile → full-screen player negotiates WebRTC and shows live video;

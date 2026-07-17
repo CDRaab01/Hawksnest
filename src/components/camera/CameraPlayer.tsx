@@ -300,7 +300,10 @@ export function CameraPlayer({
       </div>
 
       {isLive ? (
-        <LivePlayer entity={camera.liveEntity} />
+        <LivePlayer
+          entity={camera.liveEntity}
+          go2rtcSrc={isRing ? cameraName : undefined}
+        />
       ) : recordingSrc ? (
         <HlsPlayer
           src={recordingSrc}

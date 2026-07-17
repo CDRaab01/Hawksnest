@@ -37,8 +37,14 @@ Channel hues intentionally shift between themes so a vivid accent still clears c
 | `src/config/` | Entity/room overrides |
 | `public/` + service worker (vite config) | PWA shell. **The SW never caches `/api` and never touches the HA token** — offline = shell + Offline/Demo state, never stale entity data. Updates are **prompt**, not silent (`registerType:"prompt"`): `UpdateToast` (useRegisterSW) surfaces a "reload" prompt when a new shell is waiting, so a wall tablet that never navigates isn't stranded on a stale build |
 
-Camera streaming: WebRTC negotiates over the existing `/api/websocket`; media flows UDP direct to
-go2rtc. The live transport ladder (`LivePlayer`) is WebRTC → HLS → MJPEG → snapshot-poll: WebRTC
+Camera streaming: the live transport ladder (`LivePlayer`) is **go2rtc-direct → HA WebRTC → HLS →
+MJPEG → snapshot-poll**. The top tier (`Go2rtcPlayer`) negotiates WebRTC straight with the dedicated
+go2rtc (native Ring source) over its WS API (`/go2rtc/api/ws?src=<base>`, proxied same-origin by
+nginx) — no ring-mqtt/ffmpeg hop, ~1–2 s first frame, and the same signaling the Talk backchannel
+uses. It's tried for ring cameras when it looks reachable (`go2rtcMaybeAvailable` in `lib/go2rtc.ts`:
+a cached `/go2rtc/api/streams` gate + a **session circuit-breaker** that skips the tier once media is
+known-unreachable — e.g. before the §7c `:8555` host forwarder is up — so there's no repeated stall).
+The next tier, HA WebRTC, negotiates over `/api/websocket` (media UDP direct to HA's go2rtc) and
 is gated on the camera's STREAM `supported_features` bit with **absent treated as "try"**
 (`canStreamWebRtc` in `lib/cameraUrl.ts` — modern HA dropped the old `frontend_stream_type`
 attribute, and a battery cam's entity churns attribute-less mid-negotiation), holds a 20 s
