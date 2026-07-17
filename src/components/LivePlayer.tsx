@@ -7,42 +7,70 @@ import {
   streamUrl as mjpegUrl,
   snapshotUrlAt,
   snapshotUrl,
+  canStreamWebRtc,
 } from "../lib/cameraUrl";
+import { go2rtcMaybeAvailable, primeGo2rtcStreams } from "../lib/go2rtc";
 import { HlsPlayer } from "./HlsPlayer";
 import { WebRtcPlayer } from "./WebRtcPlayer";
+import { Go2rtcPlayer } from "./Go2rtcPlayer";
 
 /**
  * On-demand live view for one camera, with a graceful transport ladder:
  *
- *   WebRTC (go2rtc, <1s) → HLS/video → MJPEG proxy → snapshot poll → unavailable
+ *   go2rtc-direct (~1-2s) → HA WebRTC → HLS/video → MJPEG proxy → snapshot poll → dead
  *
- * WebRTC is tried first only when the camera advertises it (`frontend_stream_type
- * === "web_rtc"`, as ring-mqtt's go2rtc cameras do) and the live source can
- * negotiate it; otherwise we start at the HLS/demo video tier. Each tier steps
- * down on error. Nothing streams in the background — this only runs while mounted
- * ("Tap to Go Live").
+ * The dedicated go2rtc path (native Ring source, `go2rtcSrc` given for ring
+ * cameras) is tried first when it looks reachable (`go2rtcMaybeAvailable` — a
+ * session circuit-breaker skips it once media is known-unreachable, e.g. before
+ * the §7c host forwarder is up). Then HA WebRTC when the camera is STREAM-capable
+ * (or doesn't say — see `canStreamWebRtc`; modern HA dropped the old
+ * `frontend_stream_type` attribute this used to gate on); otherwise the HLS/demo
+ * video tier. Each tier steps down on error. Nothing streams in the background —
+ * this only runs while mounted ("Tap to Go Live").
  */
-type Mode = "webrtc" | "video" | "mjpeg" | "poll" | "dead";
+type Mode = "go2rtc" | "webrtc" | "video" | "mjpeg" | "poll" | "dead";
 
-export function LivePlayer({ entity }: { entity: HassEntity }) {
+export function LivePlayer({
+  entity,
+  go2rtcSrc,
+}: {
+  entity: HassEntity;
+  /** go2rtc stream name (the HA camera base) for the direct low-latency tier. */
+  go2rtcSrc?: string;
+}) {
   const baseUrl = useHaBaseUrl();
   const mjpeg = mjpegUrl(entity, baseUrl);
   const hasSnapshot = snapshotUrl(entity, baseUrl) !== null;
-  const canWebRtc =
-    entity.attributes.frontend_stream_type === "web_rtc" && supportsWebRtc();
+  const canWebRtc = canStreamWebRtc(entity) && supportsWebRtc();
+  const canGo2rtc = !!go2rtcSrc && go2rtcMaybeAvailable(go2rtcSrc);
+  const topMode = (): Mode => (canGo2rtc ? "go2rtc" : canWebRtc ? "webrtc" : "video");
 
   const [src, setSrc] = useState<string | null>(null);
   const [srcResolved, setSrcResolved] = useState(false);
-  const [mode, setMode] = useState<Mode>(canWebRtc ? "webrtc" : "video");
+  const [mode, setMode] = useState<Mode>(topMode);
   const [tick, setTick] = useState(0);
 
-  // Resolve the HLS/demo stream URL on mount (used by the "video" tier, and the
-  // fallback target when WebRTC drops). Resets when the camera changes.
+  // Warm the go2rtc stream-list cache (so the *next* camera open can gate the
+  // tier accurately); fire-and-forget, safe to call repeatedly.
   useEffect(() => {
-    let active = true;
+    if (go2rtcSrc) primeGo2rtcStreams();
+  }, [go2rtcSrc]);
+
+  // Reset the ladder when the camera changes.
+  useEffect(() => {
     setSrc(null);
     setSrcResolved(false);
-    setMode(canWebRtc ? "webrtc" : "video");
+    setMode(topMode());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entity.entity_id, go2rtcSrc]);
+
+  // Resolve the HLS/demo stream URL only once the "video" tier is actually
+  // active — NOT eagerly on mount. `camera/stream` makes HA spin up an HLS
+  // pipeline, which on a battery camera wakes it / competes for its single live
+  // session in parallel with the WebRTC negotiation above it on the ladder.
+  useEffect(() => {
+    if (mode !== "video" || srcResolved) return;
+    let active = true;
     fetchStreamUrl(entity.entity_id)
       .then((url) => {
         if (!active) return;
@@ -58,7 +86,7 @@ export function LivePlayer({ entity }: { entity: HassEntity }) {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entity.entity_id]);
+  }, [mode, srcResolved, entity.entity_id]);
 
   // Once the stream URL resolves to nothing while we're on the video tier, step down.
   useEffect(() => {
@@ -75,7 +103,8 @@ export function LivePlayer({ entity }: { entity: HassEntity }) {
 
   /** Advance the ladder one rung past `from`, skipping tiers we can't render. */
   function stepDownFrom(from: Mode) {
-    if (from === "webrtc") setMode("video");
+    if (from === "go2rtc") setMode(canWebRtc ? "webrtc" : "video");
+    else if (from === "webrtc") setMode("video");
     else if (from === "video") setMode(mjpeg ? "mjpeg" : hasSnapshot ? "poll" : "dead");
     else if (from === "mjpeg") setMode(hasSnapshot ? "poll" : "dead");
     else setMode("dead");
@@ -87,6 +116,16 @@ export function LivePlayer({ entity }: { entity: HassEntity }) {
         <VideoOff className="text-ink-faint" size={40} />
         <span className="font-body text-body text-ink-dim">Live view unavailable</span>
       </div>
+    );
+  }
+
+  if (mode === "go2rtc" && go2rtcSrc) {
+    return (
+      <Go2rtcPlayer
+        src={go2rtcSrc}
+        poster={snapshotUrl(entity, baseUrl) ?? undefined}
+        onFail={() => stepDownFrom("go2rtc")}
+      />
     );
   }
 

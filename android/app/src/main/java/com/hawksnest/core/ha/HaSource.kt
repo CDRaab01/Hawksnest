@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.dedupeRingMqtt
 import com.hawksnest.core.logic.FRIGATE_BASE
 import com.hawksnest.core.logic.LogEvent
 import com.hawksnest.core.logic.normalizeLogbook
@@ -16,6 +17,7 @@ import com.hawksnest.core.logic.recordingUrlAt as buildRecordingUrl
 import com.hawksnest.core.logic.eventClipUrl as buildEventClipUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -33,6 +35,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.Instant
 import kotlin.coroutines.coroutineContext
+
+/** How long we give HA to produce an HLS stream URL before stepping down (see [HaSource.streamUrl]). */
+private const val STREAM_URL_TIMEOUT_MS = 15_000L
 
 /**
  * The live Home Assistant source over the WebSocket. Mirrors `src/store/haSource.ts`: connect +
@@ -119,16 +124,22 @@ class HaSource(
      * Ask HA for an on-demand HLS stream URL (`camera/stream`). HA returns a signed, root-relative
      * playlist path served under the same `/api` the nginx pod proxies; resolved against the origin
      * like camera snapshots. Null on any failure so the player falls back to MJPEG/snapshot.
+     *
+     * Bounded at 15s: HA answers only once the camera's stream pipeline is up, and a battery Ring
+     * camera being woken by go2rtc can block this for the better part of a minute. Null already
+     * means "step down the transport ladder", so a timeout degrades instead of hanging the player.
      */
     override suspend fun streamUrl(entityId: String): String? {
         val c = conn ?: return null
         return try {
-            val frame = c.request("camera/stream") {
-                put("entity_id", entityId)
-                put("format", "hls")
+            withTimeoutOrNull(STREAM_URL_TIMEOUT_MS) {
+                val frame = c.request("camera/stream") {
+                    put("entity_id", entityId)
+                    put("format", "hls")
+                }
+                val url = (frame["result"] as? JsonObject)?.get("url")?.jsonPrimitive?.contentOrNull
+                url?.let { withBase(it, baseUrl) }
             }
-            val url = (frame["result"] as? JsonObject)?.get("url")?.jsonPrimitive?.contentOrNull
-            url?.let { withBase(it, baseUrl) }
         } catch (_: Exception) {
             null
         }
@@ -295,7 +306,9 @@ class HaSource(
             c.onClosed { if (!closed.isCompleted) closed.complete(Unit) }
             c.onEntitiesEvent { ev ->
                 entities = applyEntitiesEvent(entities, ev)
-                state.setEntities(entities)
+                // Central dedupe: every consumer (Home, Devices, cameras) sees one
+                // entity per physical device even while Ring + ring-mqtt are both live.
+                state.setEntities(dedupeRingMqtt(entities, state.entityPlatforms.value))
             }
             try {
                 c.connect() // suspends until auth_ok; throws HaAuthException on bad token
@@ -342,6 +355,9 @@ class HaSource(
             state.setEntityCategories(buildEntityCategories(entitiesReg))
             state.setDevices(buildDeviceIndex(areas, entitiesReg, devices))
             state.setZWaveEntityIds(buildZWaveEntityIds(entitiesReg))
+            state.setEntityPlatforms(buildEntityPlatforms(entitiesReg))
+            // Platforms may arrive after the first entity push — re-filter what's shown.
+            state.setEntities(dedupeRingMqtt(entities, state.entityPlatforms.value))
         } catch (_: Exception) {
             // non-fatal: without a registry, entities just group under "Unassigned"
         }

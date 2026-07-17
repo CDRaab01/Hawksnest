@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Android Auto Backup rules (used on API <= 30). We back up ONLY the DataStore prefs that hold the
-  HA base URL + long-lived token, so a clean uninstall -> reinstall restores the connection without
-  re-entering the token. Nothing else (image/player caches) is backed up.
+  Android Auto Backup rules (used on API <= 30).
 
-  TRADE-OFF: the long-lived token is a full HA credential, and Auto Backup ships this file to the
-  user's Google cloud backup. That is an accepted trade-off for this personal app; it only applies
-  when device backup + a Google account are enabled.
+  The HA long-lived token is a full house credential (it unlocks the doors), so the DataStore file
+  that holds it is EXCLUDED from Auto Backup — we do not ship it to the user's Google cloud backup.
+  (The token is also Keystore-encrypted at rest, so even a copy of this file is undecryptable off
+  the device; excluding it from backup is belt-and-suspenders.) The cost is a one-time re-entry of
+  the token after a clean reinstall — the correct default for a door-unlocking credential.
+
+  Everything else the app persists (the device-prefs DataStore: hide/rename choices) still backs up.
 -->
 <full-backup-content>
-    <include domain="file" path="datastore/hawksnest_prefs.preferences_pb" />
+    <exclude domain="file" path="datastore/hawksnest_prefs.preferences_pb" />
 </full-backup-content>

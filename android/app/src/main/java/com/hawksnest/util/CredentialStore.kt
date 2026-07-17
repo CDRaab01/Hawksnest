@@ -24,23 +24,49 @@ private val Context.credentialDataStore: DataStore<Preferences> by
 class CredentialStore @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
+    private val cipher = TokenCipher()
     private val haUrlKey = stringPreferencesKey("ha_url")
-    private val haTokenKey = stringPreferencesKey("ha_token")
+    /** Ciphertext of the token (base64 IV||GCM). */
+    private val haTokenEncKey = stringPreferencesKey("ha_token_enc")
+    /** Legacy plaintext token key — read-then-migrate away from it (pre-encryption installs). */
+    private val legacyTokenKey = stringPreferencesKey("ha_token")
 
     val haUrl: Flow<String?> = context.credentialDataStore.data.map { it[haUrlKey] }
-    val haToken: Flow<String?> = context.credentialDataStore.data.map { it[haTokenKey] }
+
+    /** The decrypted token, or the legacy plaintext one until [migrateLegacyToken] moves it. */
+    val haToken: Flow<String?> = context.credentialDataStore.data.map { prefs ->
+        val enc = prefs[haTokenEncKey]
+        if (enc != null) cipher.decrypt(enc) else prefs[legacyTokenKey]
+    }
 
     suspend fun save(url: String, token: String) {
+        val enc = cipher.encrypt(token.trim())
         context.credentialDataStore.edit {
             it[haUrlKey] = url.trim()
-            it[haTokenKey] = token.trim()
+            if (enc != null) it[haTokenEncKey] = enc else it.remove(haTokenEncKey)
+            it.remove(legacyTokenKey) // never keep a plaintext copy alongside
         }
     }
 
     suspend fun clear() {
         context.credentialDataStore.edit {
             it.remove(haUrlKey)
-            it.remove(haTokenKey)
+            it.remove(haTokenEncKey)
+            it.remove(legacyTokenKey)
+        }
+    }
+
+    /**
+     * One-time upgrade of a pre-encryption install: if a plaintext token is present, re-store it
+     * encrypted and delete the plaintext. Idempotent and cheap — safe to call on every app start.
+     */
+    suspend fun migrateLegacyToken() {
+        context.credentialDataStore.edit { prefs ->
+            val legacy = prefs[legacyTokenKey]
+            if (legacy != null) {
+                cipher.encrypt(legacy)?.let { prefs[haTokenEncKey] = it }
+                prefs.remove(legacyTokenKey)
+            }
         }
     }
 }

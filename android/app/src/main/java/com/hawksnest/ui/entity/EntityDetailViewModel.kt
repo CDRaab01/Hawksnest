@@ -12,6 +12,7 @@ import com.hawksnest.core.logic.domainToCard
 import com.hawksnest.core.logic.isNoiseEntity
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.ui.components.DeviceUi
+import com.hawksnest.ui.devices.controlLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -119,11 +120,12 @@ class EntityDetailViewModel @Inject constructor(
         }
     }
 
-    /** Non-optimistic control call; the store reconciles from the source echo. */
+    /** Entity ids with a control in flight — the card renders pending state from this. */
+    val pending: StateFlow<Set<String>> = connection.pendingControls
+
+    /** Crash-safe control call; failures surface on the app snackbar, pending on [pending]. */
     fun call(service: String, extra: Map<String, Any?> = emptyMap()) {
-        viewModelScope.launch {
-            connection.callService(domainOf(entityId), service, ServiceData(entityId = entityId, extra = extra))
-        }
+        connection.control(entityId, service, controlLabel(connection, entityId), extra)
     }
 
     /** Ping the node (is it reachable?). Entity-targeted `zwave_js` service. */

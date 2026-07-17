@@ -5,38 +5,47 @@ first, then the one big missing capability, then polish. (Automation-side items 
 auto-lock, Ratgdo garage, WLED — belong to `hawksnest-automation`; when those land, Hawksnest
 mostly just renders the new entities via the existing domain-card mapping.)
 
+## Road to 1.0 (suite pivot, 2026-07-13)
+
+The suite entered its **1.0 polish round** (host-level ROADMAP3, C:\Code). Hawksnest is ahead of
+the pack: **[V1.md](V1.md) is the live, sequenced 1.0 plan** and most of this file's items shipped
+through its gates (marked ✓ below — this file stays as the original backlog record). What remains
+is the V1.md merge train in its stated order: ntfy backend prod-apply → on-device push smoke →
+Android push PR → **the 1.0 version bump last**. v1.1 holds OAuth (#2) and wall-tablet kiosk
+mode (#7).
+
+**Gap review 2026-07-14 (host ROADMAP3): one v1.1 candidate added — two-way talk on the
+doorbell.** go2rtc supports two-way audio and it's Ring's core feature; it's the difference
+between a camera *viewer* and a *doorbell*. Run a feasibility spike against ring-mqtt first
+(whether the Ring device's speaker path is actually exposed) before committing — if the spike
+fails, record why here and drop it deliberately.
+
 ## Security posture (do these before features)
 
-1. **TLS on the proxy, then kill cleartext.** The Android `network_security_config.xml` is
-   deliberately broad (documented in android/README.md) because the HA host may be a bare
-   `100.x` IP. Front the proxy with TLS (Tailscale Serve gives free HTTPS at a MagicDNS name —
-   the same mechanism Dragonfly's self-host source planned to use), standardize on the hostname,
-   flip `cleartextTrafficPermitted="false"`. This closes the known, accepted Phase-0 hole.
-2. **OAuth to HA** (web "next phases" list) — replace the long-lived token with HA's OAuth
-   flow + refresh. Long-lived tokens in localStorage/CredentialStore are revocable but
-   never-expiring; for a security surface that's the wrong default. Do web + Android together
-   so the token story stays one story.
+1. ✓ **TLS on the proxy, then kill cleartext — DONE** (V1.md Gate 2: Tailscale Serve `:8443` +
+   nginx XFF-clear, PR #63; `cleartextTrafficPermitted="false"`, PR #64; token Keystore-wrapped
+   + backup-excluded, PR #62). The Phase-0 hole is closed.
+2. **OAuth to HA — deferred to v1.1** (owner decision, V1.md): with TLS done and the token
+   Keystore-wrapped, the revocable LLAT doesn't block 1.0. Still the right v1.1 headline —
+   do web + Android together so the token story stays one story.
 
 ## The big missing capability
 
-3. **Android Phase 4 — push notifications.** A doorbell app that only alerts while open isn't
-   a doorbell app. The in-app banner already keys off the `_ding` binary sensor; push needs a
-   server-side hook (HA automation → relay) + FCM, or self-hosted **ntfy** to skip Google
-   infrastructure entirely (fits the suite's local-first bias; ntfy also generalizes to the
-   suite-wide push channel in Dragonfly's roadmap). Scope it with the suite decision — build
-   the relay once, not per-app.
+3. **Android push notifications — ✓ code-complete via ntfy** (decided 2026-07-12: ntfy, not
+   FCM; V1.md Gate 3): server side in hawksnest-automation #15, client `push/` foreground
+   service in Hawksnest #66. **Gated operator steps remain** — deploy ntfy to prod, apply the
+   HA automations, and the on-device smoke (delivery with the app closed) — only then is push
+   proven. ntfy generalizes to the suite-wide push channel (Dragonfly roadmap / host Tier W2).
 
 ## Improvements
 
-4. **Camera pipeline test against real ring-mqtt** — the mock serves no `web_rtc` camera, so
-   the live-video path (WebRTC web, LL-HLS Android) is only ever tested by hand. Even a
-   documented manual smoke checklist per release ("live paints < 3 s, event scrub works,
-   doorbell banner fires") would formalize what's currently tribal.
-5. **Light theme** (web) — the tokens layer was built for it; the PULSE reference palette in
-   the sibling Pulse repo already defines contrast-safe light variants to port.
-6. **PWA update UX** — a "new version available, reload" toast when the service worker swaps
-   the shell; silent updates occasionally strand a stale tab on the wall tablet use-case.
-7. **Wall-tablet/kiosk mode** — if a mounted tablet becomes real: no-sleep, auto-reconnect
+4. ✓ **Camera live-path smoke checklist — DONE** (`docs/CAMERA-SMOKE.md` → see V1.md Gate 4,
+   PR #65) — the manual checklist formalizes what was tribal.
+5. ✓ **Light theme — SHIPPED** (V1.md Gate 4, PR #65): `:root.light` tokens + Settings →
+   Appearance (Dark/Light/System).
+6. ✓ **PWA update UX — SHIPPED** (V1.md Gate 4, PR #65): `registerType:"prompt"` +
+   `UpdateToast` (`useRegisterSW`), exactly for the wall-tablet stale-shell case.
+7. **Wall-tablet/kiosk mode** (→ v1.1) — if a mounted tablet becomes real: no-sleep, auto-reconnect
    aggressiveness, larger touch targets on the alarm panel. Cheap once light theme exists.
 
 ## Explicitly not worth it

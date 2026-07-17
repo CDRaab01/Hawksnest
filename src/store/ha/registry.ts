@@ -24,6 +24,20 @@ export const ZWAVE_PLATFORM = "zwave_js";
  * Used to detect a controller/radio outage: if every Z-Wave entity reports
  * `unavailable` at once, the stick or zwave-js-ui is down — not one dead node.
  */
+/**
+ * entity_id → integration platform id ("ring", "mqtt", "zwave_js", …). Powers
+ * the ring/ring-mqtt dedupe (src/lib/dedupe.ts).
+ */
+export function buildEntityPlatforms(
+  entities: EntityRegistryEntry[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of entities) {
+    if (e.entity_id && e.platform) out[e.entity_id] = e.platform;
+  }
+  return out;
+}
+
 export function buildZWaveEntityIds(entities: EntityRegistryEntry[]): string[] {
   return entities
     .filter((e) => e.platform === ZWAVE_PLATFORM)

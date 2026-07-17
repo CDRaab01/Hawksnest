@@ -16,6 +16,18 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
+/**
+ * Where the player is with a selected ring clip's stream URL. [Failed] is a terminal, *visible*
+ * state (HA timed out / errored / the event rotated out of ring-mqtt's ~5-slot selector) — never
+ * left looking like it's still loading. Mirrors the web `RingClipState`.
+ */
+sealed interface RingClipState {
+    data object Idle : RingClipState
+    data class Resolving(val clipId: String) : RingClipState
+    data class Ready(val clipId: String, val url: String) : RingClipState
+    data class Failed(val clipId: String) : RingClipState
+}
+
 /** Home Assistant `CameraEntityFeature.STREAM` bit (camera supports a live video stream). */
 private const val CAMERA_FEATURE_STREAM = 2
 
@@ -103,22 +115,37 @@ class CameraPlayerViewModel @Inject constructor(
     fun sirenOn(entityId: String): Flow<Boolean> =
         connection.state.entities.map { it[entityId]?.state == "on" }
 
-    /** Sound or silence a camera's siren (ring-mqtt `switch.<base>_siren`). */
-    suspend fun setSiren(entityId: String, on: Boolean) {
-        connection.callService(
-            "switch",
-            if (on) "turn_on" else "turn_off",
-            ServiceData(entityId = entityId),
-        )
+    /** Sound or silence a camera's siren (ring-mqtt `switch.<base>_siren`), crash-safe via the
+     *  control gate — a failed siren call must never crash the player. */
+    fun setSiren(entityId: String, on: Boolean) {
+        connection.control(entityId, if (on) "turn_on" else "turn_off", label = "Siren")
     }
 
-    /** Select which ring-mqtt event plays, then resolve the `_event` stream URL. */
-    suspend fun playRingEvent(eventSelectId: String, option: String, eventStreamId: String): String? {
-        connection.callService(
-            "select",
-            "select_option",
-            ServiceData(entityId = eventSelectId, extra = mapOf("option" to option)),
-        )
-        return connection.streamUrl(eventStreamId)
+    /**
+     * Select which ring-mqtt event plays, then resolve the `_event` stream URL. The select is
+     * best-effort (a rotated-out option fails, but the event stream may still hold footage); a null
+     * or thrown stream resolution lands in [RingClipState.Failed] — an honest, retryable error
+     * instead of a stuck loader. Never throws (this runs in produceState's coroutine; an uncaught
+     * throw would crash the whole player).
+     */
+    suspend fun resolveRingClip(
+        eventSelectId: String,
+        option: String,
+        eventStreamId: String,
+    ): RingClipState = runCatching {
+        runCatching {
+            connection.callService(
+                "select",
+                "select_option",
+                ServiceData(entityId = eventSelectId, extra = mapOf("option" to option)),
+            )
+        }
+        val url = connection.streamUrl(eventStreamId)
+        if (url != null) RingClipState.Ready(option, url) else RingClipState.Failed(option)
+    }.getOrElse { e ->
+        // Cancellation must propagate (produceState relaunching on a key change),
+        // not masquerade as a failed clip.
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        RingClipState.Failed(option)
     }
 }

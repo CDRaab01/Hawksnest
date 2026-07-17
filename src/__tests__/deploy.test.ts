@@ -24,14 +24,23 @@ describe("nginx.conf — same-origin HA reverse proxy", () => {
     expect(nginx).toMatch(/proxy_read_timeout\s+3600s/);
   });
 
-  it("proxies the REST API WITHOUT forwarding X-Forwarded-For", () => {
+  it("explicitly clears X-Forwarded-For on every HA-proxied location", () => {
+    // HA (use_x_forwarded_for) 400s a request carrying an XFF from an untrusted
+    // proxy. The TLS front (Tailscale Serve) injects XFF and nginx passes inbound
+    // headers through, so each HA location must actively blank it. Five HA
+    // locations: /api/websocket, /api/camera_proxy_stream/, /api/hls/,
+    // /api/frigate/, /api/.
+    const cleared = nginx.match(/proxy_set_header\s+X-Forwarded-For\s+""/g) ?? [];
+    expect(cleared.length).toBe(5);
+    expect(nginx).toMatch(/proxy_set_header\s+X-Forwarded-Proto\s+""/);
+    // And it must never PASS one through (i.e. never set it to the inbound value).
+    expect(nginx).not.toMatch(/proxy_set_header\s+X-Forwarded-For\s+\$/);
+  });
+
+  it("proxies the REST API to Home Assistant same-origin", () => {
     expect(nginx).toMatch(/location\s+\/api\//);
-    // HA rejects an X-Forwarded-For header from an untrusted proxy with HTTP 400
-    // (this pod isn't in trusted_proxies), which 400'd every camera snapshot and
-    // stream GET while the WebSocket — which never sent XFF — kept working. The
-    // directive must NOT be present, or cameras break again. (The phrase appears
-    // in an explanatory comment; we match the actual proxy_set_header directive.)
-    expect(nginx).not.toMatch(/proxy_set_header\s+X-Forwarded-For/);
+    const block = nginx.slice(nginx.indexOf("location /api/ "));
+    expect(block).toContain("proxy_pass http://homeassistant");
   });
 
   it("streams MJPEG camera live view with buffering disabled", () => {

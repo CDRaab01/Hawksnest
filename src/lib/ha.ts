@@ -46,3 +46,19 @@ export const NON_DEVICE_DOMAINS = new Set<string>([
  * a separate map (see fixtures) to keep that seam honest for Phase 1.
  */
 export type AreaRegistry = Record<string, string>;
+
+/**
+ * True when a light actually supports brightness levels. HA marks on/off-only
+ * lights (relay/switch-type, e.g. Ring smart lighting) with
+ * `supported_color_modes: ["onoff"]` — those must not get a dimmer slider or a
+ * "% brightness" readout. When color modes are absent (older integrations),
+ * fall back to whether a `brightness` attribute exists — unreliable while the
+ * light is OFF (HA drops `brightness` then), which is why color modes win.
+ */
+export function isDimmableLight(entity: HassEntity): boolean {
+  const modes = entity.attributes.supported_color_modes;
+  if (Array.isArray(modes)) {
+    return modes.some((m) => m !== "onoff");
+  }
+  return typeof entity.attributes.brightness === "number";
+}

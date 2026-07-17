@@ -11,18 +11,20 @@ export function QuickControl({ entity }: { entity: HassEntity }) {
   const domain = domainOf(entity.entity_id);
 
   if (domain === "lock") {
-    const locked = entity.state === "locked";
+    // Asymmetric on purpose: one-tap LOCK (securing the house) is safe to offer
+    // inline; one-tap UNLOCK is the accidental-touch risk the slide-to-act
+    // control exists to prevent — unlocking always goes through the LockCard's
+    // slide (entity/area view). A locked lock therefore shows no quick control.
+    if (entity.state !== "unlocked") return null;
     return (
       <PulseButton
         variant="ghost"
         compact
         onClick={() =>
-          void callService("lock", locked ? "unlock" : "lock", {
-            entity_id: entity.entity_id,
-          })
+          void callService("lock", "lock", { entity_id: entity.entity_id })
         }
       >
-        {locked ? "Unlock" : "Lock"}
+        Lock
       </PulseButton>
     );
   }

@@ -28,12 +28,14 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hawksnest.core.logic.HOUR_MS
@@ -54,29 +56,33 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 
 private val TIME_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a")
+private val DATE_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")
 
 private fun clockTime(ms: Long): String =
     TIME_FMT.format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
 
-/** Opening zoom: ~3h visible, clamped into the [10min, 24h] range. */
-private const val DEFAULT_SPAN_MS = 3 * HOUR_MS
-private const val TAP_SLOP_PX = 8f
-
-/** Compact span label for the zoom indicator ("45m", "3h", "1h 30m"). */
-private fun formatSpan(ms: Long): String {
-    val totalMin = (ms / 60_000L).coerceAtLeast(1L)
-    if (totalMin < 60) return "${totalMin}m"
-    val h = totalMin / 60
-    val m = totalMin % 60
-    return if (m == 0L) "${h}h" else "${h}h ${m}m"
+/** Ring's centered header: "TODAY" for today, otherwise the scrubbed day's date. */
+private fun dayHeader(ms: Long): String {
+    val day = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
+    val today = java.time.LocalDate.now(ZoneId.systemDefault())
+    return when (day) {
+        today -> "TODAY"
+        today.minusDays(1) -> "YESTERDAY"
+        else -> DATE_FMT.format(day).uppercase()
+    }
 }
+
+/** Opening zoom: ~8h visible so the day reads at a glance (Ring-like), clamped into [10min, 24h]. */
+private const val DEFAULT_SPAN_MS = 8 * HOUR_MS
+private const val TAP_SLOP_PX = 8f
 
 /**
  * Ring-style scrubbable timeline: a center-anchored, zoomable + pannable strip drawn on a Canvas.
  * Drag left/right to move through time; pinch to zoom (≈10 min → 24 h). The playhead marks the
- * current time — pinned at center while scrubbing, at the right edge while live. A clean tap seeks
- * to the tapped time (CameraPlayer's seek() snaps ring to the nearest event). All the mapping/clamp
- * math lives in `core/logic/TimelineViewport`. Mirrors the web `Timeline24h`.
+ * current time — pinned at center while scrubbing, at the right edge while live. While dragging,
+ * [onScrub] streams the time under the center playhead so the parent can preview footage live;
+ * release still commits through [onSeek]/[onLive]. A clean tap seeks to the tapped time. All the
+ * mapping/clamp math lives in `core/logic/TimelineViewport`. Mirrors the web `Timeline24h`.
  */
 @Composable
 fun Timeline24h(
@@ -86,49 +92,62 @@ fun Timeline24h(
     playhead: Long?,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    /** Streams the time under the playhead during an active drag (Compose delivers pointer events
+     *  roughly per frame). Release always follows with onSeek/onLive. */
+    onScrub: ((Long) -> Unit)? = null,
+    /** Snap back to live — fired when a tap/drag lands in the "Live" region right of now. */
+    onLive: () -> Unit = {},
 ) {
     val pulse = HawksnestTheme.pulse
     val measurer = rememberTextMeasurer()
-    val window = TimeWindow(startMs, endMs)
     val scrubTime = playhead ?: endMs
 
     var trackWidth by remember { mutableStateOf(0f) }
     var vp by remember { mutableStateOf<Viewport?>(null) }
+    // True while a drag is emitting scrubs — suppresses the recenter effect, which would otherwise
+    // chase every onScrub-driven playhead change and fight the finger (the web's drag guard).
+    var gestureActive by remember { mutableStateOf(false) }
 
-    fun colorFor(label: String): Color = when (label) {
-        "person" -> pulse.strength
-        "car", "truck" -> pulse.effort
-        "dog", "cat" -> pulse.recovery
-        else -> pulse.streak
+    // The clamp window is padded past *now* by half the visible span, so "now" can sit at CENTER
+    // with the "Live" region filling the right half — the Ring layout. (Unpadded, the clamp pins
+    // now to the right edge and the Live region could never show.) Panning right naturally stops
+    // when now reaches center. Mirrors the web `paddedWindow`.
+    fun padded(v: Viewport?): TimeWindow {
+        val half = (
+            (v?.takeIf { trackWidth > 0f }?.let { visibleSpanMs(it, trackWidth) }
+                ?: DEFAULT_SPAN_MS.toDouble()) / 2
+            ).toLong()
+        return TimeWindow(startMs, endMs + half)
+    }
+
+    // Commit a scrub/tap time: at/past *now* means the Live region — snap back to live.
+    fun commit(ms: Long) {
+        if (ms >= endMs) onLive() else onSeek(minOf(ms, endMs))
     }
 
     // Re-center on external seeks (Live / prev / next) and width changes, preserving zoom.
+    // Suppressed while a drag is scrubbing — the viewport is already under the finger.
     LaunchedEffect(playhead, trackWidth, startMs, endMs) {
-        if (trackWidth > 0f) {
+        if (trackWidth > 0f && !gestureActive) {
             val span = vp?.let { visibleSpanMs(it, trackWidth).toLong() } ?: DEFAULT_SPAN_MS
-            vp = viewportForSpan(scrubTime, span, trackWidth, window)
+            vp = viewportForSpan(scrubTime, span, trackWidth, padded(vp))
         }
     }
 
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
-            Text(
-                if (playhead == null) "Live" else clockTime(scrubTime),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                "${events.size} events",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            dayHeader(scrubTime),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        )
 
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(56.dp)
+                .height(64.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .onSizeChanged { trackWidth = it.width.toFloat() }
@@ -146,21 +165,30 @@ fun Timeline24h(
                             vp?.let { cur ->
                                 var nv = cur
                                 if (zoomChange != 1f) {
-                                    nv = zoom(nv, zoomChange, trackWidth, window)
+                                    nv = zoom(nv, zoomChange, trackWidth, padded(cur))
                                     moved = true
                                 }
                                 if (panChange.x != 0f) {
-                                    nv = pan(nv, panChange.x, trackWidth, window)
+                                    nv = pan(nv, panChange.x, trackWidth, padded(cur))
                                     totalDx += panChange.x
                                     if (abs(totalDx) > TAP_SLOP_PX) moved = true
                                 }
-                                if (nv != cur) vp = nv
+                                if (nv != cur) {
+                                    vp = nv
+                                    // Live scrub: stream the center time while panning (clamped
+                                    // out of the Live region).
+                                    if (moved) {
+                                        gestureActive = true
+                                        onScrub?.invoke(minOf(nv.centerMs, endMs))
+                                    }
+                                }
                             }
                             event.changes.forEach { if (it.positionChanged()) it.consume() }
                         }
+                        gestureActive = false
                         val v = vp
                         if (v != null) {
-                            if (moved) onSeek(v.centerMs) else onSeek(xToTime(down.position.x, v, trackWidth))
+                            if (moved) commit(v.centerMs) else commit(xToTime(down.position.x, v, trackWidth))
                         }
                     }
                 },
@@ -187,34 +215,77 @@ fun Timeline24h(
                 }
             }
 
-            // Event chips.
+            // Recording blocks — solid effort-blue, tall like Ring's; every block is a playable clip.
+            val blockTop = size.height * 0.16f
+            val blockH = size.height * 0.68f
             for (ev in events) {
                 val x1 = timeToX(ev.startMs, v, wpx)
                 val endT = ev.endMs ?: (ev.startMs + 30_000L)
                 val w = (timeToX(endT, v, wpx) - x1).coerceAtLeast(3f)
                 if (x1 + w < 0f || x1 > wpx) continue // off-screen
                 drawRoundRect(
-                    color = colorFor(ev.label),
-                    topLeft = Offset(x1, size.height * 0.45f),
-                    size = Size(w, size.height * 0.4f),
+                    color = pulse.effort,
+                    topLeft = Offset(x1, blockTop),
+                    size = Size(w, blockH),
                     cornerRadius = CornerRadius(3f, 3f),
                 )
             }
 
-            // Playhead — at center while scrubbing, at the right edge while live.
+            // "Live" region — everything to the right of now (endMs) is the not-yet-recorded future;
+            // dim it and label it, so the centered playhead reads as "now" (the Ring layout).
+            val nowX = timeToX(endMs, v, wpx)
+            if (nowX < wpx) {
+                drawRect(
+                    color = Color.Black.copy(alpha = 0.35f),
+                    topLeft = Offset(nowX, 0f),
+                    size = Size(wpx - nowX, size.height),
+                )
+                drawLine(pulse.recovery, Offset(nowX, 0f), Offset(nowX, size.height), strokeWidth = 1.5f)
+                val liveLayout = measurer.measure(
+                    "Live",
+                    style = TextStyle(color = pulse.recovery, fontSize = 12.sp, fontWeight = FontWeight.Medium),
+                )
+                val regionW = wpx - nowX
+                if (regionW > liveLayout.size.width + 8f) {
+                    drawText(
+                        liveLayout,
+                        topLeft = Offset(
+                            nowX + (regionW - liveLayout.size.width) / 2f,
+                            (size.height - liveLayout.size.height) / 2f,
+                        ),
+                    )
+                }
+            }
+
+            // Playhead — inward-pointing triangles top & bottom on a hairline (Ring's marker), pinned
+            // at center while scrubbing, at the right edge (now) while live.
             val px = timeToX(scrubTime, v, wpx)
-            drawLine(Color.White, Offset(px, 0f), Offset(px, size.height), strokeWidth = 3f)
+            val tw = 6.dp.toPx()
+            val th = 7.dp.toPx()
+            drawLine(Color.White.copy(alpha = 0.9f), Offset(px, 0f), Offset(px, size.height), strokeWidth = 2f)
+            drawPath(
+                Path().apply {
+                    moveTo(px - tw, 0f); lineTo(px + tw, 0f); lineTo(px, th); close()
+                },
+                Color.White,
+            )
+            drawPath(
+                Path().apply {
+                    moveTo(px - tw, size.height); lineTo(px + tw, size.height); lineTo(px, size.height - th); close()
+                },
+                Color.White,
+            )
         }
 
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
             Text(
-                "Drag to scrub · pinch to zoom",
+                if (playhead == null) "Live" else clockTime(scrubTime),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.weight(1f))
             Text(
-                vp?.let { "${formatSpan(visibleSpanMs(it, trackWidth).toLong())} view" } ?: "",
+                "${events.size} moments",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

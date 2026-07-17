@@ -12,6 +12,47 @@ import {
 } from "../store/credentials";
 import { startConnection } from "../store/connection";
 import { defaultHaUrl } from "../lib/haUrl";
+import { useThemeStore, type ThemePref } from "../store/theme";
+
+const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+  { value: "system", label: "System" },
+];
+
+/** Segmented Dark / Light / System control, bound to the theme store. */
+function AppearanceControl() {
+  const pref = useThemeStore((s) => s.pref);
+  const setPref = useThemeStore((s) => s.setPref);
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Appearance"
+      className="inline-flex rounded-md border border-hairline bg-bg p-xs"
+    >
+      {THEME_OPTIONS.map((opt) => {
+        const active = pref === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => setPref(opt.value)}
+            className={
+              "rounded-sm px-lg py-sm font-body text-body transition-colors duration-fast " +
+              (active
+                ? "bg-effort-dim text-effort"
+                : "text-ink-dim hover:text-ink")
+            }
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const STATUS_TEXT: Record<string, string> = {
   demo: "Demo data (no Home Assistant connected)",
@@ -71,6 +112,19 @@ export function SettingsScreen() {
             <ChevronRight className="ml-auto shrink-0 text-ink-faint" size={20} />
           </PanelCard>
         </Link>
+      </section>
+
+      <section className="space-y-md">
+        <SectionHeader label="Appearance" channel="strength" />
+        <PanelCard className="flex flex-wrap items-center justify-between gap-md p-lg">
+          <div className="min-w-0">
+            <div className="font-body text-body-lg text-ink">Theme</div>
+            <div className="font-body text-body text-ink-dim">
+              Dark suits a wall display; System follows your device.
+            </div>
+          </div>
+          <AppearanceControl />
+        </PanelCard>
       </section>
 
       <section className="space-y-md">

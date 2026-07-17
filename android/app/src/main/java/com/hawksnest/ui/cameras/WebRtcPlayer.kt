@@ -150,7 +150,7 @@ fun WebRtcPlayer(
  * waits, so we never stash a blank tile. Returns null on a black frame or if the listener can't be
  * added. Cancelling the caller removes the pending listener before the renderer is released.
  */
-private suspend fun captureFrame(renderer: SurfaceViewRenderer): ImageBitmap? {
+internal suspend fun captureFrame(renderer: SurfaceViewRenderer): ImageBitmap? {
     var listener: EglRenderer.FrameListener? = null
     try {
         return suspendCancellableCoroutine { cont ->
@@ -170,7 +170,7 @@ private suspend fun captureFrame(renderer: SurfaceViewRenderer): ImageBitmap? {
 
 /** Cheap "is this still the pre-connect black frame?" check — sample a 5×5 grid, treat near-zero
  *  luma everywhere as black so we don't promote an empty frame to the tile. */
-private fun Bitmap.isMostlyBlack(): Boolean {
+internal fun Bitmap.isMostlyBlack(): Boolean {
     var lit = 0
     for (i in 1..5) for (j in 1..5) {
         val px = getPixel(width * i / 6, height * j / 6)

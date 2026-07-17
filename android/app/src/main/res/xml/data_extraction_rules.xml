@@ -1,17 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Data extraction rules (used on API 31+). cloud-backup = Auto Backup to Google Drive;
-  device-transfer = direct device-to-device migration. Both include ONLY the DataStore file holding
-  the HA base URL + long-lived token, so a reinstall / new phone restores the connection.
+  device-transfer = direct device-to-device migration.
 
-  TRADE-OFF: the long-lived token is a full HA credential being included in cloud backup — see
-  backup_rules.xml.
+  The DataStore file holding the HA base URL + long-lived token is EXCLUDED from both: the token is
+  a full house credential and must not leave the device via backup or transfer. (It is also
+  Keystore-encrypted at rest — the key never leaves the device — so a copied file is undecryptable
+  elsewhere regardless; the excludes are belt-and-suspenders.) The cost is re-entering the token on
+  a new phone, which is the correct default for a door-unlocking credential.
+
+  Other app data (the device-prefs DataStore: hide/rename) still backs up / transfers normally.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <include domain="file" path="datastore/hawksnest_prefs.preferences_pb" />
+        <exclude domain="file" path="datastore/hawksnest_prefs.preferences_pb" />
     </cloud-backup>
     <device-transfer>
-        <include domain="file" path="datastore/hawksnest_prefs.preferences_pb" />
+        <exclude domain="file" path="datastore/hawksnest_prefs.preferences_pb" />
     </device-transfer>
 </data-extraction-rules>

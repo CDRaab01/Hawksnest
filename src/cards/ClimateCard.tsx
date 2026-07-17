@@ -27,6 +27,14 @@ export function ClimateCard({ entity, overrides }: CardProps) {
     ? (attrs.target_temp_step as number)
     : 0.5;
   const off = entity.state === "off";
+  // hvac_action is what the unit is DOING right now (heating/cooling/idle) —
+  // richer than the mode. Tint the current reading by it: warm streak while
+  // heating, effort blue while cooling, plain ink at rest.
+  const action = typeof attrs.hvac_action === "string" ? (attrs.hvac_action as string) : undefined;
+  const actionTint =
+    action === "heating" ? "text-streak" : action === "cooling" ? "text-effort" : "text-ink";
+  const actionLabel =
+    action === "heating" ? "heating" : action === "cooling" ? "cooling" : undefined;
 
   function nudge(delta: number) {
     if (target === undefined) return;
@@ -46,8 +54,8 @@ export function ClimateCard({ entity, overrides }: CardProps) {
           <div className="font-body text-body text-ink-dim">
             {current !== undefined ? (
               <>
-                Now <DataText className="text-ink">{current}</DataText>
-                {unit} · {off ? "Off" : entity.state}
+                Now <DataText className={actionTint}>{current}</DataText>
+                {unit} · {off ? "Off" : (actionLabel ?? entity.state)}
               </>
             ) : off ? (
               "Off"

@@ -20,10 +20,12 @@ import {
   type CameraEvent,
   type RawFrigateEvent,
 } from "../lib/cameraEvents";
+import { dedupeRingMqtt } from "../lib/dedupe";
 import {
   buildAreaRegistry,
   buildDeviceIndex,
   buildEntityCategories,
+  buildEntityPlatforms,
   buildZWaveEntityIds,
   toEntityRecord,
   type AreaRegistryEntry,
@@ -61,6 +63,7 @@ async function fetchRegistry(conn: Connection): Promise<{
   devices: DeviceIndex;
   categories: Record<string, string>;
   zwaveEntityIds: string[];
+  entityPlatforms: Record<string, string>;
 }> {
   const [areas, entities, devices] = await Promise.all([
     conn.sendMessagePromise<AreaRegistryEntry[]>({
@@ -78,6 +81,7 @@ async function fetchRegistry(conn: Connection): Promise<{
     devices: buildDeviceIndex(areas, entities, devices),
     categories: buildEntityCategories(entities),
     zwaveEntityIds: buildZWaveEntityIds(entities),
+    entityPlatforms: buildEntityPlatforms(entities),
   };
 }
 
@@ -177,11 +181,19 @@ function withBase(path: string, baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}${path}`;
 }
 
+/** How long we give HA to produce an HLS stream URL before stepping down. */
+const STREAM_URL_TIMEOUT_MS = 15_000;
+
 /**
  * Ask HA for an on-demand stream URL for a camera. `camera/stream` returns a
  * signed, root-relative HLS playlist path (`/api/hls/<token>/master.m3u8`) that
  * HA serves under the same `/api` the nginx pod already proxies. Resolved
  * against the connected origin like camera snapshots.
+ *
+ * Bounded at 15s: HA answers only after the camera's stream pipeline is up, and
+ * a battery Ring camera being woken by go2rtc can block this for the better
+ * part of a minute. Null already means "step down the transport ladder" to the
+ * caller, so a timeout degrades to MJPEG/snapshot instead of hanging the player.
  */
 async function fetchStreamUrl(
   conn: Connection,
@@ -190,11 +202,16 @@ async function fetchStreamUrl(
   format: "hls",
 ): Promise<string | null> {
   try {
-    const res = await conn.sendMessagePromise<{ url?: string }>({
-      type: "camera/stream",
-      entity_id: entityId,
-      format,
-    });
+    const res = await Promise.race([
+      conn.sendMessagePromise<{ url?: string }>({
+        type: "camera/stream",
+        entity_id: entityId,
+        format,
+      }),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), STREAM_URL_TIMEOUT_MS),
+      ),
+    ]);
     return res?.url ? withBase(res.url, baseUrl) : null;
   } catch {
     // Camera can't produce a stream (or HA lacks the stream integration) — the
@@ -249,11 +266,15 @@ export function createHaSource(
   async function loadAreas() {
     if (!conn) return;
     try {
-      const { areas, devices, categories, zwaveEntityIds } = await fetchRegistry(conn);
+      const { areas, devices, categories, zwaveEntityIds, entityPlatforms } =
+        await fetchRegistry(conn);
       store().setAreas(areas);
       store().setDevices(devices);
       store().setCategories(categories);
       store().setZWaveEntityIds(zwaveEntityIds);
+      store().setEntityPlatforms(entityPlatforms);
+      // Platforms can arrive after the first entity push — re-filter what's shown.
+      store().setEntities(dedupeRingMqtt(store().entities, entityPlatforms));
     } catch {
       // Registry unavailable (older HA / limited token) — keep entities,
       // they group under "Unassigned" rather than failing the connection.
@@ -292,7 +313,11 @@ export function createHaSource(
       });
 
       unsub = deps.subscribe(conn, (entities) => {
-        store().setEntities(toEntityRecord(entities));
+        // Central dedupe: every consumer (Home, Devices, camera wall) sees one
+        // entity per physical device even while Ring + ring-mqtt are both live.
+        store().setEntities(
+          dedupeRingMqtt(toEntityRecord(entities), store().entityPlatforms),
+        );
       });
 
       store().setStatus("connected");

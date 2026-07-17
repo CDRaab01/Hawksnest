@@ -65,6 +65,7 @@ fun EntityDetailScreen(
     viewModel: EntityDetailViewModel = hiltViewModel(),
 ) {
     val device by viewModel.device.collectAsState()
+    val pending by viewModel.pending.collectAsState()
     val hours by viewModel.hours.collectAsState()
     val history by viewModel.history.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
@@ -138,7 +139,11 @@ fun EntityDetailScreen(
             verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
         ) {
             SectionHeader("Control", channel = channel)
-            DeviceControlCard(current, onCall = { service, extra -> viewModel.call(service, extra) })
+            DeviceControlCard(
+                current,
+                onCall = { service, extra -> viewModel.call(service, extra) },
+                pending = viewModel.entityId in pending,
+            )
 
             if (isLockEntity(viewModel.entityId)) {
                 SectionHeader("Keypad codes", channel = channel)
