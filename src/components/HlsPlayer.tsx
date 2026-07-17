@@ -34,6 +34,7 @@ export function HlsPlayer({
   muted = true,
   paused = false,
   seekSeconds,
+  onDuration,
   onError,
   className,
 }: {
@@ -44,10 +45,31 @@ export function HlsPlayer({
   paused?: boolean;
   /** Scrub position (seconds into the media). Seeks the existing element — no reload/re-init. */
   seekSeconds?: number;
+  /** Reports the media duration (seconds) once known — and again when it grows
+   *  (an HLS event playlist's duration extends as segments append). */
+  onDuration?: (seconds: number) => void;
   onError?: () => void;
   className?: string;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
+  // Ref'd so a new callback identity per render can't re-init the source effect.
+  const onDurationRef = useRef(onDuration);
+  onDurationRef.current = onDuration;
+
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    const report = () => {
+      const d = video.duration;
+      if (Number.isFinite(d) && d > 0) onDurationRef.current?.(d);
+    };
+    video.addEventListener("loadedmetadata", report);
+    video.addEventListener("durationchange", report);
+    return () => {
+      video.removeEventListener("loadedmetadata", report);
+      video.removeEventListener("durationchange", report);
+    };
+  }, [src]);
 
   // Drive play/pause from the transport bar without remounting the element.
   useEffect(() => {

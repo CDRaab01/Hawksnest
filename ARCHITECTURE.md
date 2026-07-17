@@ -47,14 +47,20 @@ watchdog + "Connecting…" overlay for battery-camera wake, and the HLS tier res
 with a 15 s bound in `haSource`. Tile age badges use `snapshotFreshnessMs` (`timestamp` attr →
 `last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras. Recorded
 playback = the last ~5 Ring events via the event-selector entity (not continuous VOD; a Frigate
-seam exists in `cameraEvents.ts`, unused). The **timeline itself** shows the whole day of "moments of
-action", not just those ~5: `motionBlocks.ts` (`motionBlocksFromHistory` + `mergePlayable`, mirrored
-in `core/logic/SensorBlocks.kt`) folds the camera's motion/ding **binary_sensor recorder history**
-(`fetchHistory`) into duration blocks, and marks the handful that still have a kept clip as playable.
-Scrubbing to a block with no clip shows the snapshot with an honest "no saved recording" note (Ring/HA
-only retain recent recordings). Rendered Ring-style — solid `effort`-blue blocks (dimmer when
-history-only), a triangle playhead, a dim "Live" region right of now, a "TODAY" header
-(`Timeline24h`) — over the tested `timelineViewport` math.
+seam exists in `cameraEvents.ts`, unused). The **timeline shows only playable recordings**
+(Ring-style: every block is watchable) — the selector's ~5 on ring, clip-bearing events on
+Frigate/demo; no history-derived markers. Scrubbing is **live**: `Timeline24h` streams the time
+under the center playhead during a drag (`onScrub`, rAF-throttled) and the playhead is a true ms —
+inside a kept clip the video seeks in real time (forward and reverse) at the in-clip offset
+(`clipSeek.ts`, mirrored in `core/logic/ClipSeek.kt`; a ring clip's real span is learned from the
+loaded media's duration since `endMs` arrives null), and release keeps playing from that moment.
+Ring clip streams resolve through an explicit per-clip state machine (`RingClipState`:
+resolving → ready/**failed**): a stream HA can't produce (15 s timeout, sleeping battery cam,
+rotated-out event, playback error) surfaces as "Couldn't load this recording" **with a Retry** —
+never a stuck loader — while a time with no kept recording shows the honest "no saved recording"
+note over the snapshot. Rendered Ring-style — solid `effort`-blue blocks, a triangle playhead, a
+dim "Live" region right of now, a "TODAY" header (`Timeline24h`) — over the tested
+`timelineViewport` math.
 
 ## 2. Android app (`android/`, package `com.hawksnest`)
 

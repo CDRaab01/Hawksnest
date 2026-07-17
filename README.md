@@ -59,9 +59,10 @@ labels** (HA's raw "Lock Current status …" → "Front Door"):
 
 - **Home** (`/`) — pinned favorites (large cards) above an **area hub** (`src/config/favorites.ts`).
 - **Cameras** — a **Ring-style player** (tap any camera): on-demand low-latency live
-  (**WebRTC** via `camera/webrtc/offer` → HLS → MJPEG → snapshot), a scrubbable **timeline** of
-  recorded events, an in-player camera switcher, and transport (prev/next event, play/pause,
-  snap-to-Live). Plus an app-wide **doorbell banner** that fires on a camera's `_ding` and opens its
+  (**WebRTC** via `camera/webrtc/offer` → HLS → MJPEG → snapshot), a **live-scrub timeline** of
+  recorded events (dragging previews the footage in real time, forward and reverse; every block
+  is a playable recording), an in-player camera switcher, and transport (prev/next moment,
+  play/pause, snap-to-Live). Plus an app-wide **doorbell banner** that fires on a camera's `_ding` and opens its
   live view. The camera backend is **ring-mqtt** (Ring devices over MQTT + go2rtc): its split
   entities (`_live`/`_snapshot`/`_event` + event-selector/ding/motion) are collapsed into one
   logical camera (`src/lib/cameraModel.ts`), and recorded playback uses the **event selector**

@@ -79,9 +79,10 @@ private const val TAP_SLOP_PX = 8f
 /**
  * Ring-style scrubbable timeline: a center-anchored, zoomable + pannable strip drawn on a Canvas.
  * Drag left/right to move through time; pinch to zoom (≈10 min → 24 h). The playhead marks the
- * current time — pinned at center while scrubbing, at the right edge while live. A clean tap seeks
- * to the tapped time (CameraPlayer's seek() snaps ring to the nearest event). All the mapping/clamp
- * math lives in `core/logic/TimelineViewport`. Mirrors the web `Timeline24h`.
+ * current time — pinned at center while scrubbing, at the right edge while live. While dragging,
+ * [onScrub] streams the time under the center playhead so the parent can preview footage live;
+ * release still commits through [onSeek]/[onLive]. A clean tap seeks to the tapped time. All the
+ * mapping/clamp math lives in `core/logic/TimelineViewport`. Mirrors the web `Timeline24h`.
  */
 @Composable
 fun Timeline24h(
@@ -91,6 +92,9 @@ fun Timeline24h(
     playhead: Long?,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    /** Streams the time under the playhead during an active drag (Compose delivers pointer events
+     *  roughly per frame). Release always follows with onSeek/onLive. */
+    onScrub: ((Long) -> Unit)? = null,
     /** Snap back to live — fired when a tap/drag lands in the "Live" region right of now. */
     onLive: () -> Unit = {},
 ) {
@@ -100,6 +104,9 @@ fun Timeline24h(
 
     var trackWidth by remember { mutableStateOf(0f) }
     var vp by remember { mutableStateOf<Viewport?>(null) }
+    // True while a drag is emitting scrubs — suppresses the recenter effect, which would otherwise
+    // chase every onScrub-driven playhead change and fight the finger (the web's drag guard).
+    var gestureActive by remember { mutableStateOf(false) }
 
     // The clamp window is padded past *now* by half the visible span, so "now" can sit at CENTER
     // with the "Live" region filling the right half — the Ring layout. (Unpadded, the clamp pins
@@ -118,14 +125,10 @@ fun Timeline24h(
         if (ms >= endMs) onLive() else onSeek(minOf(ms, endMs))
     }
 
-    // Ring look: every moment is the same effort-blue. A playable clip (a recording Ring still keeps)
-    // is drawn at full strength; a history-only marker is a touch dimmer so you can see what will play.
-    fun blockColor(ev: CameraEvent): Color =
-        pulse.effort.copy(alpha = if (ev.hasClip) 1f else 0.62f)
-
     // Re-center on external seeks (Live / prev / next) and width changes, preserving zoom.
+    // Suppressed while a drag is scrubbing — the viewport is already under the finger.
     LaunchedEffect(playhead, trackWidth, startMs, endMs) {
-        if (trackWidth > 0f) {
+        if (trackWidth > 0f && !gestureActive) {
             val span = vp?.let { visibleSpanMs(it, trackWidth).toLong() } ?: DEFAULT_SPAN_MS
             vp = viewportForSpan(scrubTime, span, trackWidth, padded(vp))
         }
@@ -170,10 +173,19 @@ fun Timeline24h(
                                     totalDx += panChange.x
                                     if (abs(totalDx) > TAP_SLOP_PX) moved = true
                                 }
-                                if (nv != cur) vp = nv
+                                if (nv != cur) {
+                                    vp = nv
+                                    // Live scrub: stream the center time while panning (clamped
+                                    // out of the Live region).
+                                    if (moved) {
+                                        gestureActive = true
+                                        onScrub?.invoke(minOf(nv.centerMs, endMs))
+                                    }
+                                }
                             }
                             event.changes.forEach { if (it.positionChanged()) it.consume() }
                         }
+                        gestureActive = false
                         val v = vp
                         if (v != null) {
                             if (moved) commit(v.centerMs) else commit(xToTime(down.position.x, v, trackWidth))
@@ -203,7 +215,7 @@ fun Timeline24h(
                 }
             }
 
-            // Action blocks — solid blue "moments", tall like Ring's.
+            // Recording blocks — solid effort-blue, tall like Ring's; every block is a playable clip.
             val blockTop = size.height * 0.16f
             val blockH = size.height * 0.68f
             for (ev in events) {
@@ -212,7 +224,7 @@ fun Timeline24h(
                 val w = (timeToX(endT, v, wpx) - x1).coerceAtLeast(3f)
                 if (x1 + w < 0f || x1 > wpx) continue // off-screen
                 drawRoundRect(
-                    color = blockColor(ev),
+                    color = pulse.effort,
                     topLeft = Offset(x1, blockTop),
                     size = Size(w, blockH),
                     cornerRadius = CornerRadius(3f, 3f),
