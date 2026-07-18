@@ -116,10 +116,11 @@ function AddGuest({ lockEntityId, nextSlot }: { lockEntityId: string; nextSlot: 
       lockEntityId,
       slot: nextSlot,
       guestName: name.trim(),
-      expiryLocal: expiry,
+      // Expiry is a whole day; the code turns off at 11:59 PM on the chosen date.
+      expiryLocal: expiry ? `${expiry}T23:59` : "",
     });
     if (!automation) {
-      setMsg("Pick a valid expiry date & time.");
+      setMsg("Pick an expiry date.");
       return;
     }
     setBusy(true);
@@ -165,10 +166,11 @@ function AddGuest({ lockEntityId, nextSlot }: { lockEntityId: string; nextSlot: 
           className="w-24 rounded-sm border border-hairline bg-panel px-sm py-xs font-mono text-body text-ink"
         />
         <input
-          type="datetime-local"
+          type="date"
           value={expiry}
           onChange={(e) => setExpiry(e.target.value)}
-          aria-label="Guest code expires"
+          aria-label="Guest code expires (11:59 PM on this date)"
+          title="Code turns off at 11:59 PM on this date"
           className="rounded-sm border border-hairline bg-panel px-sm py-xs font-body text-body text-ink"
         />
         <PulseButton
