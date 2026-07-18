@@ -1,6 +1,10 @@
 package com.hawksnest.ui.entity
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -8,7 +12,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -16,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -23,7 +32,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.time.LocalDate
+import java.time.YearMonth
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -246,11 +258,23 @@ private fun OwnerSlotRow(slot: Int, label: String, onSet: (String) -> Unit, onCl
     }
 }
 
+private val MONTH_NAMES = listOf(
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+)
+
 @Composable
 private fun AddGuest(nextSlot: Int?, onAdd: (String, String, String) -> Unit) {
+    val today = remember { LocalDate.now() }
     var name by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
-    var expiry by remember { mutableStateOf("") }
+    var year by remember { mutableIntStateOf(today.year) }
+    var month by remember { mutableIntStateOf(today.monthValue) }
+    var day by remember { mutableIntStateOf(today.dayOfMonth) }
+
+    // Keep the day valid when a month/year change shortens the month (e.g. Jan 31 → Feb).
+    val daysInMonth = YearMonth.of(year, month).lengthOfMonth()
+    if (day > daysInMonth) day = daysInMonth
+
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = HawksnestTheme.spacing.sm),
         verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm),
@@ -270,18 +294,81 @@ private fun AddGuest(nextSlot: Int?, onAdd: (String, String, String) -> Unit) {
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
             modifier = Modifier.fillMaxWidth(),
         )
-        OutlinedTextField(
-            value = expiry,
-            onValueChange = { expiry = it },
-            placeholder = { Text("Expires (YYYY-MM-DDTHH:MM)") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+        Text(
+            "Expires (11:59 PM on)",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
+            DateDropdown(
+                selectedLabel = MONTH_NAMES[month - 1],
+                options = (1..12).map { it to MONTH_NAMES[it - 1] },
+                onSelect = { month = it },
+                modifier = Modifier.weight(1.2f),
+            )
+            DateDropdown(
+                selectedLabel = day.toString(),
+                options = (1..daysInMonth).map { it to it.toString() },
+                onSelect = { day = it },
+                modifier = Modifier.weight(1f),
+            )
+            DateDropdown(
+                selectedLabel = year.toString(),
+                options = (today.year..today.year + 2).map { it to it.toString() },
+                onSelect = { year = it },
+                modifier = Modifier.weight(1.3f),
+            )
+        }
         PulseButton(
             "Add guest",
-            onClick = { onAdd(name, code, expiry); name = ""; code = ""; expiry = "" },
+            onClick = {
+                val expiry = "%04d-%02d-%02dT23:59".format(year, month, day)
+                onAdd(name, code, expiry)
+                name = ""; code = ""
+                year = today.year; month = today.monthValue; day = today.dayOfMonth
+            },
             tonal = true,
             enabled = nextSlot != null,
         )
+    }
+}
+
+/** A read-only field that opens a [DropdownMenu] of numeric date parts on tap. */
+@Composable
+private fun DateDropdown(
+    selectedLabel: String,
+    options: List<Pair<Int, String>>,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, HawksnestTheme.pulse.hairline, MaterialTheme.shapes.small)
+                .background(HawksnestTheme.pulse.panel, MaterialTheme.shapes.small)
+                .clickable { expanded = true }
+                .padding(horizontal = HawksnestTheme.spacing.md, vertical = HawksnestTheme.spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                selectedLabel,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { (value, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = { onSelect(value); expanded = false },
+                )
+            }
+        }
     }
 }
