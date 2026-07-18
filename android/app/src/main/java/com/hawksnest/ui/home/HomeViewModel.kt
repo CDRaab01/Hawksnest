@@ -123,6 +123,25 @@ class HomeViewModel @Inject constructor(
     /** Entity ids with a control in flight — the security hero renders arming spinners from this. */
     val pending: StateFlow<Set<String>> = connection.pendingControls
 
+    // ── Honest degraded offline state (see core/logic/Offline.kt for the model) ──────────────
+    /** Epoch ms an in-session drop made the in-memory entities stale (null while live/demo). */
+    val staleSinceMs: StateFlow<Long?> = state.staleSinceMs
+
+    /** Epoch ms we were last connected — the Offline screen's "Last connected" readout. */
+    val lastConnectedMs: StateFlow<Long?> = state.lastConnectedMs
+
+    /** Epoch ms of the next reconnect attempt (drives the Offline "Retrying in Ns" countdown). */
+    val nextRetryAtMs: StateFlow<Long?> = state.nextRetryAtMs
+
+    /** Passive reachability hint while disconnected (true = host answers, HA doesn't; null = unknown). */
+    val hostReachable: StateFlow<Boolean?> = state.hostReachable
+
+    /** Epoch ms of the last entity update — the grace banner's "as of HH:MM". */
+    val lastUpdateMs: StateFlow<Long> = state.lastUpdateMs
+
+    /** Skip the remaining reconnect backoff and try again now (the Offline screen's button). */
+    fun retryNow() = connection.retryNow()
+
     /** Arm/disarm — crash-safe via the control gate (failures land on the app snackbar), pending
      *  on [pending]. Non-optimistic — the store reconciles from the source echo. Disarm sends no
      *  code: the in-app PIN keypad was removed, so a panel that enforces `code_format` must allow
@@ -188,15 +207,20 @@ class HomeViewModel @Inject constructor(
 
         val rooms = groupByArea(all, areas)
 
+        // While disconnected the lock/alarm states are masked (HaState) and anything else is
+        // last-known — never claim a security posture we can't verify. Honest over reassuring.
+        val disconnected =
+            status == ConnectionStatus.CONNECTING || status == ConnectionStatus.ERROR
+
         return HomeUi(
             status = status,
             error = error,
             alarm = alarm,
             alarmEntityId = alarmEntity?.entityId,
             alarmRawState = alarmEntity?.state,
-            securitySummary = security.summary,
-            secureAllClear = security.allClear,
-            offlineLabel = security.offlineLabel,
+            securitySummary = if (disconnected) "Security state unknown — offline" else security.summary,
+            secureAllClear = if (disconnected) false else security.allClear,
+            offlineLabel = if (disconnected) null else security.offlineLabel,
             cameras = cameras,
             liveCameraCount = cameras.count { it.live },
             doorbell = doorbell,

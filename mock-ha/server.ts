@@ -108,6 +108,11 @@ async function handleHttp(req: IncomingMessage, res: ServerResponse): Promise<vo
     hub.disconnectAll();
     return json(res, 200, { ok: true });
   }
+  if (path === "/__scenario/refuse-connections" && method === "POST") {
+    const b = asRecord(await readBody(req));
+    hub.refuseConnections = b.refuse === true;
+    return json(res, 200, { ok: true });
+  }
   if (path === "/__scenario/calls" && method === "GET") {
     return json(res, 200, hub.calls);
   }
@@ -145,6 +150,12 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: "/api/websocket" });
 wss.on("connection", (ws) => {
+  // A scripted outage: drop the socket before the auth handshake even starts, so
+  // the app sees exactly what a dead proxy/HA looks like and keeps backing off.
+  if (hub.refuseConnections) {
+    ws.close();
+    return;
+  }
   const transport: Transport = {
     send: (m) => {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(m));

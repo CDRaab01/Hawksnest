@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -47,8 +48,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.alarmView
+import com.hawksnest.core.logic.graceExpired
 import com.hawksnest.core.logic.relativeTime
 import com.hawksnest.ui.cameras.CameraLightbox
 import com.hawksnest.ui.cameras.DoorbellBanner
@@ -56,7 +59,9 @@ import com.hawksnest.ui.cameras.CameraSnapshot
 import com.hawksnest.ui.cameras.LiveFrameStore
 import com.hawksnest.ui.cameras.bustCache
 import com.hawksnest.ui.components.ConnectionPill
+import com.hawksnest.ui.components.OfflineState
 import com.hawksnest.ui.components.PanelCard
+import com.hawksnest.ui.components.ReconnectingBanner
 import com.hawksnest.ui.components.SectionHeader
 import com.hawksnest.ui.components.rememberHaptics
 import com.hawksnest.ui.theme.HawksnestTheme
@@ -118,6 +123,33 @@ fun HomeScreen(
         }
     }
 
+    // ── Honest degraded offline model (core/logic/Offline.kt) ────────────────────────────────
+    // After an in-session drop we keep the last in-memory entities on screen — dimmed, controls
+    // disabled, under a "Reconnecting — as of HH:MM" banner — for at most the 120s grace window
+    // (lock/alarm state is already masked at the store the moment the socket drops). Beyond the
+    // window, or on a terminal auth error, collapse to the full OfflineState. Nothing is
+    // persisted; a first-ever connect (nothing stale to show) keeps the plain connecting UI.
+    val staleSince by viewModel.staleSinceMs.collectAsState()
+    val lastConnected by viewModel.lastConnectedMs.collectAsState()
+    val nextRetryAt by viewModel.nextRetryAtMs.collectAsState()
+    val hostReachable by viewModel.hostReachable.collectAsState()
+    val lastUpdate by viewModel.lastUpdateMs.collectAsState()
+    val disconnected = ui.status == ConnectionStatus.ERROR ||
+        (ui.status == ConnectionStatus.CONNECTING && staleSince != null)
+    // 1s heartbeat while disconnected so the grace window actually expires on screen.
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(disconnected) {
+        if (!disconnected) return@LaunchedEffect
+        while (true) {
+            nowMs = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    val inGrace = ui.status == ConnectionStatus.CONNECTING &&
+        staleSince?.let { !graceExpired(it, nowMs) } == true
+    val showOffline = ui.status == ConnectionStatus.ERROR ||
+        (ui.status == ConnectionStatus.CONNECTING && staleSince?.let { graceExpired(it, nowMs) } == true)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -142,14 +174,77 @@ fun HomeScreen(
             }
         }
 
+        if (showOffline) {
+            // Offline = "we don't know" — no entity data at all, just the honest readouts.
+            // The header stays above so Settings (fix the URL/token) is always reachable.
+            OfflineState(
+                lastConnectedMs = lastConnected,
+                nextRetryAtMs = nextRetryAt,
+                hostReachable = hostReachable,
+                onRetry = viewModel::retryNow,
+                error = ui.error?.takeIf { ui.status == ConnectionStatus.ERROR },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            return@Column
+        }
+
+        if (inGrace) {
+            ReconnectingBanner(asOfMs = lastUpdate.takeIf { it > 0 })
+        }
+
+        HomeContent(
+            ui = ui,
+            pending = pending,
+            bucket = bucket,
+            showDoorbell = showDoorbell,
+            controlsEnabled = !inGrace,
+            onOpenRooms = onOpenRooms,
+            onArm = viewModel::arm,
+            onOpenLightbox = { lightbox = it },
+            onDoorbellDismiss = { ring?.let { doorbellDismissedAt = it.whenMs } },
+            modifier = if (inGrace) Modifier.alpha(0.55f) else Modifier,
+        )
+    }
+
+    lightbox?.let { cam ->
+        CameraLightbox(
+            cameras = ui.cameras,
+            initial = cam,
+            onDismiss = { lightbox = null },
+        )
+    }
+}
+
+/**
+ * Everything below Home's header — split out so the offline/grace branch above stays readable.
+ * During the grace window the whole block renders dimmed with [controlsEnabled] false.
+ */
+@Composable
+private fun HomeContent(
+    ui: HomeUi,
+    pending: Set<String>,
+    bucket: Long,
+    showDoorbell: Boolean,
+    controlsEnabled: Boolean,
+    onOpenRooms: () -> Unit,
+    onArm: (String) -> Unit,
+    onOpenLightbox: (CameraUi) -> Unit,
+    onDoorbellDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ring = ui.doorbell
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.lg),
+    ) {
         if (showDoorbell && ring != null) {
             DoorbellBanner(
                 cameraName = ring.name,
                 onView = {
-                    ui.cameras.firstOrNull { it.id == ring.cameraId }?.let { lightbox = it }
-                    doorbellDismissedAt = ring.whenMs
+                    ui.cameras.firstOrNull { it.id == ring.cameraId }?.let { onOpenLightbox(it) }
+                    onDoorbellDismiss()
                 },
-                onDismiss = { doorbellDismissedAt = ring.whenMs },
+                onDismiss = onDoorbellDismiss,
             )
         }
 
@@ -161,8 +256,9 @@ fun HomeScreen(
             ui,
             busy = ui.alarmEntityId?.let { it in pending } == true ||
                 ui.alarmRawState in setOf("arming", "disarming", "pending"),
-            onArm = viewModel::arm,
-            onDisarm = { viewModel.arm("alarm_disarm") },
+            enabled = controlsEnabled,
+            onArm = onArm,
+            onDisarm = { onArm("alarm_disarm") },
         )
 
         if (ui.cameras.isNotEmpty()) {
@@ -183,7 +279,7 @@ fun HomeScreen(
                         CameraTile(
                             cam = cam,
                             snapshotModel = bustCache(cam.snapshotUrl, bucket),
-                            onClick = { lightbox = cam },
+                            onClick = { onOpenLightbox(cam) },
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -219,14 +315,6 @@ fun HomeScreen(
             }
         }
     }
-
-    lightbox?.let { cam ->
-        CameraLightbox(
-            cameras = ui.cameras,
-            initial = cam,
-            onDismiss = { lightbox = null },
-        )
-    }
 }
 
 /**
@@ -258,13 +346,21 @@ private fun LifeSafetyStrip(ui: HomeUi) {
 }
 
 @Composable
-private fun SecurityHero(ui: HomeUi, busy: Boolean, onArm: (String) -> Unit, onDisarm: () -> Unit) {
+private fun SecurityHero(
+    ui: HomeUi,
+    busy: Boolean,
+    onArm: (String) -> Unit,
+    onDisarm: () -> Unit,
+    enabled: Boolean = true,
+) {
     val pulse = HawksnestTheme.pulse
     val haptics = rememberHaptics()
     // Which circle was tapped, so only its spinner shows while HA arms/disarms. Cleared on settle.
     var tapped by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(busy) { if (!busy) tapped = null }
-    PanelCard(channel = ui.alarm?.let { pulse.color(it.channel) }, raised = true) {
+    // While reconnecting the alarm entity is masked to `unavailable` (never a stale mode), so no
+    // circle reads active; drop the channel tint too so the hero doesn't imply a posture.
+    PanelCard(channel = if (enabled) ui.alarm?.let { pulse.color(it.channel) } else null, raised = true) {
         if (ui.alarm != null) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -274,10 +370,10 @@ private fun SecurityHero(ui: HomeUi, busy: Boolean, onArm: (String) -> Unit, onD
                     ArmCircle(
                         label = b.label,
                         icon = ARM_ICON[b.service] ?: Icons.Filled.LockOpen,
-                        active = ui.alarmRawState == b.state,
+                        active = enabled && ui.alarmRawState == b.state,
                         channel = pulse.color(alarmView(b.state).channel),
                         busy = busy && tapped == b.service,
-                        enabled = !busy,
+                        enabled = enabled && !busy,
                         onClick = {
                             haptics.toggleOn()
                             tapped = b.service

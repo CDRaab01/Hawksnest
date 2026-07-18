@@ -1,5 +1,6 @@
 package com.hawksnest.core.ha
 
+import com.hawksnest.core.logic.maskSecurityStates
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,6 +54,30 @@ class HaState @Inject constructor() {
     private val _lastUpdateMs = MutableStateFlow(0L)
     val lastUpdateMs: StateFlow<Long> = _lastUpdateMs.asStateFlow()
 
+    /** Epoch ms we last *left* CONNECTED (null before the first drop) — the Offline "as of" line. */
+    private val _lastConnectedMs = MutableStateFlow<Long?>(null)
+    val lastConnectedMs: StateFlow<Long?> = _lastConnectedMs.asStateFlow()
+
+    /**
+     * Epoch ms an in-session drop made the in-memory entities stale (null while live, in demo, or
+     * on a first-ever connect). Home's 120s grace window (dimmed entities + "Reconnecting" banner)
+     * counts from here; a successful reconnect clears it.
+     */
+    private val _staleSinceMs = MutableStateFlow<Long?>(null)
+    val staleSinceMs: StateFlow<Long?> = _staleSinceMs.asStateFlow()
+
+    /** Epoch ms of the next reconnect attempt while backing off (null when none is scheduled). */
+    private val _nextRetryAtMs = MutableStateFlow<Long?>(null)
+    val nextRetryAtMs: StateFlow<Long?> = _nextRetryAtMs.asStateFlow()
+
+    /**
+     * Passive reachability hint while disconnected: true = the base URL's host answered HTTP (HA
+     * itself isn't answering), false = transport failure (the home network / Tailscale is
+     * unreachable), null = unknown / not probed. Cleared once live again.
+     */
+    private val _hostReachable = MutableStateFlow<Boolean?>(null)
+    val hostReachable: StateFlow<Boolean?> = _hostReachable.asStateFlow()
+
     /** Replace the whole snapshot (initial load / full re-sync). */
     fun setSnapshot(entities: Map<String, HassEntity>, areas: AreaRegistry) {
         _entities.value = entities
@@ -86,9 +111,36 @@ class HaState @Inject constructor() {
     }
 
     fun setStatus(status: ConnectionStatus, error: String? = null) {
+        val prev = _status.value
+        if (prev == ConnectionStatus.CONNECTED && status != ConnectionStatus.CONNECTED) {
+            // Leaving CONNECTED = the in-session drop. Stamp when we were last live, start the
+            // grace clock if there's anything to keep showing, and — the security invariant —
+            // collapse lock/alarm states to `unavailable` immediately so nothing can render them
+            // stale, not even for the length of one reconnect backoff. In-memory only; the next
+            // successful connection's fresh snapshot replaces all of it.
+            val now = System.currentTimeMillis()
+            _lastConnectedMs.value = now
+            if (_entities.value.isNotEmpty() && _staleSinceMs.value == null) {
+                _staleSinceMs.value = now
+            }
+            _entities.value = maskSecurityStates(_entities.value)
+        }
+        if (status == ConnectionStatus.CONNECTED || status == ConnectionStatus.DEMO) {
+            // Live again (or fresh demo data): nothing is stale, no retry is scheduled, and the
+            // reachability hint no longer applies.
+            _staleSinceMs.value = null
+            _nextRetryAtMs.value = null
+            _hostReachable.value = null
+        }
         _status.value = status
         _error.value = error
     }
 
     fun setBaseUrl(baseUrl: String) { _baseUrl.value = baseUrl }
+
+    /** Set/clear the next scheduled reconnect attempt (drives the Offline "Retrying in Ns"). */
+    fun setNextRetryAt(atMs: Long?) { _nextRetryAtMs.value = atMs }
+
+    /** Record the once-per-backoff-cycle reachability probe result (see [hostReachable]). */
+    fun setHostReachable(reachable: Boolean?) { _hostReachable.value = reachable }
 }

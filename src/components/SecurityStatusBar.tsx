@@ -3,7 +3,7 @@ import { Home, Loader, Lock, ShieldOff, type LucideIcon } from "lucide-react";
 import { PanelCard } from "./PanelCard";
 import type { Channel } from "./PanelCard";
 import { useAlarmControl } from "./useAlarmControl";
-import { usePrimaryAlarm, useEntityStore } from "../store/entityStore";
+import { usePrimaryAlarm, useConnection, useEntityStore } from "../store/entityStore";
 import { alarmView, ARM_BUTTONS } from "../lib/alarm";
 import { resolveName } from "../lib/resolve";
 import { overrides } from "../config/overrides";
@@ -39,6 +39,11 @@ const DOOR_CLASSES = new Set(["door", "window", "garage_door"]);
  */
 export function SecurityStatusBar() {
   const alarm = usePrimaryAlarm();
+  // Security invariant: never claim a posture we can't verify. While the socket is down the
+  // store has masked lock/alarm states; here the discs additionally drop their active mode and
+  // the summary line says "unknown" instead of a stale "All doors locked".
+  const { status } = useConnection();
+  const disconnected = status === "connecting" || status === "error";
   const entities = useEntityStore((s) => s.entities);
   const areas = useEntityStore((s) => s.areas);
   const entityToDevice = useEntityStore((s) => s.devices.entityToDevice);
@@ -95,7 +100,7 @@ export function SecurityStatusBar() {
       {alarm ? (
         <div className="flex items-end justify-center gap-xl">
           {ARM_BUTTONS.map((b) => {
-            const active = alarm.state === b.state;
+            const active = !disconnected && alarm.state === b.state;
             const channel = alarmView(b.state).channel;
             const Icon = ARM_ICON[b.service] ?? ShieldOff;
             const isPending = pending === b.service;
@@ -104,7 +109,7 @@ export function SecurityStatusBar() {
                 key={b.service}
                 type="button"
                 onClick={() => arm(b.service)}
-                disabled={pending !== null}
+                disabled={pending !== null || disconnected}
                 aria-pressed={active}
                 aria-busy={isPending}
                 aria-label={b.label}
@@ -160,7 +165,11 @@ export function SecurityStatusBar() {
 
       {/* A failed arm/disarm, or the plain-language security line + any offline notice. */}
       <div className="mt-lg border-t border-hairline pt-md text-center">
-        {error ? (
+        {disconnected ? (
+          <span className="font-body text-body text-ink-dim">
+            Security state unknown — offline
+          </span>
+        ) : error ? (
           <span className="font-body text-body text-streak">{error}</span>
         ) : (
           <>

@@ -6,6 +6,7 @@ import { domainOf } from "../lib/ha";
 import { groupByArea, type AreaGroup } from "../lib/areas";
 import { isPrimaryEntity, isNoiseEntity } from "../lib/entityVisibility";
 import { resolveCameras, type LogicalCamera } from "../lib/cameraModel";
+import { maskSecurityStates } from "../lib/offline";
 import { overrides } from "../config/overrides";
 import { zwaveControllerOffline } from "../lib/deviceHealth";
 import type { DeviceIndex, DeviceRecord } from "./ha/registry";
@@ -27,6 +28,15 @@ interface EntityState {
   entityPlatforms: Record<string, string>;
   status: ConnectionStatus;
   error?: string;
+  /** Epoch ms we last *left* "connected" (undefined before the first drop) — the Offline "as of". */
+  lastConnectedAt?: number;
+  /**
+   * Epoch ms an in-session drop made the in-memory entities stale (undefined while live, in
+   * demo, or on a first-ever connect). The dashboard's 120s grace window (dimmed entities +
+   * "Reconnecting" banner) counts from here; a successful reconnect clears it. In-memory only —
+   * nothing about entity state is ever persisted.
+   */
+  staleSince?: number;
   /**
    * Connected Home Assistant origin (the saved creds URL), or "" in demo mode.
    * Camera `<img>` URLs are resolved against this so they reach HA even when
@@ -77,7 +87,28 @@ export const useEntityStore = create<EntityState>((set) => ({
       for (const e of list) entities[e.entity_id] = e;
       return { entities };
     }),
-  setStatus: (status, error) => set({ status, error }),
+  setStatus: (status, error) =>
+    set((s) => {
+      const leavingConnected = s.status === "connected" && status !== "connected";
+      const settled = status === "connected" || status === "demo";
+      const now = Date.now();
+      return {
+        status,
+        error,
+        // Leaving "connected" = the in-session drop: stamp when we were last live, start the
+        // grace clock if there's anything to keep showing, and — the security invariant —
+        // collapse lock/alarm states to `unavailable` immediately so nothing can render them
+        // stale, not even for the length of one reconnect backoff. In-memory only; the next
+        // successful connection's entity push replaces all of it.
+        lastConnectedAt: leavingConnected ? now : s.lastConnectedAt,
+        staleSince: settled
+          ? undefined
+          : leavingConnected && Object.keys(s.entities).length > 0
+            ? s.staleSince ?? now
+            : s.staleSince,
+        entities: leavingConnected ? maskSecurityStates(s.entities) : s.entities,
+      };
+    }),
   setBaseUrl: (baseUrl) => set({ baseUrl }),
 }));
 
@@ -87,7 +118,14 @@ export const useEntity = (id: string): HassEntity | undefined =>
   useEntityStore((s) => s.entities[id]);
 
 export const useConnection = () =>
-  useEntityStore(useShallow((s) => ({ status: s.status, error: s.error })));
+  useEntityStore(
+    useShallow((s) => ({
+      status: s.status,
+      error: s.error,
+      lastConnectedAt: s.lastConnectedAt,
+      staleSince: s.staleSince,
+    })),
+  );
 
 /** Connected HA origin for resolving camera image URLs ("" in demo mode). */
 export const useHaBaseUrl = (): string => useEntityStore((s) => s.baseUrl);

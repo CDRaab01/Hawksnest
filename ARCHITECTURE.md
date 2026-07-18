@@ -32,7 +32,7 @@ Channel hues intentionally shift between themes so a vivid accent still clears c
 | Area | Responsibility |
 |---|---|
 | `src/lib/` | The domain kernel. `cameraModel.ts` collapses ring-mqtt's split entities (`_live`/`_snapshot`/`_event` + selectors/ding/motion) into one logical camera; `cards.ts` maps HA domains → card components (**must never throw** — unknown domains render `GenericCard`); `resolve.ts` centralizes label/icon resolution (per-entity overrides go in `src/config/overrides.ts`, never in components) |
-| `src/store/` | Client state: HA WebSocket connection, auth, entity registry, reconnect logic. The entity sink dedupes the Ring-vs-ring-mqtt double exposure centrally (`src/lib/dedupe.ts`, platform map from the registry): when both integrations expose the same light, the ring-platform twin is dropped so every consumer sees one entity per physical device |
+| `src/store/` | Client state: HA WebSocket connection, auth, entity registry, reconnect logic. The entity sink dedupes the Ring-vs-ring-mqtt double exposure centrally (`src/lib/dedupe.ts`, platform map from the registry): when both integrations expose the same light, the ring-platform twin is dropped so every consumer sees one entity per physical device. The store also keeps the offline bookkeeping (`lastConnectedAt`/`staleSince`, stamped on leaving `connected`) and masks lock/alarm states to `unavailable` at the drop moment (`lib/offline.ts` — see the offline invariant below); `retryConnection()` restarts the source to skip the websocket lib's internal backoff |
 | `src/screens/` + `src/cards/` + `src/components/` | Presentation; no raw hex — PULSE tokens only. Loading states use the shared `Skeleton` (one hairline-strong shimmer sweep — camera first-frame decode, history fetch); the dashboard arm discs activate via a channel fill-sweep, still non-optimistic (the sweep follows HA's echo, pinned in tests) |
 | `src/config/` | Entity/room overrides |
 | `public/` + service worker (vite config) | PWA shell. **The SW never caches `/api` and never touches the HA token** — offline = shell + Offline/Demo state, never stale entity data. Updates are **prompt**, not silent (`registerType:"prompt"`): `UpdateToast` (useRegisterSW) surfaces a "reload" prompt when a new shell is waiting, so a wall tablet that never navigates isn't stranded on a stale build |
@@ -78,7 +78,13 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   layer (a failed call becomes a message on the app-level snackbar, never an uncaught coroutine
   exception) and the honest-pending tracker (entity id held in `pendingControls` until HA echoes,
   the call fails, or a 30 s timeout reports "didn't respond"). Raw `callService` is reserved for
-  screens that surface their own errors (lock keypad codes, Z-Wave maintenance).
+  screens that surface their own errors (lock keypad codes, Z-Wave maintenance). `HaState` also
+  carries the offline bookkeeping (`lastConnectedMs`/`staleSinceMs`/`nextRetryAtMs`/
+  `hostReachable`, all in-memory `StateFlow`s) and applies the lock/alarm stale-state mask on
+  leaving CONNECTED; `HaSource`'s reconnect backoff is skippable via `Source.retryNow()`
+  (`RetrySignal`) and fires one bounded `core/net/ReachabilityProbe` per cycle — see the offline
+  invariant below and `core/logic/Offline.kt` (the pure model: grace window, countdown,
+  "as of" formatting, mask).
 - `core/logic/`, `core/automations/` — entity → domain-model mapping, automation surfaces.
   Includes the ring/ring-mqtt dedupe (`Dedupe.kt`, applied centrally at `HaSource`'s entity sink,
   mirroring the web) and the Devices sectioning model (`DeviceSections.kt`: per-room three-tier
@@ -175,13 +181,33 @@ change deploy files, that test is the spec**; update both together.
    `SlideToAct` — the pending wait *is* the thumb holding at the end of the track. The optimistic
    switches on lights/switches/fans are **not** a violation: the invariant covers security
    domains — locks and the alarm — only.
-2. **Service worker: never cache `/api`, never touch the token.**
-3. **nginx XFF rule** (above) — all-or-nothing.
-4. Long-lived-token auth is the accepted Phase-0 posture; the upgrade path is TLS-then-OAuth
+2. **Honest degraded offline (the refined no-stale-state invariant).** Hawksnest still has **no
+   persistent entity cache** — nothing about entity state ever touches disk, and no command is
+   ever queued. What was refined: after an **in-session** drop, non-security entities may keep
+   rendering **dimmed + labeled** ("Reconnecting — as of HH:MM", controls disabled) for **≤120 s**
+   (`GRACE_WINDOW_MS`), because a blank screen three seconds into a Wi-Fi blip is less honest than
+   a labeled stale one; **lock and alarm state is never rendered stale, not even inside the
+   window** — the store masks `lock.*`/`alarm_control_panel.*` to `unavailable` the moment the
+   socket is lost (web `lib/offline.ts::maskSecurityStates` in `entityStore.setStatus`; Android
+   `core/logic/Offline.kt` in `HaState.setStatus`), and the lock/alarm/security-bar surfaces
+   additionally present an explicit "Unknown — offline". Past the window — or immediately on a
+   terminal auth error — the UI collapses to the full **OfflineState** (web
+   `components/OfflineState.tsx`, Android `ui/components/OfflineState.kt`): no entity data at all,
+   a "Last connected …" readout, a **Retry now** (web restarts the source; Android
+   `Source.retryNow()` → `HaSource`'s `RetrySignal` skips the remaining 1 s→30 s backoff, whose
+   next attempt is published as `nextRetryAtMs` for the live countdown), and a **passive
+   reachability hint**: one bounded probe per backoff cycle (web: same-origin `fetch("/api/")`;
+   Android: `core/net/ReachabilityProbe`, shared with Settings → Test) distinguishes "your home
+   network is unreachable — check Tailscale" (transport failure) from "reachable but HA isn't
+   answering" (any HTTP response). A first-ever connect has nothing stale to show, so it never
+   enters the grace window. A successful reconnect's fresh snapshot replaces everything.
+3. **Service worker: never cache `/api`, never touch the token.**
+4. **nginx XFF rule** (above) — all-or-nothing.
+5. Long-lived-token auth is the accepted Phase-0 posture; the upgrade path is TLS-then-OAuth
    (ROADMAP #1–2), in that order, web + Android together so the token story stays one story.
    Android hardens token-at-rest now: the LLAT is Keystore-encrypted (`util/TokenCipher`) and
    excluded from cloud backup / device transfer, so a copied credential file is useless off-device.
-5. Unknown HA domains must render, not crash (`cards.ts` contract).
+6. Unknown HA domains must render, not crash (`cards.ts` contract).
 
 ## Where to make common changes
 

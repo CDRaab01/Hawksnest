@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { usePrimaryAlarm } from "../store/entityStore";
+import { CloudOff } from "lucide-react";
+import { usePrimaryAlarm, useConnection } from "../store/entityStore";
 import { alarmView } from "../lib/alarm";
 import type { Channel } from "./PanelCard";
 
@@ -23,7 +24,23 @@ const TEXT: Record<Channel, string> = {
  */
 export function ArmedPill() {
   const alarm = usePrimaryAlarm();
+  const { status } = useConnection();
   if (!alarm) return null;
+  // Security invariant: never a stale armed mode in the nav — while the socket is down the pill
+  // reads an explicit "Unknown" instead of the last-known posture.
+  if (status === "connecting" || status === "error") {
+    return (
+      <Link
+        to="/"
+        aria-label="Security: unknown while offline"
+        className="inline-flex items-center gap-xs rounded-sm border border-hairline px-sm py-xs transition-colors duration-fast hover:border-hairline-strong"
+      >
+        <span className="h-2 w-2 rounded-full bg-ink-faint" />
+        <CloudOff className="text-ink-dim" size={14} />
+        <span className="font-body text-caption font-semibold text-ink-dim">Unknown</span>
+      </Link>
+    );
+  }
   const view = alarmView(alarm.state);
   const Icon = view.icon;
 

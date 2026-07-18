@@ -40,6 +40,13 @@ interface Source {
     fun stop()
 
     /**
+     * Skip the remainder of the current reconnect backoff and try again now (the Offline screen's
+     * "Retry now" button). No-op for sources that don't reconnect (the fixture source) or when a
+     * connect attempt is already in flight. Never queues work — it only shortens a wait.
+     */
+    fun retryNow() {}
+
+    /**
      * Perform an HA service call (e.g. lock.lock, light.turn_on). The fixture source simulates it
      * locally; the live source forwards it to HA, whose state echo reconciles the store —
      * **non-optimistic**. Throws if the source can't perform writes.
