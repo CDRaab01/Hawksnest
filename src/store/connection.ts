@@ -31,6 +31,16 @@ export function stopConnection(): void {
 }
 
 /**
+ * The Offline screen's "Retry now": re-select and restart the source, which attempts a fresh
+ * connection immediately. The websocket lib's own `reconnect()` is a no-op mid-backoff (its
+ * socket is already gone), so restarting the source is the reliable skip-the-wait. Never queues
+ * anything — a failed attempt just lands back in "error"/"connecting" honestly.
+ */
+export function retryConnection(): void {
+  startConnection();
+}
+
+/**
  * Perform an HA service call through the active source (fixture simulates it;
  * live HA forwards it and reconciles via the state echo). Throws if the source
  * can't perform writes (e.g. not connected).

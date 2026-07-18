@@ -3,6 +3,7 @@ import { render, screen, act, fireEvent } from "@testing-library/react";
 import { LockCard } from "../LockCard";
 import { AlarmCard } from "../AlarmCard";
 import { callService } from "../../store/connection";
+import { useEntityStore } from "../../store/entityStore";
 import type { HassEntity } from "../../lib/ha";
 
 // The control cards call HA through this module; mock it so the call is
@@ -28,6 +29,9 @@ const alarm = (state: string): HassEntity => ({
 beforeEach(() => {
   vi.useFakeTimers();
   mockCall.mockClear();
+  // The security cards render an explicit "Unknown — offline" while disconnected;
+  // these timeout flows are about a LIVE connection whose device never echoes.
+  useEntityStore.setState({ status: "connected" });
 });
 afterEach(() => {
   vi.useRealTimers();

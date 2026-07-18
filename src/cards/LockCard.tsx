@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Lock, LockOpen, Loader, AlertTriangle } from "lucide-react";
+import { Lock, LockOpen, Loader, AlertTriangle, CloudOff } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { SlideToAct } from "../components/SlideToAct";
 import { resolveName } from "../lib/resolve";
 import { callService } from "../store/connection";
+import { useConnection } from "../store/entityStore";
 import type { Channel } from "../components/PanelCard";
 import type { CardProps } from "./types";
 
@@ -37,6 +38,12 @@ const FLASH_COLOR: Record<"locked" | "unlocked", string> = {
  */
 export function LockCard({ entity, overrides, density = "comfortable" }: CardProps) {
   const name = resolveName(entity, overrides);
+  // Security invariant: a lock's state is NEVER rendered stale. While the HA socket is down
+  // (reconnecting or terminal error) the store has already masked lock states, and this card
+  // additionally presents an explicit "Unknown — offline" with the control disabled — a brief
+  // disconnect must not show "Locked" it can't verify (or offer a slide it can't deliver).
+  const { status } = useConnection();
+  const disconnected = status === "connecting" || status === "error";
   const locked = entity.state === "locked";
   // A jam is a terminal *failure* state HA reports when the bolt can't throw —
   // surface it explicitly. Never render a jammed lock as "Unlocked".
@@ -108,20 +115,30 @@ export function LockCard({ entity, overrides, density = "comfortable" }: CardPro
       : "Slide to lock";
   const pendingLabel = (pending ?? target) === "unlocked" ? "Unlocking…" : "Locking…";
 
-  const StatusIcon = pending ? Loader : jammed ? AlertTriangle : locked ? Lock : LockOpen;
-  const channel = locked ? "recovery" : "streak";
-  const statusColor = pending
+  const StatusIcon = disconnected
+    ? CloudOff
+    : pending
+      ? Loader
+      : jammed
+        ? AlertTriangle
+        : locked
+          ? Lock
+          : LockOpen;
+  const channel = disconnected ? undefined : locked ? "recovery" : "streak";
+  const statusColor = disconnected || pending
     ? "text-ink-dim"
     : locked
       ? "text-recovery"
       : "text-streak";
-  const statusText = pending
-    ? pendingLabel
-    : jammed
-      ? "Jammed — try again"
-      : locked
-        ? "Locked"
-        : "Unlocked";
+  const statusText = disconnected
+    ? "Unknown — offline"
+    : pending
+      ? pendingLabel
+      : jammed
+        ? "Jammed — try again"
+        : locked
+          ? "Locked"
+          : "Unlocked";
 
   const testId = `lock-card-${entity.entity_id}`;
   const compact = density === "compact";
@@ -181,7 +198,7 @@ export function LockCard({ entity, overrides, density = "comfortable" }: CardPro
           icon={target === "unlocked" ? <LockOpen size={20} /> : <Lock size={20} />}
           channel={actionChannel}
           pending={pending !== null}
-          disabled={entity.state === "unavailable"}
+          disabled={entity.state === "unavailable" || disconnected}
           onCommit={() => void request(target)}
           testId={`slide-${entity.entity_id}`}
         />

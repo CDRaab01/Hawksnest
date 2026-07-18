@@ -56,6 +56,11 @@ class ConnectionManager @Inject constructor(
         scope.launch { select() }
     }
 
+    /** Skip the remainder of the current reconnect backoff (the Offline screen's "Retry now"). */
+    fun retryNow() {
+        current?.retryNow()
+    }
+
     private suspend fun select() = selectMutex.withLock {
         val url = credentialStore.haUrl.firstOrNull()
         val token = credentialStore.haToken.firstOrNull()

@@ -185,6 +185,9 @@ export class MockHub {
   readonly streamRequests: string[] = [];
   /** Total sockets ever accepted — lets reconnect tests assert deterministically. */
   connections = 0;
+  /** When true, new sockets are closed immediately (scripts a persistent outage so
+   *  the app's grace-window / offline states can be asserted deterministically). */
+  refuseConnections = false;
   private sessions = new Set<Session>();
 
   get sessionCount(): number {
@@ -211,6 +214,7 @@ export class MockHub {
     this.defaultDelayMs = scenario.defaultDelayMs ?? 600;
     this.calls.length = 0;
     this.streamRequests.length = 0;
+    this.refuseConnections = false;
   }
 
   /** Reset to a fresh scenario AND push the new full state to any live sessions. */

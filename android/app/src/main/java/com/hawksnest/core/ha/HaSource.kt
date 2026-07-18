@@ -4,11 +4,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.dedupeRingMqtt
+import com.hawksnest.core.net.ReachabilityProbe
 import com.hawksnest.core.logic.FRIGATE_BASE
 import com.hawksnest.core.logic.LogEvent
 import com.hawksnest.core.logic.normalizeLogbook
@@ -58,9 +58,22 @@ class HaSource(
     @Volatile private var conn: HaConnection? = null
     @Volatile private var entities: Map<String, HassEntity> = emptyMap()
 
+    /** Releases the backoff wait early when the Offline screen's "Retry now" is tapped. */
+    private val retrySignal = RetrySignal()
+
+    /** Shared bounded probe for the per-backoff-cycle reachability hint (see [runLoop]). */
+    private val probe = ReachabilityProbe.from(client)
+
+    /** True while a reachability probe is in flight, so cheap early backoffs don't stack them. */
+    @Volatile private var probing = false
+
     override suspend fun start() {
         if (job?.isActive == true) return
         job = scope.launch { runLoop() }
+    }
+
+    override fun retryNow() {
+        retrySignal.signal()
     }
 
     override fun stop() {
@@ -321,7 +334,9 @@ class HaSource(
                 state.setStatus(ConnectionStatus.CONNECTED)
                 backoff = 1_000L
                 while (coroutineContext.isActive && !closed.isCompleted) {
-                    delay(25_000)
+                    // Race the ping interval against the close signal so a dead socket flips the
+                    // status (and masks lock/alarm state) immediately, not at the next 25s tick.
+                    withTimeoutOrNull(25_000) { closed.await() }
                     if (!closed.isCompleted) c.ping()
                 }
             } catch (e: HaAuthException) {
@@ -341,7 +356,25 @@ class HaSource(
             }
             if (!coroutineContext.isActive) break
             state.setStatus(ConnectionStatus.CONNECTING, "Reconnecting…")
-            delay(backoff)
+            // One passive reachability probe per backoff cycle (never continuous): fire-and-forget
+            // so its bounded 8s can't delay the retry, and skip if the last one is still running.
+            if (!probing) {
+                probing = true
+                scope.launch {
+                    try {
+                        state.setHostReachable(probe.isReachable(baseUrl))
+                    } finally {
+                        probing = false
+                    }
+                }
+            }
+            // Skippable backoff: publish when the next attempt fires (drives the Offline screen's
+            // "Retrying in Ns"), then wait — released early by retryNow(). Drain first so a tap
+            // that landed while a connect attempt was already in flight can't skip this wait.
+            retrySignal.drain()
+            state.setNextRetryAt(System.currentTimeMillis() + backoff)
+            retrySignal.awaitOrTimeout(backoff)
+            state.setNextRetryAt(null)
             backoff = (backoff * 2).coerceAtMost(30_000)
         }
     }

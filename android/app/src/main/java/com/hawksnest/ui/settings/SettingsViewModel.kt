@@ -5,12 +5,12 @@ import androidx.lifecycle.viewModelScope
 import android.content.Context
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
+import com.hawksnest.core.net.ReachabilityProbe
 import com.hawksnest.push.NtfyPushService
 import com.hawksnest.push.PushSettings
 import com.hawksnest.util.CredentialStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -19,10 +19,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 /** Result of the Tailscale reachability probe (a one-shot HTTP check against the saved base URL). */
@@ -66,13 +63,9 @@ class SettingsViewModel @Inject constructor(
     /** Live result of the last [testReachability] run (Idle until the user taps Test). */
     val reachability: StateFlow<Reachability> = _reachability.asStateFlow()
 
-    // The shared client has no read timeout (the WS is long-lived); a probe must not hang forever,
-    // so it gets its own bounded-timeout copy (cheap — connection pool/dispatcher are shared).
-    private val probeClient: OkHttpClient = okHttpClient.newBuilder()
-        .callTimeout(8, TimeUnit.SECONDS)
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .build()
+    // The bounded-timeout probe shared with the reconnect loop's offline hint (extracted to
+    // core/net/ReachabilityProbe so both surfaces classify reachability identically).
+    private val probe = ReachabilityProbe.from(okHttpClient)
 
     /**
      * Probe whether the base URL's host answers over the current network (i.e. the Tailscale tunnel
@@ -84,17 +77,8 @@ class SettingsViewModel @Inject constructor(
         if (target.isBlank()) return
         viewModelScope.launch {
             _reachability.value = Reachability.Checking
-            val reachable = withContext(Dispatchers.IO) {
-                try {
-                    val req = Request.Builder().url(target.trimEnd('/') + "/").get().build()
-                    probeClient.newCall(req).execute().use { true }
-                } catch (e: IllegalArgumentException) {
-                    false // malformed URL
-                } catch (e: Exception) {
-                    false // UnknownHost / connect refused / timeout → not reachable
-                }
-            }
-            _reachability.value = if (reachable) Reachability.Reachable else Reachability.Unreachable
+            _reachability.value =
+                if (probe.isReachable(target)) Reachability.Reachable else Reachability.Unreachable
         }
     }
 

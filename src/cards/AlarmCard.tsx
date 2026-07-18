@@ -1,10 +1,11 @@
-import { Loader } from "lucide-react";
+import { Loader, CloudOff } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
 import type { Channel } from "../components/PanelCard";
 import { useAlarmControl } from "../components/useAlarmControl";
 import { resolveName } from "../lib/resolve";
 import { alarmView, ARM_BUTTONS } from "../lib/alarm";
+import { useConnection } from "../store/entityStore";
 import type { CardProps } from "./types";
 
 const TEXT: Record<Channel, string> = {
@@ -24,18 +25,25 @@ const TEXT: Record<Channel, string> = {
  */
 export function AlarmCard({ entity, overrides }: CardProps) {
   const name = resolveName(entity, overrides);
+  // Security invariant: the alarm's mode is NEVER rendered stale. While the HA socket is down
+  // the store has already masked the panel's state; this card additionally presents an explicit
+  // "Unknown — offline" with the arm segments disabled (nothing can be delivered anyway).
+  const { status } = useConnection();
+  const disconnected = status === "connecting" || status === "error";
   const view = alarmView(entity.state);
-  const Icon = view.icon;
-  const color = TEXT[view.channel];
+  const Icon = disconnected ? CloudOff : view.icon;
+  const color = disconnected ? "text-ink-dim" : TEXT[view.channel];
   const { pending, error, arm } = useAlarmControl(entity);
 
   return (
-    <PanelCard tint={view.triggered ? "streak" : undefined} className="p-lg">
+    <PanelCard tint={!disconnected && view.triggered ? "streak" : undefined} className="p-lg">
       <div className="flex items-center gap-md">
         <Icon className={color} size={26} />
         <div className="min-w-0">
           <div className="truncate font-display text-title text-ink">{name}</div>
-          <div className={["font-body text-body", color].join(" ")}>{view.label}</div>
+          <div className={["font-body text-body", color].join(" ")}>
+            {disconnected ? "Unknown — offline" : view.label}
+          </div>
           {error && (
             <div className="font-body text-caption text-streak">{error}</div>
           )}
@@ -47,8 +55,8 @@ export function AlarmCard({ entity, overrides }: CardProps) {
             key={b.service}
             variant="ghost"
             compact
-            active={entity.state === b.state}
-            disabled={pending !== null}
+            active={!disconnected && entity.state === b.state}
+            disabled={pending !== null || disconnected}
             onClick={() => arm(b.service)}
           >
             {pending === b.service ? (

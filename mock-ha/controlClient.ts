@@ -54,6 +54,12 @@ export class MockControl {
     return this.post("/__scenario/disconnect");
   }
 
+  /** Script a persistent outage: while true, new sockets are dropped immediately
+   *  (pair with `disconnect()` to hold the app in its reconnecting/offline states). */
+  setRefuseConnections(refuse: boolean): Promise<void> {
+    return this.post("/__scenario/refuse-connections", { refuse });
+  }
+
   /** The recorded `call_service` log, for round-trip assertions. */
   async getCalls(): Promise<ServiceCall[]> {
     const res = await fetch(`${this.base}/__scenario/calls`);
