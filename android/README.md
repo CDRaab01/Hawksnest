@@ -65,10 +65,14 @@ single row they switch to a compact layout — one line of text, controls fillin
 than clipping. The lock and alarm give up their device *name* first and never the state or the time
 it was read.
 
-They wear the PULSE panel: lit from above, held by a hairline, and rimmed in the channel colour of
-whatever they're reporting — green edge for a locked door, orange for a jam, blue for an armed
-panel — with the engaged control wearing the matching gradient. The rim-instead-of-shadow idea is
-borrowed from Remnant.
+They wear the PULSE palette: the whole panel takes the state colour — green when a door is locked,
+blue when the alarm is armed, orange on a jam, neutral when there's nothing to report — and the
+engaged control fills with the matching channel colour.
+
+> **Updating from an older build?** A widget placed by a previous version can get stuck on a
+> spinner after an app update — Glance can't always migrate an existing widget across a layout
+> change. Opening the Hawksnest app once forces every widget to rebuild and usually clears it; if a
+> widget is still stuck, remove it and add it again. Newly added widgets are never affected.
 
 Things worth knowing before relying on them:
 
