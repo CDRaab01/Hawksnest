@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Three segments across, so this one does not resize below three cells wide: any narrower and
-     Off/Home/Away stop being separable touch targets. See light_widget_info.xml for the rest. -->
+<!-- Three segments across, so this one alone keeps a three-cell width floor: any narrower and
+     Off/Home/Away stop being separable touch targets. Height shrinks like the others — see
+     light_widget_info.xml for the minResizeHeight rule and the refresh reasoning. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="180dp"
-    android:minHeight="110dp"
+    android:minHeight="40dp"
     android:targetCellWidth="3"
-    android:targetCellHeight="2"
+    android:targetCellHeight="1"
     android:minResizeWidth="180dp"
-    android:minResizeHeight="110dp"
+    android:minResizeHeight="40dp"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/glance_default_loading_layout"

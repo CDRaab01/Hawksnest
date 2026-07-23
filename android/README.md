@@ -60,6 +60,16 @@ should control when you drop it, and each opens the app when you tap its name.
 | **Hawksnest Lock** | One tap to lock. **Two taps to unlock** — the first arms "Tap again to unlock", which lapses after five seconds. |
 | **Hawksnest Alarm** | Off / Home / Away. Arming is one tap; **disarming takes two**, the same way unlocking does. |
 
+All three are **resizable in both directions** and arrive at three cells by one row. Squeezed to a
+single row they switch to a compact layout — one line of text, controls filling the rest — rather
+than clipping. The lock and alarm give up their device *name* first and never the state or the time
+it was read.
+
+They wear the PULSE panel: lit from above, held by a hairline, and rimmed in the channel colour of
+whatever they're reporting — green edge for a locked door, orange for a jam, blue for an armed
+panel — with the engaged control wearing the matching gradient. The rim-instead-of-shadow idea is
+borrowed from Remnant.
+
 Things worth knowing before relying on them:
 
 - **They only work on the tailnet**, like the rest of the app. Off it, a widget says "Can't reach

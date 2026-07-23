@@ -6,6 +6,7 @@ import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.LocalSize
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
@@ -20,8 +21,11 @@ import androidx.glance.layout.width
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.ArmTap
 import com.hawksnest.core.logic.WidgetKind
+import com.hawksnest.core.logic.WidgetSizeTier
 import com.hawksnest.core.logic.alarmWidgetView
 import com.hawksnest.core.logic.armTap
+import com.hawksnest.core.logic.compactShowsName
+import com.hawksnest.core.logic.sizeTier
 import com.hawksnest.ui.glance.PulseGlanceTheme
 import com.hawksnest.widget.data.WidgetEntryPoint
 import com.hawksnest.widget.data.blocker
@@ -75,7 +79,9 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
     )
     val retry = actionRunCallback<WidgetRefreshAction>(widgetParams(WidgetKind.ALARM))
 
-    WidgetPanel {
+    val compact = sizeTier(LocalSize.current.height.value.toInt()) == WidgetSizeTier.COMPACT
+
+    WidgetPanel(compact = compact, accent = view.channel) {
         if (blocker != null) {
             BlockerBody(blocker, retry)
         } else {
@@ -86,8 +92,10 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
                 pending = view.pending,
                 // See LockWidget: the read time keeps a persisted frame honest.
                 note = readAtLabel(view.readAtMs),
+                compact = compact,
+                showName = compactShowsName(WidgetKind.ALARM),
             )
-            Spacer(modifier = GlanceModifier.height(8.dp))
+            Spacer(modifier = GlanceModifier.height(if (compact) 4.dp else 8.dp))
             Row(modifier = GlanceModifier.fillMaxWidth()) {
                 ARM_BUTTONS.forEachIndexed { index, button ->
                     if (index > 0) Spacer(modifier = GlanceModifier.width(6.dp))
@@ -111,6 +119,7 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
                         modifier = GlanceModifier.defaultWeight(),
                         accent = view.channel,
                         filled = view.activeState == button.state || confirming,
+                        fillHeight = compact,
                     )
                 }
             }

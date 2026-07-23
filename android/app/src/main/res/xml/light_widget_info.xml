@@ -1,20 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Three cells by two is the smallest honest size: a name, a state line, and an action row whose
-  buttons clear the 48dp touch floor. Resizing down to two cells is allowed — the toggle drops to
-  a single word and the dim steps stay — but nothing shrinks below a real target.
+  Sizing, and the rule that matters: **minResizeHeight must be below minHeight**, or the launcher
+  offers no vertical resize at all. It used to equal it (110dp), which is why these could only be
+  squeezed sideways — and why on a launcher with a coarser grid they arrived too big and stayed
+  that way.
+
+  Placed at 3x1 and shrinkable to 2x1. Below ~112dp tall the layout switches to its compact tier
+  (single-line header, controls taking the remaining height) rather than clipping — see
+  `sizeTier` in core/logic/WidgetModel.kt.
 
   updatePeriodMillis is the platform floor of 30 minutes and is not this widget's freshness
   mechanism; every render and every action triggers a read, and WidgetLiveBridge pushes changes
   while the app is running. See ARCHITECTURE.md.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="180dp"
-    android:minHeight="110dp"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
     android:targetCellWidth="3"
-    android:targetCellHeight="2"
+    android:targetCellHeight="1"
     android:minResizeWidth="110dp"
-    android:minResizeHeight="110dp"
+    android:minResizeHeight="40dp"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/glance_default_loading_layout"

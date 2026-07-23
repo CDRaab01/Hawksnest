@@ -6,6 +6,7 @@ import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.LocalSize
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
@@ -16,7 +17,10 @@ import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import com.hawksnest.core.logic.WidgetKind
+import com.hawksnest.core.logic.WidgetSizeTier
+import com.hawksnest.core.logic.compactShowsName
 import com.hawksnest.core.logic.lockWidgetView
+import com.hawksnest.core.logic.sizeTier
 import com.hawksnest.ui.glance.PulseGlanceTheme
 import com.hawksnest.widget.data.WidgetEntryPoint
 import com.hawksnest.widget.data.blocker
@@ -70,7 +74,9 @@ private fun LockBody(prefs: Preferences, json: Json) {
     val params = widgetParams(WidgetKind.LOCK)
     val retry = actionRunCallback<WidgetRefreshAction>(params)
 
-    WidgetPanel {
+    val compact = sizeTier(LocalSize.current.height.value.toInt()) == WidgetSizeTier.COMPACT
+
+    WidgetPanel(compact = compact, accent = view.channel) {
         // A lock with a live problem shows the problem, full stop — no half-state behind a banner.
         // `WidgetRepository` has already masked the stored reading, so there is nothing to leak.
         if (blocker != null) {
@@ -84,8 +90,10 @@ private fun LockBody(prefs: Preferences, json: Json) {
                 // Always stamped: this frame may still be on the home screen long after the
                 // reading behind it expired, and it must say so itself.
                 note = readAtLabel(view.readAtMs),
+                compact = compact,
+                showName = compactShowsName(WidgetKind.LOCK),
             )
-            Spacer(modifier = GlanceModifier.height(8.dp))
+            Spacer(modifier = GlanceModifier.height(if (compact) 4.dp else 8.dp))
             WidgetButton(
                 label = view.actionLabel,
                 action = when {
@@ -103,6 +111,7 @@ private fun LockBody(prefs: Preferences, json: Json) {
                 modifier = GlanceModifier.fillMaxWidth(),
                 accent = view.actionChannel,
                 filled = view.confirming,
+                fillHeight = compact,
             )
         }
     }

@@ -12,14 +12,15 @@ import androidx.glance.action.Action
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.CircularProgressIndicator
+import androidx.glance.ImageProvider
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.action.actionStartActivity
-import androidx.glance.appwidget.cornerRadius
 import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Column
 import androidx.glance.layout.ColumnScope
 import androidx.glance.layout.Row
+import androidx.glance.layout.fillMaxHeight
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
@@ -36,10 +37,10 @@ import com.hawksnest.MainActivity
 import com.hawksnest.core.logic.Channel
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.blockerCopy
+import com.hawksnest.R
 import com.hawksnest.ui.glance.channelColor
-import com.hawksnest.ui.glance.hairline
-import com.hawksnest.ui.glance.onChannel
-import com.hawksnest.ui.glance.panelHigh
+import com.hawksnest.ui.glance.onEnergy
+import com.hawksnest.ui.glance.onGradient
 import com.hawksnest.ui.navigation.Screen
 import com.hawksnest.widget.WidgetConfigActivity
 import java.util.Date
@@ -80,16 +81,34 @@ private fun openConfig(): Action {
     )
 }
 
+/**
+ * The widget's surface: a PULSE panel lit from above, held by a hairline — and by a channel-lit
+ * rim when [accent] says the thing inside has something to report. That rim is the Remnant idea,
+ * scaled to a widget: light the edge instead of shadowing the box, so state is legible from across
+ * the room before you read a word of it.
+ *
+ * Drawn from a shape drawable rather than a flat `ColorProvider` because gradients and strokes are
+ * not expressible in Glance any other way. The drawable owns the corner radius, which is also why
+ * it works below API 31, where `GlanceModifier.cornerRadius` is ignored.
+ */
 @Composable
-fun WidgetPanel(content: @Composable ColumnScope.() -> Unit) {
+fun WidgetPanel(
+    compact: Boolean = false,
+    accent: Channel? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val panel = when (accent) {
+        Channel.EFFORT -> R.drawable.widget_panel_effort
+        Channel.STREAK -> R.drawable.widget_panel_streak
+        Channel.RECOVERY -> R.drawable.widget_panel_recovery
+        else -> R.drawable.widget_panel
+    }
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(GlanceTheme.colors.widgetBackground)
-            // Arbitrary corner radii are an API 31+ capability; below that this is ignored and the
-            // widget draws square, which is a cosmetic loss on devices this app will never see.
-            .cornerRadius(20.dp)
-            .padding(12.dp),
+            .background(ImageProvider(panel))
+            // A one-row widget is ~70dp tall; 12dp of padding top and bottom would eat a third of it.
+            .padding(if (compact) 6.dp else 12.dp),
         content = content,
     )
 }
@@ -109,33 +128,45 @@ fun WidgetHeader(
      * lock was last read, or what went wrong. Never decoration.
      */
     note: String? = null,
+    compact: Boolean = false,
+    /** Whether the compact single line spends itself on the name — see `compactShowsName`. */
+    showName: Boolean = true,
 ) {
     Row(
         modifier = GlanceModifier.fillMaxWidth().clickable(openApp()),
         verticalAlignment = Alignment.Vertical.CenterVertically,
     ) {
-        Column(modifier = GlanceModifier.defaultWeight()) {
+        val accentColor = accent?.let { channelColor(it) } ?: GlanceTheme.colors.onSurfaceVariant
+        if (compact) {
+            // One line for everything. Whatever is dropped here is dropped on purpose: for a lock
+            // that is the name, never the state or the time it was read.
             Text(
-                text = name,
-                style = TextStyle(
-                    color = GlanceTheme.colors.onSurface,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                ),
+                text = listOfNotNull(name.takeIf { showName }, detail, note).joinToString(" · "),
+                modifier = GlanceModifier.defaultWeight(),
+                style = TextStyle(color = accentColor, fontSize = 11.sp),
                 maxLines = 1,
             )
-            Text(
-                text = if (note == null) detail else "$detail · $note",
-                style = TextStyle(
-                    color = accent?.let { channelColor(it) } ?: GlanceTheme.colors.onSurfaceVariant,
-                    fontSize = 12.sp,
-                ),
-                maxLines = 1,
-            )
+        } else {
+            Column(modifier = GlanceModifier.defaultWeight()) {
+                Text(
+                    text = name,
+                    style = TextStyle(
+                        color = GlanceTheme.colors.onSurface,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    ),
+                    maxLines = 1,
+                )
+                Text(
+                    text = if (note == null) detail else "$detail · $note",
+                    style = TextStyle(color = accentColor, fontSize = 12.sp),
+                    maxLines = 1,
+                )
+            }
         }
         if (pending) {
             CircularProgressIndicator(
-                modifier = GlanceModifier.size(16.dp),
+                modifier = GlanceModifier.size(if (compact) 12.dp else 16.dp),
                 color = GlanceTheme.colors.onSurfaceVariant,
             )
         }
@@ -194,23 +225,35 @@ fun WidgetButton(
     modifier: GlanceModifier = GlanceModifier,
     accent: Channel? = null,
     filled: Boolean = false,
+    /**
+     * Take whatever height is left instead of the 48dp floor. Only for the compact tier, where the
+     * widget itself is around one launcher row — there the button *is* the widget, so the target
+     * is as big as the owner chose to make it.
+     */
+    fillHeight: Boolean = false,
 ) {
-    val background: ColorProvider = when {
-        action == null -> panelHigh
-        filled && accent != null -> channelColor(accent)
-        else -> panelHigh
+    // An engaged control wears its channel's PULSE gradient; a resting one is the panel face.
+    val face = when {
+        action == null || !filled -> R.drawable.widget_button_face
+        accent == Channel.STREAK -> R.drawable.widget_button_energy
+        accent == Channel.EFFORT -> R.drawable.widget_button_hero
+        accent == Channel.RECOVERY -> R.drawable.widget_button_recovery
+        else -> R.drawable.widget_button_face
     }
     val content: ColorProvider = when {
         action == null -> GlanceTheme.colors.onSurfaceVariant
-        filled && accent != null -> onChannel(accent)
+        // Content sitting on a gradient can't use the channel's flat `on` colour — that is tuned
+        // for the base hue and fails against the far stop. The energy sweep stays light in both
+        // themes so it takes PULSE's warm ink; the other two run dark enough for white.
+        filled && accent == Channel.STREAK -> onEnergy
+        filled && accent != null -> onGradient
         accent != null -> channelColor(accent)
         else -> GlanceTheme.colors.onSurface
     }
     Column(
         modifier = modifier
-            .height(TOUCH_TARGET)
-            .background(background)
-            .cornerRadius(14.dp)
+            .let { if (fillHeight) it.fillMaxHeight() else it.height(TOUCH_TARGET) }
+            .background(ImageProvider(face))
             .let { if (action != null) it.clickable(action) else it },
         verticalAlignment = Alignment.Vertical.CenterVertically,
         horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
