@@ -151,6 +151,59 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   automations that publish to it) lives in the `hawksnest-automation` repo (`docs/ntfy-push.md`).
   On-device runtime (delivery with the app closed, battery, reconnect, the tap deep-link) is the
   one part unit tests can't cover — smoke-test it on the phone.
+- **Home-screen widgets** (`widget/`, Glance/RemoteViews) — a light/switch toggle with dim steps,
+  a lock, and the alarm panel's Off/Home/Away. Three `GlanceAppWidgetReceiver`s so the launcher
+  lists them separately; one shared `WidgetConfigActivity` (it learns which widget it is
+  configuring from the provider that launched it) picking an entity from `GET /api/states`.
+  - **They do not use the WebSocket stack, deliberately.** `HaSource` is live-socket-only — no
+    on-demand fetch, no entity cache — and a widget is drawn by a broadcast into a process that
+    may have just been created and will be killed again shortly. Standing up the socket (auth
+    handshake, three registry loads, reconnect loop) to answer "is the door locked?" costs seconds
+    and battery for one reading. So `widget/data/WidgetHaClient` speaks HA's REST API directly
+    (`GET /api/states[/<id>]`, `POST /api/services/<domain>/<service>`, bearer token from the same
+    `CredentialStore`), the way `HaSource` already does for Frigate and automation config. Every
+    call has a hard timeout and every failure becomes a `WidgetBlocker` the widget draws, never an
+    exception.
+  - **Echo without a stream.** `ControlGate`'s "wait for HA to react" becomes polling:
+    `widget/data/WidgetEcho` re-reads the entity every second until the state *settles* somewhere
+    other than where it started, within the same 30 s `ControlGate` allows. It polls *through*
+    transitional states (`locking`, `arming`) rather than stopping at them — in-app the socket
+    carries the rest of the story, but a widget that stopped there would sit on "Locking…" until
+    something else redrew it. Clock and sleep are injected, so the timeout and jam cases are
+    millisecond unit tests.
+  - **Staleness is the widget-only hazard** (`core/logic/WidgetModel.kt`, all pure + tested). A
+    widget is a picture drawn at an unknown time by a process that may since have died, so lock
+    and alarm readings carry a 60 s expiry (`securityStateFresh`); past it the widget renders
+    "Checking…" and refetches rather than repeating itself. This extends invariant 2's mask: on
+    any failed fetch the stored security reading is dropped (`maskState`), the same rule
+    `maskSecurityStates` applies in-app when the socket drops. Lights are exempt — a lamp drawn
+    wrong is cosmetic — so they render from cache with their age shown once past 15 minutes.
+    Persisted pending and confirm markers expire the same way, so a process killed mid-poll can't
+    strand a spinner.
+  - **The expiry alone isn't enough, because a drawn widget is pixels.** Nothing redraws the home
+    screen when a value ages out, so a frame that said "Locked" when it was true can still be
+    there an hour later. Rather than schedule redraws forever (a permanent background poll, for a
+    surface only reachable on the tailnet), lock and alarm widgets **always print the clock time
+    the reading was taken** next to the state — "Locked · 10:42". A persisted frame then dates
+    itself and can't lie, at zero ongoing cost.
+  - **Destructive commands take two taps.** Unlock and disarm arm a confirmation that lapses after
+    5 s; lock and arm are one tap. Glance can draw neither `SlideToAct` nor a drag, so the confirm
+    tap is the substitute for the deliberate gesture those controls exist to require. For the same
+    reason the dimmer is discrete ±20% steps rather than a fake slider — each step still commits
+    through `dimCommit`, one service call per gesture, as `LightPillar` does on release.
+  - **Refresh** is on render, after every action, on tapping an error, and — while the app happens
+    to be running — pushed from the live socket by `widget/WidgetLiveBridge` (throttled to one
+    pass every 3 s). `updatePeriodMillis` is the platform's 30-minute floor and is cosmetic only.
+    There is deliberately **no background polling**: it would cost battery for a widget that is
+    only reachable on the tailnet anyway.
+    **The render-triggered refresh must be throttled** (`WidgetRepository.lastFetchAt`, 10 s,
+    in-memory): writing a widget's state redraws it, a redraw re-runs `provideGlance`, and
+    `provideGlance` asks for a refresh — so an unthrottled refresh feeds itself forever at
+    whatever rate the network allows. Failed fetches count toward the throttle too, or an
+    unreachable HA becomes a retry storm.
+  - Styling is `ui/glance/PulseGlanceTheme`, which feeds the app's existing `ColorScheme`s to
+    `glance-material3` and reads channel accents off the same `PulseColors`. No color originates
+    in the widget layer; edit `ui/theme/Color.kt` and both surfaces move.
 - Suite membership: signed with the suite key (secrets are `HAWKSNEST_`-prefixed), released by
   `android-release.yml` on `android/**` pushes, tagged `android-vX.Y.Z` (clear of web `v*`).
   Managed by the Dragonfly hub for updates — but **no** SuiteConfigReader/AppAuth (nothing to
@@ -183,6 +236,12 @@ change deploy files, that test is the spec**; update both together.
   WebSocket protocol (auth, reconnect, doorbell, lock pending/jam/rejected flows) with a
   `/__scenario` API. The same mock serves Android instrumented tests
   (`scripts/android-emulator-test.sh`, needs KVM).
+- The home-screen widgets are covered by unit tests only, and deliberately so — everything that
+  can be got wrong there is pure: the security expiry and masking rules, pending/confirm lapse,
+  the echo poller against a fake clock (`WidgetModelTest`, `WidgetEchoTest`), and the REST client
+  against MockWebServer for 200/401/404/5xx/dead-host/garbage-200 (`WidgetHaClientTest`). What
+  isn't covered is the launcher hosting itself — placement, resize, and a tap surviving process
+  death — which needs a real home screen.
 - CI: `ci.yml` (typecheck/lint/test/build + kubeconform over the k8s manifests),
   `android-ci.yml` (unit tests + assembleDebug + the advisory **Sift** design audit — a sibling
   public repo checked out by CI; known to trip on the new Compose render, advisory-only).
@@ -192,7 +251,8 @@ change deploy files, that test is the spec**; update both together.
 
 ## Invariants (security-flavored — this app unlocks doors)
 
-1. **Locks _and the alarm_ are non-optimistic UI** — pending until HA confirms, and a failed or
+1. **Locks _and the alarm_ are non-optimistic UI** — pending until HA confirms (including on the
+   home-screen widgets, which poll for the confirmation they can't stream), and a failed or
    silent call surfaces an error rather than doing nothing. Deliberate; the E2E suite pins it.
    Don't "fix" the lag. Web: the alarm arm/disarm behaviour is shared by the dashboard
    `SecurityStatusBar` and the `AlarmCard` via the `useAlarmControl` hook (tapped mode spins until
@@ -211,7 +271,10 @@ change deploy files, that test is the spec**; update both together.
    window** — the store masks `lock.*`/`alarm_control_panel.*` to `unavailable` the moment the
    socket is lost (web `lib/offline.ts::maskSecurityStates` in `entityStore.setStatus`; Android
    `core/logic/Offline.kt` in `HaState.setStatus`), and the lock/alarm/security-bar surfaces
-   additionally present an explicit "Unknown — offline". Past the window — or immediately on a
+   additionally present an explicit "Unknown — offline". **The home-screen widgets extend this
+   with an expiry**, because they have no session to be "in": a lock or alarm reading older than
+   60 s is not rendered at all, and any failed fetch drops the stored reading outright
+   (`core/logic/WidgetModel.kt`, `widget/data/WidgetState.kt::maskState`). Past the window — or immediately on a
    terminal auth error — the UI collapses to the full **OfflineState** (web
    `components/OfflineState.tsx`, Android `ui/components/OfflineState.kt`): no entity data at all,
    a "Last connected …" readout, a **Retry now** (web restarts the source; Android
@@ -234,6 +297,9 @@ change deploy files, that test is the spec**; update both together.
 
 - **New device type/domain**: `src/lib/cards.ts` mapping + a card component (web);
   `core/logic` + `ui/devices` (Android). Entity naming quirks → `config/overrides.ts`.
+- **New home-screen widget**: a `WidgetKind` + its pure view-model in `core/logic/WidgetModel.kt`,
+  a `GlanceAppWidget`/`Receiver` pair in `widget/`, the `when` in `widget/WidgetKinds.kt`, an
+  `appwidget-provider` XML, and a manifest receiver. The data layer is domain-agnostic already.
 - **HA protocol behavior**: extend `mock-ha/` first, write the failing E2E, then implement.
 - **Deploy changes**: `deploy/` + `deploy.test.ts` together.
 - **Automation-side features** (new sensors, Ring/Z-Wave config): wrong repo — that's

@@ -33,6 +33,9 @@ class MainActivity : FragmentActivity() {
         // (the nav shell brings Home forward and opens that camera's lightbox) rather
         // than a start destination — a specific camera opens in an overlay, not a route.
         handlePushIntent(intent)
+        // A widget whose problem the owner can only fix in Settings (no token, token rejected)
+        // opens straight there rather than dropping them on Home to find it.
+        val start = intent?.getStringExtra(EXTRA_START_ROUTE) ?: Screen.Home.route
         setContent {
             // Dark-first OLED instrument panel; follows the system day/night setting for now.
             HawksnestTheme {
@@ -40,7 +43,7 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    AppNavGraph(startDestination = Screen.Home.route, pushNav = pushNav)
+                    AppNavGraph(startDestination = start, pushNav = pushNav)
                 }
             }
         }
@@ -56,5 +59,10 @@ class MainActivity : FragmentActivity() {
 
     private fun handlePushIntent(intent: Intent?) {
         intent?.getStringExtra(PushNotifier.EXTRA_CAMERA)?.let { pushNav.openCamera(it) }
+    }
+
+    companion object {
+        /** Nav route to open on launch, set by the home-screen widgets' error states. */
+        const val EXTRA_START_ROUTE = "com.hawksnest.START_ROUTE"
     }
 }

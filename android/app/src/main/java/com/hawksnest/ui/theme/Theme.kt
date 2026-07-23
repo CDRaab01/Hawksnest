@@ -8,7 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 
-private val LightColors = lightColorScheme(
+// `internal` rather than private: the Glance widget theme (ui/glance/PulseGlanceTheme.kt) maps
+// these same two schemes onto the home-screen widgets, so one edit here restyles both surfaces.
+internal val LightColors = lightColorScheme(
     primary = LightPrimary,
     onPrimary = LightOnPrimary,
     primaryContainer = LightPrimaryContainer,
@@ -35,7 +37,7 @@ private val LightColors = lightColorScheme(
     outlineVariant = LightOutlineVariant,
 )
 
-private val DarkColors = darkColorScheme(
+internal val DarkColors = darkColorScheme(
     primary = DarkPrimary,
     onPrimary = DarkOnPrimary,
     primaryContainer = DarkPrimaryContainer,
