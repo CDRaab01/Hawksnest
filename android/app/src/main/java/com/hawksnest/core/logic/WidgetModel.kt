@@ -33,14 +33,47 @@ import kotlin.math.roundToInt
 enum class WidgetKind { LIGHT, LOCK, ALARM }
 
 /**
- * Which HA domains a widget of this kind can control. The light widget takes `switch` entities
- * too — relay-style lights land there, and a switch is a light as far as the control goes. The
- * service call uses the entity's own domain, never this set.
+ * Which HA domains a widget of this kind can control.
+ *
+ * The light widget is `light` only. It briefly took `switch` too, on the theory that relay-style
+ * lights land there — but on this house `switch.*` is overwhelmingly ring-mqtt camera plumbing
+ * (live/event streams, motion-detection toggles, sirens), which buried the dozen real lights under
+ * dozens of things nobody would ever put on a home screen. The app itself keeps the two domains
+ * apart (`Cards.kt` maps them to different cards); conflating them here was the deviation.
  */
 fun widgetCandidateDomains(kind: WidgetKind): Set<String> = when (kind) {
-    WidgetKind.LIGHT -> setOf("light", "switch")
+    WidgetKind.LIGHT -> setOf("light")
     WidgetKind.LOCK -> setOf("lock")
     WidgetKind.ALARM -> setOf("alarm_control_panel")
+}
+
+/**
+ * The entities worth offering for a widget of this kind: the right domain, reachable, not
+ * housekeeping, and not a duplicate of something already in the list.
+ *
+ * [categories] and [platforms] come from HA's entity registry, which is WebSocket-only. The
+ * configuration screen runs inside the app, so it can hand them over from the live connection;
+ * when it can't — no socket yet, off the tailnet — both default to empty and the filters degrade
+ * on their own. [isPrimaryEntity] with no categories falls back to the suffix denylist, and
+ * [dedupeRingMqtt] with no platforms returns the list untouched. So this is one code path that
+ * gets better when the registry is there rather than two paths to keep in step.
+ */
+fun widgetCandidates(
+    kind: WidgetKind,
+    entities: List<HassEntity>,
+    categories: Map<String, String> = emptyMap(),
+    platforms: Map<String, String> = emptyMap(),
+): List<HassEntity> {
+    val domains = widgetCandidateDomains(kind)
+    val inScope = entities.filter { entity ->
+        entity.entityId.substringBefore('.') in domains &&
+            // Nothing worth pinning to a home screen; it would render "Unavailable" forever.
+            entity.state != "unavailable" &&
+            isPrimaryEntity(entity.entityId, categories)
+    }
+    // The household runs both the Ring integration and ring-mqtt, so a Ring light can appear
+    // twice under one name. Same collapse the Devices list does.
+    return dedupeRingMqtt(inScope.associateBy { it.entityId }, platforms).values.toList()
 }
 
 /**
@@ -63,14 +96,20 @@ const val WIDGET_ECHO_TIMEOUT_MS = 30_000L
 /** How long an armed "tap again" confirmation stays live before lapsing back to the resting state. */
 const val WIDGET_CONFIRM_WINDOW_MS = 5_000L
 
-/** One press of the widget's dim buttons. */
-const val WIDGET_DIM_STEP_PCT = 20
-
 /**
- * The dimmest a step button will go. Stepping down never turns the light off — that is the
- * toggle's job, and `brightness_pct: 0` is not portable across HA integrations (see [dimCommit]).
+ * The levels the widget's dim buttons step between.
+ *
+ * Not a fixed percentage, because a fixed percentage is wrong at both ends: the eye responds to
+ * brightness roughly logarithmically, so going 80% → 60% is barely visible while 20% → 1% is the
+ * difference between a lit room and a nightlight. Even steps therefore feel coarse where it
+ * matters and pointlessly fine where it doesn't. These stops are tight at the bottom and wide at
+ * the top, which is how a good physical dimmer is geared — and it means the useful range takes
+ * about the same number of taps as before while landing on levels you can actually tell apart.
+ *
+ * The floor is 1, not 0: turning the light off is the toggle's job, and `brightness_pct: 0` is
+ * not portable across HA integrations (see [dimCommit]).
  */
-const val WIDGET_DIM_FLOOR_PCT = 5
+val WIDGET_DIM_STOPS = listOf(1, 5, 10, 20, 30, 40, 50, 65, 80, 100)
 
 /** An entity reading a widget has persisted, with the moment it was fetched. */
 data class WidgetSnapshot(
@@ -154,9 +193,16 @@ fun stalenessLabel(fetchedAtMs: Long?, nowMs: Long): String? {
     }
 }
 
-/** One press of a dim button, clamped so stepping down never reaches "off". */
-fun stepBrightnessPct(currentPct: Int, deltaPct: Int): Int =
-    (currentPct + deltaPct).coerceIn(WIDGET_DIM_FLOOR_PCT, 100)
+/**
+ * The next stop above [currentPct] on the dim ladder, or full brightness at the top. An off light
+ * (0%) steps up to the dimmest stop — the toggle is the way to turn it on properly.
+ */
+fun dimUp(currentPct: Int): Int =
+    WIDGET_DIM_STOPS.firstOrNull { it > currentPct } ?: WIDGET_DIM_STOPS.last()
+
+/** The next stop below [currentPct], or the dimmest. Never reaches off — that's the toggle's job. */
+fun dimDown(currentPct: Int): Int =
+    WIDGET_DIM_STOPS.lastOrNull { it < currentPct } ?: WIDGET_DIM_STOPS.first()
 
 private val LOCK_TRANSITIONAL = setOf("locking", "unlocking")
 

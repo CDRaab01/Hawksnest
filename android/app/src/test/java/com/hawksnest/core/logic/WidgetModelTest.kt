@@ -285,27 +285,55 @@ class WidgetModelTest {
     // ── Dim steps ─────────────────────────────────────────────────────────────────────────────
 
     @Test
-    fun `stepping down stops short of off`() {
+    fun `the ladder is finer at the dim end than the bright end`() {
+        // The whole point of stops over a fixed percentage: the eye reads brightness roughly
+        // logarithmically, so 80→65 is a smaller perceived change than 20→10 despite being bigger.
+        val gapsLow = WIDGET_DIM_STOPS.zipWithNext().take(3).map { (a, b) -> b - a }
+        val gapsHigh = WIDGET_DIM_STOPS.zipWithNext().takeLast(3).map { (a, b) -> b - a }
+        assertTrue(gapsLow.max() < gapsHigh.min(), "expected tighter steps at the bottom")
+    }
+
+    @Test
+    fun `stepping down walks the ladder and stops short of off`() {
         // Turning the light off is the toggle's job; brightness_pct 0 isn't portable across
         // integrations, which is why dimCommit treats it specially.
-        assertEquals(WIDGET_DIM_FLOOR_PCT, stepBrightnessPct(10, -WIDGET_DIM_STEP_PCT))
-        assertEquals(WIDGET_DIM_FLOOR_PCT, stepBrightnessPct(WIDGET_DIM_FLOOR_PCT, -WIDGET_DIM_STEP_PCT))
+        assertEquals(65, dimDown(80))
+        assertEquals(5, dimDown(10))
+        assertEquals(1, dimDown(5))
+        assertEquals(1, dimDown(1))
     }
 
     @Test
-    fun `stepping up stops at full`() {
-        assertEquals(100, stepBrightnessPct(90, WIDGET_DIM_STEP_PCT))
+    fun `stepping up walks the ladder and stops at full`() {
+        assertEquals(30, dimUp(20))
+        assertEquals(100, dimUp(80))
+        assertEquals(100, dimUp(100))
     }
 
     @Test
-    fun `a step from an off light lands on a real level`() {
-        assertEquals(WIDGET_DIM_STEP_PCT, stepBrightnessPct(0, WIDGET_DIM_STEP_PCT))
+    fun `a level between stops snaps to the neighbouring one`() {
+        // HA reports whatever the bulb is actually at, which need not be one of our stops.
+        assertEquals(50, dimUp(43))
+        assertEquals(40, dimDown(43))
     }
 
     @Test
-    fun `every clamped step commits as turn_on, never turn_off`() {
-        val (service, _) = dimCommit(stepBrightnessPct(10, -WIDGET_DIM_STEP_PCT))
-        assertEquals("turn_on", service)
+    fun `stepping up from an off light lands on the dimmest stop`() {
+        assertEquals(WIDGET_DIM_STOPS.first(), dimUp(0))
+    }
+
+    @Test
+    fun `every step commits as turn_on, never turn_off`() {
+        WIDGET_DIM_STOPS.forEach { stop ->
+            assertEquals("turn_on", dimCommit(stop).first, "stop $stop")
+        }
+    }
+
+    @Test
+    fun `the ladder is ordered, positive and reaches full`() {
+        assertEquals(WIDGET_DIM_STOPS.sorted(), WIDGET_DIM_STOPS)
+        assertTrue(WIDGET_DIM_STOPS.first() >= 1)
+        assertEquals(100, WIDGET_DIM_STOPS.last())
     }
 
     // ── Optimistic light prediction ───────────────────────────────────────────────────────────
@@ -346,9 +374,95 @@ class WidgetModelTest {
         assertTrue(blockerCopy(WidgetBlocker.UNREACHABLE).detail.contains("Tailscale"))
     }
 
+    // ── The picker's candidate list ───────────────────────────────────────────────────────────
+
     @Test
-    fun `a light widget can be pointed at a switch`() {
-        assertTrue("switch" in widgetCandidateDomains(WidgetKind.LIGHT))
-        assertEquals(setOf("alarm_control_panel"), widgetCandidateDomains(WidgetKind.ALARM))
+    fun `the light picker offers lights, not the camera switches that outnumber them`() {
+        // The bug this fixes: `switch.*` on this house is overwhelmingly ring-mqtt camera
+        // plumbing, so including that domain buried a dozen real lights under dozens of
+        // live-stream and motion-detection toggles.
+        val candidates = widgetCandidates(
+            WidgetKind.LIGHT,
+            listOf(
+                entity("light.back2_light_2", state = "on"),
+                entity("light.back_light_2", state = "off"),
+                entity("switch.back2_live_stream", state = "on"),
+                entity("switch.back2_motion_detection_2", state = "on"),
+                entity("switch.back2_siren", state = "off"),
+                entity("switch.basement_event_stream", state = "on"),
+            ),
+        )
+        assertEquals(listOf("light.back2_light_2", "light.back_light_2"), candidates.map { it.entityId })
+    }
+
+    @Test
+    fun `housekeeping entities are filtered out of every picker`() {
+        // The app's own noise rule, which the picker had been skipping.
+        val candidates = widgetCandidates(
+            WidgetKind.LOCK,
+            listOf(
+                entity("lock.front_door_lock", state = "locked"),
+                entity("lock.back_door_info", state = "unknown"),
+            ),
+        )
+        assertEquals(listOf("lock.front_door_lock"), candidates.map { it.entityId })
+    }
+
+    @Test
+    fun `the registry demotes diagnostic entities when the picker has it`() {
+        // The config screen runs in the app, so it can hand over HA's entity_category map — which
+        // catches the config/diagnostic entities the suffix denylist has no way to know about.
+        val entities = listOf(
+            entity("light.kitchen", state = "on"),
+            entity("light.kitchen_calibration", state = "on"),
+        )
+        val categories = mapOf("light.kitchen_calibration" to "config")
+        assertEquals(
+            listOf("light.kitchen"),
+            widgetCandidates(WidgetKind.LIGHT, entities, categories = categories).map { it.entityId },
+        )
+    }
+
+    @Test
+    fun `the registry collapses the Ring and ring-mqtt twins`() {
+        // The household runs both integrations, so one physical light lands twice under one name.
+        // ring-mqtt is this app's backend, so the `ring` twin is the one that goes.
+        val entities = listOf(
+            entity("light.front_light", friendlyName = "Front Light", state = "on"),
+            entity("light.front_light_2", friendlyName = "Front Light", state = "on"),
+        )
+        val platforms = mapOf(
+            "light.front_light" to RING_PLATFORM,
+            "light.front_light_2" to MQTT_PLATFORM,
+        )
+        assertEquals(
+            listOf("light.front_light_2"),
+            widgetCandidates(WidgetKind.LIGHT, entities, platforms = platforms).map { it.entityId },
+        )
+    }
+
+    @Test
+    fun `without the registry the list still works, just less well`() {
+        // Off the tailnet the picker falls back to REST, which carries no registry. Both filters
+        // have to degrade to a no-op rather than emptying the list.
+        val entities = listOf(
+            entity("light.front_light", friendlyName = "Front Light", state = "on"),
+            entity("light.front_light_2", friendlyName = "Front Light", state = "on"),
+            entity("light.kitchen_calibration", state = "on"),
+        )
+        assertEquals(3, widgetCandidates(WidgetKind.LIGHT, entities).size)
+    }
+
+    @Test
+    fun `an unreachable entity is not offered`() {
+        // Nothing worth pinning to a home screen; it would render "Unavailable" forever.
+        val candidates = widgetCandidates(
+            WidgetKind.ALARM,
+            listOf(
+                entity("alarm_control_panel.home", state = "disarmed"),
+                entity("alarm_control_panel.spare", state = "unavailable"),
+            ),
+        )
+        assertEquals(listOf("alarm_control_panel.home"), candidates.map { it.entityId })
     }
 }

@@ -189,8 +189,29 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   - **Destructive commands take two taps.** Unlock and disarm arm a confirmation that lapses after
     5 s; lock and arm are one tap. Glance can draw neither `SlideToAct` nor a drag, so the confirm
     tap is the substitute for the deliberate gesture those controls exist to require. For the same
-    reason the dimmer is discrete ±20% steps rather than a fake slider — each step still commits
+    reason the dimmer is discrete steps rather than a fake slider — each step still commits
     through `dimCommit`, one service call per gesture, as `LightPillar` does on release.
+  - **The dim steps walk a ladder (`WIDGET_DIM_STOPS`), not a fixed percentage.** A fixed step is
+    wrong at both ends: the eye reads brightness roughly logarithmically, so 80→65 is barely
+    visible while 20→10 halves the room. The stops are tight at the bottom and wide at the top,
+    like a physical dimmer's gearing. A read-only `LinearProgressIndicator` under the name shows
+    the level; it is deliberately not tappable, because a ~250dp-wide widget split into enough
+    zones to beat the step buttons would have ~20dp targets.
+  - **The picker offers `light` only, not `switch`.** It briefly took both, on the theory that
+    relay-style lights land in `switch` — but here `switch.*` is overwhelmingly ring-mqtt camera
+    plumbing (live/event streams, motion toggles, sirens), which buried the real lights. The app
+    keeps the domains apart too (`Cards.kt`).
+  - **`WidgetConfigActivity` is the one part of this feature that is not REST-only**, and
+    deliberately: it is an ordinary activity in the app process, so it can use `ConnectionManager`
+    and with it HA's **entity registry** — which REST cannot see. That buys the picker the full
+    `isPrimaryEntity` (hides `config`/`diagnostic` entities) and `dedupeRingMqtt` (collapses the
+    Ring-vs-ring-mqtt twins), the same two filters the Devices list gets. `HaSource` loads the
+    registries *before* it reports `CONNECTED`, so that status alone is proof the maps are
+    populated; `DEMO` deliberately does not qualify, or the picker would offer fixture entities.
+    It waits ~4s for the socket and otherwise falls back to the widgets' REST path. One code path
+    handles both: `widgetCandidates` takes the registry maps as parameters, and each filter
+    degrades to a no-op on an empty map (`isPrimaryEntity` falls back to the suffix denylist,
+    `dedupeRingMqtt` returns its input), so the fallback list is worse but never wrong.
   - **Refresh** is on render, after every action, on tapping an error, and — while the app happens
     to be running — pushed from the live socket by `widget/WidgetLiveBridge` (throttled to one
     pass every 3 s). `updatePeriodMillis` is the platform's 30-minute floor and is cosmetic only.
