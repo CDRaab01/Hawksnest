@@ -36,12 +36,11 @@ import androidx.lifecycle.lifecycleScope
 import com.hawksnest.MainActivity
 import com.hawksnest.config.overrides
 import com.hawksnest.core.ha.HassEntity
-import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.blockerCopy
 import com.hawksnest.core.logic.resolveName
-import com.hawksnest.core.logic.widgetCandidateDomains
+import com.hawksnest.core.logic.widgetCandidates
 import com.hawksnest.ui.theme.HawksnestTheme
 import com.hawksnest.widget.data.HaCall
 import com.hawksnest.widget.data.WidgetEntryPoint
@@ -143,13 +142,9 @@ private fun PickerScreen(
     var state by remember { mutableStateOf<PickerState>(PickerState.Loading) }
 
     LaunchedEffect(kind) {
-        val domains = widgetCandidateDomains(kind)
         state = when (val result = WidgetEntryPoint.get(context).haClient().states()) {
             is HaCall.Ok -> PickerState.Ready(
-                result.value
-                    .filter { domainOf(it.entityId) in domains }
-                    // An entity HA can't currently reach isn't something to pin to a home screen.
-                    .filter { it.state != "unavailable" }
+                widgetCandidates(kind, result.value)
                     .sortedBy { resolveName(it, overrides).lowercase() }
             )
             is HaCall.Failed -> PickerState.Problem(result.blocker)

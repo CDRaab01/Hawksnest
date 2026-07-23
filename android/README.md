@@ -56,7 +56,7 @@ should control when you drop it, and each opens the app when you tap its name.
 
 | Widget | What it does |
 |---|---|
-| **Hawksnest Light** | Tap to toggle. Dimmable lights also get −/+ buttons that step brightness by 20%. Works with `switch` entities too. |
+| **Hawksnest Light** | Tap to toggle. Dimmable lights also get −/+ buttons and a level bar. The steps are geared like a real dimmer — small near the bottom (1, 5, 10, 20…) where the eye notices, larger near the top (…65, 80, 100) where it doesn't. |
 | **Hawksnest Lock** | One tap to lock. **Two taps to unlock** — the first arms "Tap again to unlock", which lapses after five seconds. |
 | **Hawksnest Alarm** | Off / Home / Away. Arming is one tap; **disarming takes two**, the same way unlocking does. |
 
@@ -78,6 +78,10 @@ Things worth knowing before relying on them:
 - **Unlock and disarm are confirm-taps, not slides.** The in-app controls make you slide precisely
   so a pocket can't open the front door; widgets can't draw a slide, so a second tap stands in for
   the deliberate gesture.
+- **The light picker lists lights only** — not `switch` entities, which on this house are mostly
+  ring-mqtt camera plumbing (live streams, motion toggles, sirens) and drowned out the real lights.
+  All three pickers also drop the housekeeping entities the rest of the app hides. If a lamp you
+  want is wired as a `switch` rather than a `light`, say so and it's a one-line change.
 
 On-device behaviour (placement, resize, and a tap landing while the app is dead) is the seam unit
 tests can't reach — worth a smoke test after the first install that carries them.

@@ -189,8 +189,22 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   - **Destructive commands take two taps.** Unlock and disarm arm a confirmation that lapses after
     5 s; lock and arm are one tap. Glance can draw neither `SlideToAct` nor a drag, so the confirm
     tap is the substitute for the deliberate gesture those controls exist to require. For the same
-    reason the dimmer is discrete ±20% steps rather than a fake slider — each step still commits
+    reason the dimmer is discrete steps rather than a fake slider — each step still commits
     through `dimCommit`, one service call per gesture, as `LightPillar` does on release.
+  - **The dim steps walk a ladder (`WIDGET_DIM_STOPS`), not a fixed percentage.** A fixed step is
+    wrong at both ends: the eye reads brightness roughly logarithmically, so 80→65 is barely
+    visible while 20→10 halves the room. The stops are tight at the bottom and wide at the top,
+    like a physical dimmer's gearing. A read-only `LinearProgressIndicator` under the name shows
+    the level; it is deliberately not tappable, because a ~250dp-wide widget split into enough
+    zones to beat the step buttons would have ~20dp targets.
+  - **The picker offers `light` only, not `switch`.** It briefly took both, on the theory that
+    relay-style lights land in `switch` — but here `switch.*` is overwhelmingly ring-mqtt camera
+    plumbing (live/event streams, motion toggles, sirens), which buried the real lights. The app
+    keeps the domains apart too (`Cards.kt`). The picker also applies the app's `isNoiseEntity`
+    suffix filter. It **cannot** apply the full `isPrimaryEntity` or `dedupeRingMqtt`: both need the
+    entity registry (`entity_category`, integration platform), which is WebSocket-only — the widget
+    layer has REST and REST alone. So a house running both the Ring integration and ring-mqtt may
+    see a duplicate name in the picker; either twin controls the same device.
   - **Refresh** is on render, after every action, on tapping an error, and — while the app happens
     to be running — pushed from the live socket by `widget/WidgetLiveBridge` (throttled to one
     pass every 3 s). `updatePeriodMillis` is the platform's 30-minute floor and is cosmetic only.
