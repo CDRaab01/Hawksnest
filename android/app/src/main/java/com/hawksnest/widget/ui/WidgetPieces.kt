@@ -12,9 +12,9 @@ import androidx.glance.action.Action
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.CircularProgressIndicator
-import androidx.glance.ImageProvider
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.action.actionStartActivity
+import androidx.glance.appwidget.cornerRadius
 import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Column
@@ -37,10 +37,10 @@ import com.hawksnest.MainActivity
 import com.hawksnest.core.logic.Channel
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.blockerCopy
-import com.hawksnest.R
 import com.hawksnest.ui.glance.channelColor
-import com.hawksnest.ui.glance.onEnergy
-import com.hawksnest.ui.glance.onGradient
+import com.hawksnest.ui.glance.channelDim
+import com.hawksnest.ui.glance.onChannel
+import com.hawksnest.ui.glance.panelHigh
 import com.hawksnest.ui.navigation.Screen
 import com.hawksnest.widget.WidgetConfigActivity
 import java.util.Date
@@ -82,14 +82,17 @@ private fun openConfig(): Action {
 }
 
 /**
- * The widget's surface: a PULSE panel lit from above, held by a hairline — and by a channel-lit
- * rim when [accent] says the thing inside has something to report. That rim is the Remnant idea,
- * scaled to a widget: light the edge instead of shadowing the box, so state is legible from across
- * the room before you read a word of it.
+ * The widget's surface.
  *
- * Drawn from a shape drawable rather than a flat `ColorProvider` because gradients and strokes are
- * not expressible in Glance any other way. The drawable owns the corner radius, which is also why
- * it works below API 31, where `GlanceModifier.cornerRadius` is ignored.
+ * Its whole fill carries the state colour: a locked door sits on PULSE's recovery-green container
+ * tone, a jam on streak-orange, an armed panel on effort-blue, and anything with nothing to report
+ * on the neutral raised panel. That is how a widget reads from across a room before a word of it is
+ * legible — the same signal the in-app cards give, expressed as a solid `dim` fill.
+ *
+ * Flat `background(ColorProvider)` + `cornerRadius` on purpose. Glance renders gradients and rim
+ * strokes only by wrapping the element in a background-image node, and that path failed to render
+ * on device; a solid channel tone is the reliable way to say the same thing. `cornerRadius`
+ * applies on API 31+ and is ignored (square) below — acceptable on the phones this ships to.
  */
 @Composable
 fun WidgetPanel(
@@ -97,16 +100,12 @@ fun WidgetPanel(
     accent: Channel? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val panel = when (accent) {
-        Channel.EFFORT -> R.drawable.widget_panel_effort
-        Channel.STREAK -> R.drawable.widget_panel_streak
-        Channel.RECOVERY -> R.drawable.widget_panel_recovery
-        else -> R.drawable.widget_panel
-    }
+    val fill = accent?.let { channelDim(it) } ?: GlanceTheme.colors.widgetBackground
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(ImageProvider(panel))
+            .background(fill)
+            .cornerRadius(if (compact) 16.dp else 20.dp)
             // A one-row widget is ~70dp tall; 12dp of padding top and bottom would eat a third of it.
             .padding(if (compact) 6.dp else 12.dp),
         content = content,
@@ -232,28 +231,23 @@ fun WidgetButton(
      */
     fillHeight: Boolean = false,
 ) {
-    // An engaged control wears its channel's PULSE gradient; a resting one is the panel face.
-    val face = when {
-        action == null || !filled -> R.drawable.widget_button_face
-        accent == Channel.STREAK -> R.drawable.widget_button_energy
-        accent == Channel.EFFORT -> R.drawable.widget_button_hero
-        accent == Channel.RECOVERY -> R.drawable.widget_button_recovery
-        else -> R.drawable.widget_button_face
+    // An engaged control is filled with its channel's base colour; a resting one wears the raised
+    // panel tone. Flat fills only — the reliable Glance path (see WidgetPanel).
+    val fill: ColorProvider = when {
+        action != null && filled && accent != null -> channelColor(accent)
+        else -> panelHigh
     }
     val content: ColorProvider = when {
         action == null -> GlanceTheme.colors.onSurfaceVariant
-        // Content sitting on a gradient can't use the channel's flat `on` colour — that is tuned
-        // for the base hue and fails against the far stop. The energy sweep stays light in both
-        // themes so it takes PULSE's warm ink; the other two run dark enough for white.
-        filled && accent == Channel.STREAK -> onEnergy
-        filled && accent != null -> onGradient
+        filled && accent != null -> onChannel(accent)
         accent != null -> channelColor(accent)
         else -> GlanceTheme.colors.onSurface
     }
     Column(
         modifier = modifier
             .let { if (fillHeight) it.fillMaxHeight() else it.height(TOUCH_TARGET) }
-            .background(ImageProvider(face))
+            .background(fill)
+            .cornerRadius(14.dp)
             .let { if (action != null) it.clickable(action) else it },
         verticalAlignment = Alignment.Vertical.CenterVertically,
         horizontalAlignment = Alignment.Horizontal.CenterHorizontally,

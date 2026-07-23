@@ -229,17 +229,23 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     *below* `minHeight`.** It used to equal it, so launchers offered no vertical resize at all —
     which is why the widgets arrived oversized on a coarser home-screen grid and stayed that way.
     Compact drops the *name* on lock/alarm, never the state or its timestamp (`compactShowsName`).
-  - **Styling** is `ui/glance/PulseGlanceTheme` (text and flat fills, from the app's own
-    `ColorScheme`s via `glance-material3`) plus `res/drawable/widget_*.xml` for anything Glance
-    can't express as a flat color. Glance has no border or gradient modifier, so the panel and the
-    controls are **shape drawables**: a panel lit from above (`panelHigh` → `ink`) held by a 1dp
-    hairline, engaged controls wearing PULSE's energy / hero / recovery gradients, and — the one
-    idea borrowed from Remnant — a **channel-lit rim** in place of a shadow, so a locked door glows
-    green at the edge and a jam glows orange. The drawables read `@color` from
-    `values{,-night}/widget_colors.xml`, which is the drawable-side mirror of `ui/theme/Color.kt`
-    and names the constant behind every value; the two must be edited together. Corner radii live
-    in the drawables, which is also why they work below API 31 where
-    `GlanceModifier.cornerRadius` is ignored.
+  - **Styling** is `ui/glance/PulseGlanceTheme` — text and **flat `ColorProvider` fills** only,
+    read off the app's own `PulseColors`. The whole panel carries the state colour as a solid
+    PULSE `dim` container tone (recovery-green when a door is locked, effort-blue when armed,
+    streak-orange on a jam, neutral otherwise) and engaged controls fill with the channel base;
+    that is the reliable way to say what a rim or gradient would. An earlier cut used shape
+    drawables for gradient fills and a channel-lit rim (the Remnant idea): they rendered on freshly
+    placed widgets but the extra background-image nodes changed the layout structure enough that
+    **widget instances placed by the previous app version wedged on the loading spinner** — Glance
+    caches a layout shape per instance and could not reconcile the new tree against the old cache.
+    Flat fills keep the tree close to the previously-shipped structure, which is what lets existing
+    instances survive an update. If gradient glow is revisited, it needs on-device verification of
+    the *update* path (place a widget, then update the app), not just a fresh placement.
+  - **Existing instances are force-rebuilt on app start** (`WidgetLiveBridge.recoverExistingWidgets`
+    → `updateAll` per kind). A wedged instance won't self-heal from a normal broadcast, but a
+    pushed `updateAll` replaces its stale cached RemoteViews. It is the same rebuild a refresh does,
+    so it runs unconditionally rather than trying to detect the wedge. This is the code-side half of
+    recovery; a hard-wedged instance may still need a one-time remove-and-re-add.
 - Suite membership: signed with the suite key (secrets are `HAWKSNEST_`-prefixed), released by
   `android-release.yml` on `android/**` pushes, tagged `android-vX.Y.Z` (clear of web `v*`).
   Managed by the Dragonfly hub for updates — but **no** SuiteConfigReader/AppAuth (nothing to
