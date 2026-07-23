@@ -16,6 +16,8 @@ import androidx.glance.currentState
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
+import com.hawksnest.R
+import com.hawksnest.core.logic.LockPhase
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.WidgetSizeTier
 import com.hawksnest.core.logic.compactShowsName
@@ -80,11 +82,17 @@ private fun LockBody(prefs: Preferences, json: Json) {
         // A lock with a live problem shows the problem, full stop — no half-state behind a banner.
         // `WidgetRepository` has already masked the stored reading, so there is nothing to leak.
         if (blocker != null) {
-            BlockerBody(blocker, retry)
+            BlockerBody(blocker, retry, R.drawable.ic_glyph_lock)
         } else {
             WidgetHeader(
                 name = view.name,
                 detail = view.label,
+                // The bolt as HA last reported it: thrown when locked (or throwing), open
+                // otherwise — a jam included, because a jammed bolt is an unthrown one.
+                icon = when (view.phase) {
+                    LockPhase.LOCKED, LockPhase.LOCKING -> R.drawable.ic_glyph_lock
+                    else -> R.drawable.ic_glyph_lock_open
+                },
                 accent = view.channel,
                 pending = view.pending,
                 // Always stamped: this frame may still be on the home screen long after the
@@ -93,6 +101,10 @@ private fun LockBody(prefs: Preferences, json: Json) {
                 compact = compact,
                 showName = compactShowsName(WidgetKind.LOCK),
             )
+            // Full tier: the action sits on the panel's bottom edge and the room above stays
+            // panel, so a tall widget reads as a surface with one control rather than one
+            // enormous button. Compact: the button is the widget.
+            if (!compact) Spacer(modifier = GlanceModifier.defaultWeight())
             Spacer(modifier = GlanceModifier.height(if (compact) 4.dp else 8.dp))
             WidgetButton(
                 label = view.actionLabel,
@@ -108,9 +120,20 @@ private fun LockBody(prefs: Preferences, json: Json) {
                     !view.known -> retry
                     else -> null
                 },
-                modifier = GlanceModifier.fillMaxWidth(),
+                modifier = GlanceModifier.fillMaxWidth()
+                    .let { if (compact) it.defaultWeight() else it },
                 accent = view.actionChannel,
                 filled = view.confirming,
+                // The wash makes the resting action legible as a control without shouting; while
+                // the state is unknown the face stays plain — "Checking…" is not an invitation.
+                tinted = view.known,
+                // The action's result, not the current state: tapping Lock throws the bolt.
+                icon = when {
+                    !view.known -> null
+                    view.armsConfirm || view.confirming || view.service == "unlock" ->
+                        R.drawable.ic_glyph_lock_open
+                    else -> R.drawable.ic_glyph_lock
+                },
                 fillHeight = compact,
             )
         }

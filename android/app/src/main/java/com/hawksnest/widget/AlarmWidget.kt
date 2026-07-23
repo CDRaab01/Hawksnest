@@ -18,6 +18,7 @@ import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.width
+import com.hawksnest.R
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.ArmTap
 import com.hawksnest.core.logic.WidgetKind
@@ -83,11 +84,12 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
 
     WidgetPanel(compact = compact, accent = view.channel) {
         if (blocker != null) {
-            BlockerBody(blocker, retry)
+            BlockerBody(blocker, retry, R.drawable.ic_glyph_shield)
         } else {
             WidgetHeader(
                 name = view.name,
                 detail = view.label,
+                icon = R.drawable.ic_glyph_shield,
                 accent = view.channel,
                 pending = view.pending,
                 // See LockWidget: the read time keeps a persisted frame honest.
@@ -95,8 +97,14 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
                 compact = compact,
                 showName = compactShowsName(WidgetKind.ALARM),
             )
+            // Full tier: segments on the bottom edge, air above — see LockWidget. Compact: the
+            // segments take whatever height is left.
+            if (!compact) Spacer(modifier = GlanceModifier.defaultWeight())
             Spacer(modifier = GlanceModifier.height(if (compact) 4.dp else 8.dp))
-            Row(modifier = GlanceModifier.fillMaxWidth()) {
+            Row(
+                modifier = GlanceModifier.fillMaxWidth()
+                    .let { if (compact) it.defaultWeight() else it },
+            ) {
                 ARM_BUTTONS.forEachIndexed { index, button ->
                     if (index > 0) Spacer(modifier = GlanceModifier.width(6.dp))
                     val tap = armTap(view, button)
@@ -119,12 +127,23 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
                         modifier = GlanceModifier.defaultWeight(),
                         accent = view.channel,
                         filled = view.activeState == button.state || confirming,
+                        icon = segmentGlyph(button.state),
+                        // Compact keeps glyph and label on one line; the full tier's 52dp segment
+                        // stacks them, the same silhouette as the app's ArmSegments.
+                        stacked = !compact,
                         fillHeight = compact,
                     )
                 }
             }
         }
     }
+}
+
+/** Each segment's glyph, keyed by the panel state the segment commands. */
+private fun segmentGlyph(state: String): Int = when (state) {
+    "disarmed" -> R.drawable.ic_glyph_power
+    "armed_home" -> R.drawable.ic_glyph_home
+    else -> R.drawable.ic_glyph_shield
 }
 
 class AlarmWidgetReceiver : GlanceAppWidgetReceiver() {

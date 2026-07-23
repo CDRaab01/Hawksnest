@@ -14,11 +14,14 @@ import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
 import androidx.glance.currentState
+import androidx.glance.layout.Alignment
+import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.width
+import com.hawksnest.R
 import com.hawksnest.core.logic.Channel
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
@@ -86,7 +89,7 @@ private fun LightBody(prefs: Preferences, json: Json) {
     WidgetPanel(compact = compact, accent = Channel.STREAK.takeIf { view.on && snapshot != null }) {
         if (snapshot == null) {
             // Nothing has ever been read. Say why, and make the whole face a retry.
-            BlockerBody(blocker ?: WidgetBlocker.NOT_CONFIGURED, retry)
+            BlockerBody(blocker ?: WidgetBlocker.NOT_CONFIGURED, retry, R.drawable.ic_glyph_bulb)
         } else {
             // A light may keep showing its last reading while HA is unreachable — a lamp drawn
             // wrong is a cosmetic error, not a security one — but never silently. The note line
@@ -95,27 +98,39 @@ private fun LightBody(prefs: Preferences, json: Json) {
             WidgetHeader(
                 name = view.name,
                 detail = view.stateLabel,
+                icon = R.drawable.ic_glyph_bulb,
                 accent = if (view.on) Channel.STREAK else null,
                 pending = view.pending,
                 note = note,
                 compact = compact,
                 showName = compactShowsName(WidgetKind.LIGHT),
             )
-            // The level, as a level. Read-only — it costs no touch target and gives the widget the
-            // one thing the old ±20% buttons couldn't: somewhere to see what you just changed.
-            // First thing to go when the widget is squeezed: the header already says the percent.
-            if (view.dimmable && view.on && !compact) {
-                Spacer(modifier = GlanceModifier.height(6.dp))
-                LinearProgressIndicator(
-                    progress = view.pct / 100f,
-                    modifier = GlanceModifier.fillMaxWidth().height(4.dp),
-                    color = channelColor(Channel.STREAK),
-                    backgroundColor = panelHigh,
-                )
+            // The flexible middle, full tier only: the controls sit on the panel's bottom edge
+            // whatever height the launcher grants, and the level bar rides centred in the room
+            // between — read-only, because a ~250dp widget split into tappable zones would have
+            // ~20dp targets. Compact has no middle; there the control row takes the leftover, and
+            // the header already says the percent.
+            if (!compact) {
+                Column(
+                    modifier = GlanceModifier.defaultWeight().fillMaxWidth(),
+                    verticalAlignment = Alignment.Vertical.CenterVertically,
+                ) {
+                    if (view.dimmable && view.on) {
+                        LinearProgressIndicator(
+                            progress = view.pct / 100f,
+                            modifier = GlanceModifier.fillMaxWidth().height(4.dp),
+                            color = channelColor(Channel.STREAK),
+                            backgroundColor = panelHigh,
+                        )
+                    }
+                }
             }
             Spacer(modifier = GlanceModifier.height(if (compact) 4.dp else 8.dp))
             val width = size.width
-            Row(modifier = GlanceModifier.defaultWeight().fillMaxWidth()) {
+            Row(
+                modifier = GlanceModifier.fillMaxWidth()
+                    .let { if (compact) it.defaultWeight() else it },
+            ) {
                 val toggle = if (view.on) "turn_off" else "turn_on"
                 WidgetButton(
                     // The header already states what the light *is*; this button says what the tap
@@ -135,13 +150,14 @@ private fun LightBody(prefs: Preferences, json: Json) {
                     modifier = GlanceModifier.defaultWeight(),
                     accent = Channel.STREAK,
                     filled = view.on,
+                    icon = R.drawable.ic_glyph_power,
                     fillHeight = compact,
                 )
                 if (view.dimmable && view.controllable) {
                     Spacer(modifier = GlanceModifier.width(6.dp))
-                    DimButton("−", dimDown(view.pct), compact)
+                    DimButton(R.drawable.ic_glyph_minus, "Dimmer", dimDown(view.pct), compact)
                     Spacer(modifier = GlanceModifier.width(6.dp))
-                    DimButton("+", dimUp(view.pct), compact)
+                    DimButton(R.drawable.ic_glyph_plus, "Brighter", dimUp(view.pct), compact)
                 }
             }
         }
@@ -149,18 +165,19 @@ private fun LightBody(prefs: Preferences, json: Json) {
 }
 
 @Composable
-private fun DimButton(label: String, targetPct: Int, compact: Boolean) {
+private fun DimButton(icon: Int, description: String, targetPct: Int, compact: Boolean) {
     WidgetButton(
-        label = label,
+        label = "",
+        icon = icon,
+        iconDescription = description,
         fillHeight = compact,
         action = actionRunCallback<WidgetServiceAction>(
             // `dimCommit` maps a level to a call; at these clamped levels that is always turn_on
             // with a brightness percent — stepping down never reaches the "off" case.
             widgetParams(WidgetKind.LIGHT, service = "turn_on", brightnessPct = targetPct)
         ),
-        // 44dp square keeps both steps on a three-cell widget while staying a real touch target
-        // (WidgetButton fixes the height at 48dp).
-        modifier = GlanceModifier.width(44.dp),
+        // A 48dp square keeps both steps on a three-cell widget while staying a real touch target.
+        modifier = GlanceModifier.width(48.dp),
         accent = Channel.STREAK,
     )
 }

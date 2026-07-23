@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Header glyph chip washed in the effort channel — an armed panel. See widget_chip.xml. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/widget_soft_effort" />
+    <corners android:radius="10dp" />
+</shape>

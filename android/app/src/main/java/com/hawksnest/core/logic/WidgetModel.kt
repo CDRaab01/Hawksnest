@@ -35,14 +35,14 @@ enum class WidgetKind { LIGHT, LOCK, ALARM }
 /**
  * How much room a widget has been given, and therefore how much it says.
  *
- * Two tiers, not three: the full layout wants a two-line header plus a 48dp control, which needs
- * about 114dp, and a one-row widget has nowhere near that. Compact keeps every control and
- * collapses the header to a single small line.
+ * Two tiers, not three: the full layout wants a chipped two-line header plus a 52dp control row,
+ * which needs about 118dp, and a one-row widget has nowhere near that. Compact keeps every control
+ * and collapses the header to a single small line with an inline glyph.
  */
 enum class WidgetSizeTier { COMPACT, FULL }
 
-/** Below this a widget cannot fit a two-line header over a full-height control. */
-const val WIDGET_FULL_MIN_HEIGHT_DP = 112
+/** Below this a widget cannot fit the chipped two-line header over a full-height control row. */
+const val WIDGET_FULL_MIN_HEIGHT_DP = 120
 
 fun sizeTier(heightDp: Int): WidgetSizeTier =
     if (heightDp < WIDGET_FULL_MIN_HEIGHT_DP) WidgetSizeTier.COMPACT else WidgetSizeTier.FULL

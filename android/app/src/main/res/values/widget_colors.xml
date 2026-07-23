@@ -25,6 +25,12 @@
     <color name="widget_rim_streak">#73C2410C</color>     <!-- PulseOrangeDeep -->
     <color name="widget_rim_recovery">#73047857</color>   <!-- PulseGreenDeep -->
 
+    <!-- Soft channel washes at 12%: the header chip's fill, and the tinted resting button (a
+         control that is live but not engaged — the lock's next action). Same Deep seeds as above. -->
+    <color name="widget_soft_effort">#1F2A5BFF</color>    <!-- PulseBlueDeep -->
+    <color name="widget_soft_streak">#1FC2410C</color>    <!-- PulseOrangeDeep -->
+    <color name="widget_soft_recovery">#1F047857</color>  <!-- PulseGreenDeep -->
+
     <!-- energyGradient (light): the celebration/streak voice — a lit lamp, a cautionary confirm. -->
     <color name="widget_energy_start">#FFFF6B35</color>
     <color name="widget_energy_end">#FFF5A623</color>
