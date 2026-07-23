@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Three segments across, so this one does not resize below three cells wide: any narrower and
+     Off/Home/Away stop being separable touch targets. See light_widget_info.xml for the rest. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="110dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:previewImage="@drawable/ic_widget_alarm"
+    android:description="@string/widget_alarm_description"
+    android:configure="com.hawksnest.widget.WidgetConfigActivity"
+    android:widgetCategory="home_screen" />

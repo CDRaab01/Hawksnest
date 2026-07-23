@@ -52,6 +52,58 @@
                 android:value="Keeps a connection to the household's self-hosted ntfy server for doorbell and alarm push notifications." />
         </service>
 
+        <!-- ── Home-screen widgets ────────────────────────────────────────────────────────────
+             Three providers rather than one, so the launcher's picker lists them by name and each
+             gets its own size and preview. They share one configuration activity, which works out
+             which widget it is configuring from the provider that launched it. The widgets talk to
+             Home Assistant over REST (widget/data/WidgetHaClient) — see ARCHITECTURE.md. -->
+        <receiver
+            android:name=".widget.LightWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_light_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/light_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.LockWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_lock_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/lock_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.AlarmWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_alarm_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/alarm_widget_info" />
+        </receiver>
+
+        <!-- Launched by the system when a widget is dropped on the home screen. Exported because
+             the launcher starts it; it takes no input beyond the widget id the system supplies. -->
+        <activity
+            android:name=".widget.WidgetConfigActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Hawksnest">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <!-- Restart the listener after a reboot (only if push is enabled). -->
         <receiver
             android:name=".push.BootReceiver"

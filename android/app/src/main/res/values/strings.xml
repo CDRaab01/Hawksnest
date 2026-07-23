@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Hawksnest</string>
+
+    <!-- Home-screen widgets. These labels and descriptions are what the launcher's widget
+         picker shows, so each one says what the widget does, not what it is. -->
+    <string name="widget_light_label">Hawksnest Light</string>
+    <string name="widget_light_description">Toggle and dim one light.</string>
+    <string name="widget_lock_label">Hawksnest Lock</string>
+    <string name="widget_lock_description">Lock a door, or unlock it with a confirming second tap.</string>
+    <string name="widget_alarm_label">Hawksnest Alarm</string>
+    <string name="widget_alarm_description">Arm home, arm away, or disarm the alarm panel.</string>
 </resources>

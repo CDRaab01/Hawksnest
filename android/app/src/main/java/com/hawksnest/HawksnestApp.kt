@@ -7,6 +7,7 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.push.NtfyPushService
 import com.hawksnest.push.PushNotifier
 import com.hawksnest.push.PushSettings
+import com.hawksnest.widget.WidgetLiveBridge
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,10 +31,14 @@ class HawksnestApp : Application(), ImageLoaderFactory {
     @Inject lateinit var okHttpClient: OkHttpClient
     @Inject lateinit var pushNotifier: PushNotifier
     @Inject lateinit var pushSettings: PushSettings
+    @Inject lateinit var widgetLiveBridge: WidgetLiveBridge
 
     override fun onCreate() {
         super.onCreate()
         connectionManager.start()
+        // Mirror entity changes into any home-screen widgets while this process is alive. Purely
+        // additive — widgets read for themselves when the app isn't running.
+        widgetLiveBridge.start()
         // Notification channels must exist before the first notify(); create them
         // once here. Then resume the push listener if the user has it enabled
         // (the service self-stops if not).

@@ -44,8 +44,43 @@ components (`ui/components/`) are in place, plus:
   the notification tap) is the one seam unit tests can't cover — smoke-test it on the phone before
   relying on it (see the camera smoke checklist's "push fires" item).
 
+- **Home-screen widgets** ✅ (code) — see below.
+
 > Coverage today is strongest on the pure logic (`core/logic`, `core/ha`), which is JVM-unit-tested.
 > The Compose UI also runs through the **Sift design-slop audit** (below).
+
+## Home-screen widgets
+
+Three widgets, added from the launcher's widget picker like any other. Each asks which device it
+should control when you drop it, and each opens the app when you tap its name.
+
+| Widget | What it does |
+|---|---|
+| **Hawksnest Light** | Tap to toggle. Dimmable lights also get −/+ buttons that step brightness by 20%. Works with `switch` entities too. |
+| **Hawksnest Lock** | One tap to lock. **Two taps to unlock** — the first arms "Tap again to unlock", which lapses after five seconds. |
+| **Hawksnest Alarm** | Off / Home / Away. Arming is one tap; **disarming takes two**, the same way unlocking does. |
+
+Things worth knowing before relying on them:
+
+- **They only work on the tailnet**, like the rest of the app. Off it, a widget says "Can't reach
+  Hawksnest — check Tailscale" and offers a retry; it does not show what the lock said last time.
+- **Locks and the alarm never show a stale state.** A reading more than a minute old is dropped and
+  the widget says "Checking…" while it refetches. This is deliberate and is the widget half of the
+  no-stale-security-state invariant — "Locked" is the one word a widget must never guess. Lights
+  are exempt: they keep their last reading and show its age once it is over fifteen minutes old.
+- **The lock and alarm always show when they were read** — "Locked · 10:42". A widget's picture
+  stays on the home screen until something redraws it, which may be a long time, so the picture
+  has to date itself. If the time looks old, it is: tap it to refresh.
+- **Nothing polls in the background.** A widget reads when it is drawn, after every action, and
+  whenever you tap an error. While the app is open its widgets also follow the live socket, so
+  opening Hawksnest makes the home screen snap current. That is the whole freshness story — the
+  platform's own 30-minute update period is cosmetic.
+- **Unlock and disarm are confirm-taps, not slides.** The in-app controls make you slide precisely
+  so a pocket can't open the front door; widgets can't draw a slide, so a second tap stands in for
+  the deliberate gesture.
+
+On-device behaviour (placement, resize, and a tap landing while the app is dead) is the seam unit
+tests can't reach — worth a smoke test after the first install that carries them.
 
 ## Build
 

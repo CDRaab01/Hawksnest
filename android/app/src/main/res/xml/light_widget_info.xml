@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Three cells by two is the smallest honest size: a name, a state line, and an action row whose
+  buttons clear the 48dp touch floor. Resizing down to two cells is allowed — the toggle drops to
+  a single word and the dim steps stay — but nothing shrinks below a real target.
+
+  updatePeriodMillis is the platform floor of 30 minutes and is not this widget's freshness
+  mechanism; every render and every action triggers a read, and WidgetLiveBridge pushes changes
+  while the app is running. See ARCHITECTURE.md.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="110dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:previewImage="@drawable/ic_widget_light"
+    android:description="@string/widget_light_description"
+    android:configure="com.hawksnest.widget.WidgetConfigActivity"
+    android:widgetCategory="home_screen" />

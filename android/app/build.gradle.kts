@@ -121,6 +121,12 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
 
+    // Glance — home-screen AppWidgets (lights, locks, alarm). RemoteViews-backed, so it is a
+    // separate composable API from the in-app Compose UI; glance-material3 maps our existing
+    // M3 ColorSchemes onto the widget theme (see ui/glance/PulseGlanceTheme.kt).
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.material3)
+
     // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
@@ -155,6 +161,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.mockito.kotlin)
     testImplementation(libs.kotlinx.coroutines.test)
+    // MockWebServer — exercises the widget REST client's real OkHttp path (200/401/5xx/timeout).
+    testImplementation(libs.okhttp.mockwebserver)
     // AGP 9 built-in Kotlin: kotlin("test") no longer selects the JVM binding; pin it.
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:2.2.10")
 
