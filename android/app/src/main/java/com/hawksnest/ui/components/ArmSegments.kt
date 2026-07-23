@@ -106,7 +106,7 @@ private fun RowScope.Segment(
     )
     Box(
         modifier = modifier
-            .heightIn(min = 44.dp)
+            .heightIn(min = 48.dp)
             .clip(CircleShape)
             .background(fill)
             .clickable(onClick = onClick, enabled = enabled && !busy),
