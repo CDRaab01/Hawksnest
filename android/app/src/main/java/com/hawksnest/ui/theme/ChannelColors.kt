@@ -25,6 +25,14 @@ fun PulseColors.dim(channel: Channel): Color = when (channel) {
     Channel.RECOVERY -> recoveryDim
 }
 
+/** Content color for text/icons atop a [Channel]'s base fill. */
+fun PulseColors.on(channel: Channel): Color = when (channel) {
+    Channel.EFFORT -> onEffort
+    Channel.STRENGTH -> onStrength
+    Channel.STREAK -> onStreak
+    Channel.RECOVERY -> onRecovery
+}
+
 /** The Material icon for an alarm shield glyph (the pure [AlarmGlyph] from core/logic). */
 fun AlarmGlyph.icon(): ImageVector = when (this) {
     AlarmGlyph.SHIELD -> Icons.Filled.Shield

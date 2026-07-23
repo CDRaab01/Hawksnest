@@ -79,13 +79,34 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   persisted in `util/DevicePrefsStore` (DataStore) with a hidden-devices shelf. Display names
   resolve rename → override → non-junk friendly_name → registry device name
   (`core/logic/Resolve.kt displayName`).
-- **Control interaction model** (`ui/components/`): locks use `SlideToAct` — the drag is the
-  confirmation, and the thumb holds a spinner until HA's echo (non-optimistic, per invariant 1).
-  Lights/switches/fans render **optimistically** — the switch thumb follows the finger, the echo
-  reconciles, and a failure snaps back (they are not security surfaces; the non-optimism invariant
-  is locks/alarm only). Alarm segments are plain taps with per-segment pending spinners. Haptics
-  route through the `Haptics` vocabulary (`rememberHaptics()`) — actuation tick, threshold buzz on
-  the slide's commit point, reject buzz with the failure snackbar.
+- **Control interaction model** (`ui/components/`): the hero domains render premium PULSE
+  widgets, each committing **exactly one service call per gesture** with live-local preview
+  (no mid-drag calls, so no `awaitEcho` plumbing):
+  - **Lights — `LightPillar`**: the whole surface is the dimmer. A warmth-tinted glow fill
+    (scalar warmth from `core/logic/LightFeel.kt lightWarmth` — kelvin/rgb attrs → 0..1, lerped
+    between effort/streak channels in the composable so no raw color originates in logic) rises
+    to the level; drag anywhere to dim with a haptic tick per quarter (`tickCrossed`), tap to
+    toggle, release commits once (`dimCommit` — the floor sends a real `turn_off`). Optimistic.
+    Non-dimmable lights are tap-only (`isDimmableLight` still gates, same as the old slider).
+  - **Switches — `RockerSwitch`**: full-width spring rocker (tap anywhere or drag the thumb past
+    the midpoint), optimistic via `rememberOptimisticOnOff`.
+  - **Locks — `LockVault`** around the unchanged `SlideToAct`: the drag is still the
+    confirmation and the thumb still holds a spinner until HA's echo (non-optimistic, per
+    invariant 1). The vault adds the state's voice from `core/logic/LockState.kt lockVaultView`:
+    a deadbolt glyph that throws **only on the echoed `locked`**, recovery secure glow, a
+    streak jammed frame with a reject buzz (jam leaves the glyph visibly stuck partway), and a
+    charge shimmer while pending. The settle-thunk confirm haptic lives here too.
+  - **Climate — `ThermostatDial`**: a 270° arc (geometry in `core/logic/Thermostat.kt`) dragged
+    along the ring, tinted by `hvac_action` (streak heating / effort cooling), setpoint in mono
+    type with the measured "now" beneath; −/+ 48dp steppers remain as precise controls; a
+    bottom dead-gap rejects stray touches; no target → read-only dial.
+  - **Alarm — `ArmSegments`** (animated channel pill, still plain taps with per-segment pending
+    spinners, non-optimistic) and **media — `MediaTransport`** (instrument-disc transport).
+  Fans/covers keep the original compact controls (`ToggleRow`/`LevelSlider`/`CoverButton`).
+  Gesture→value math is pure and unit-tested (`LightFeelTest`, `ThermostatTest`,
+  `LockStateTest`). Haptics route through the `Haptics` vocabulary (`rememberHaptics()`) —
+  actuation tick, threshold buzz on ticks/steps/commit points, reject buzz with the failure
+  snackbar and on entering a jam.
 - Cleartext HTTP is **deliberately permitted** (`network_security_config.xml`): the HA host can
   be a bare `100.x` Tailscale IP, which a scoped domain-config cannot match. The fix is TLS on
   the proxy first (ROADMAP #1), then flip `cleartextTrafficPermitted="false"` — not a manifest

@@ -12,15 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,11 +29,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.unit.dp
-import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.CardType
+import com.hawksnest.core.logic.brightnessPct
+import com.hawksnest.core.logic.dimCommit
+import com.hawksnest.core.logic.fmtTemp
 import com.hawksnest.core.logic.isDimmableLight
+import com.hawksnest.core.logic.lightWarmth
 import com.hawksnest.core.logic.lockStateLabel
+import com.hawksnest.core.logic.lockVaultView
+import com.hawksnest.core.logic.thermostatView
 import com.hawksnest.ui.theme.HawksnestTheme
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -74,6 +69,11 @@ private val DOOR_CLASSES = setOf("door", "window", "opening", "garage_door", "co
  * pending state until HA echoes; lights/switches/fans render **optimistically** (the thumb follows
  * the finger, the echo reconciles, a failure snaps back). Shared by the Devices tab and per-room
  * Area detail.
+ *
+ * The hero domains render the premium widgets — [LightPillar] (drag-anywhere dimmer),
+ * [RockerSwitch], [LockVault] (the vault around [SlideToAct]), [ThermostatDial], [ArmSegments]
+ * and [MediaTransport] — each committing exactly one service call per gesture. Fans and covers
+ * keep the original compact controls.
  */
 @Composable
 fun DeviceControlCard(
@@ -98,48 +98,38 @@ fun DeviceControlCard(
         }
         when (device.card) {
             // Locks are the deliberate-action exception: no tap target at all — a slide commits,
-            // and the track holds an honest pending state until HA echoes (never optimistic).
+            // and the vault holds an honest pending state until HA echoes (never optimistic).
             CardType.LOCK -> {
-                val locked = device.rawState == "locked"
-                val transitional = device.rawState == "locking" || device.rawState == "unlocking"
-                // The bolt's confirm tick: when a busy lock settles into locked/unlocked
-                // (HA's echo — the moment the physical bolt actually threw), buzz once.
-                var wasBusy by remember { mutableStateOf(false) }
-                LaunchedEffect(device.rawState, pending) {
-                    val settledNow = device.rawState == "locked" || device.rawState == "unlocked"
-                    if (wasBusy && settledNow && !pending) haptics.confirm()
-                    wasBusy = pending || transitional
-                }
+                val view = lockVaultView(device.rawState)
                 Box(Modifier.padding(top = HawksnestTheme.spacing.md)) {
-                    SlideToAct(
-                        label = if (locked) "Slide to unlock" else "Slide to lock",
-                        pendingLabel = when {
-                            device.rawState == "locking" -> "Locking…"
-                            device.rawState == "unlocking" -> "Unlocking…"
-                            locked -> "Unlocking…" // gate-pending before the first echo
-                            else -> "Locking…"
-                        },
-                        icon = if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock,
-                        channel = if (locked) pulse.streak else pulse.recovery,
-                        onChannel = if (locked) pulse.onStreak else pulse.onRecovery,
-                        dimChannel = if (locked) pulse.streakDim else pulse.recoveryDim,
-                        pending = pending || transitional,
-                        enabled = device.rawState != "unavailable",
-                        onCommit = { onCall(if (locked) "unlock" else "lock", emptyMap()) },
+                    LockVault(
+                        view = view,
+                        pending = pending,
+                        onCommit = { onCall(view.service, emptyMap()) },
                         testTag = "slide-${device.entityId}",
                     )
                 }
             }
-            CardType.SWITCH -> ToggleRow(device.rawState == "on", pending, haptics, onCall)
-            CardType.LIGHT -> {
-                val on = device.rawState == "on"
-                ToggleRow(on, pending, haptics, onCall)
-                // On/off-only lights (relay/switch-type) get no dimmer — a dead
-                // slider on every porch light was worse than no slider.
-                if (isDimmableLight(device.attributes)) {
-                    val pct = device.attributes.num("brightness")?.let { (it / 2.55).roundToInt() } ?: 0
-                    LevelSlider(pct, enabled = on) { v -> onCall("turn_on", mapOf("brightness_pct" to v)) }
-                }
+            CardType.SWITCH -> RockerSwitch(
+                on = device.rawState == "on",
+                pending = pending,
+                enabled = device.rawState != "unavailable",
+                onToggle = { onCall(if (it) "turn_on" else "turn_off", emptyMap()) },
+            )
+            CardType.LIGHT -> Box(Modifier.padding(top = HawksnestTheme.spacing.sm)) {
+                LightPillar(
+                    on = device.rawState == "on",
+                    dimmable = isDimmableLight(device.attributes),
+                    pct = brightnessPct(device.attributes),
+                    warmth = lightWarmth(device.attributes),
+                    pending = pending,
+                    enabled = device.rawState != "unavailable",
+                    onToggle = { onCall(if (it) "turn_on" else "turn_off", emptyMap()) },
+                    onCommitPct = {
+                        val (service, extra) = dimCommit(it)
+                        onCall(service, extra)
+                    },
+                )
             }
             CardType.FAN -> {
                 val on = device.rawState == "on"
@@ -152,61 +142,23 @@ fun DeviceControlCard(
                 CoverButton("Stop", null) { onCall("stop_cover", emptyMap()) }
                 CoverButton("Close", pulse.recovery) { onCall("close_cover", emptyMap()) }
             }
-            CardType.CLIMATE -> {
-                val target = device.attributes.num("temperature")
-                val step = device.attributes.num("target_temp_step") ?: 0.5
-                val unit = device.attributes.str("unit_of_measurement") ?: "°"
-                Box(Modifier.padding(top = HawksnestTheme.spacing.md)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md)) {
-                        IconButton(onClick = { target?.let { onCall("set_temperature", mapOf("temperature" to it - step)) } }) {
-                            Icon(Icons.Filled.Remove, contentDescription = "Cooler", tint = pulse.effort)
-                        }
-                        Text(
-                            if (target != null) "${fmtTemp(target)}$unit" else "—",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        IconButton(onClick = { target?.let { onCall("set_temperature", mapOf("temperature" to it + step)) } }) {
-                            Icon(Icons.Filled.Add, contentDescription = "Warmer", tint = pulse.effort)
-                        }
-                    }
-                }
-            }
-            CardType.MEDIA_PLAYER -> ControlRow {
-                IconButton(onClick = { onCall("media_previous_track", emptyMap()) }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", tint = MaterialTheme.colorScheme.onSurface)
-                }
-                IconButton(onClick = { onCall("media_play_pause", emptyMap()) }, modifier = Modifier.weight(1f)) {
-                    val playing = device.rawState == "playing"
-                    Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = "Play/Pause", tint = pulse.effort)
-                }
-                IconButton(onClick = { onCall("media_next_track", emptyMap()) }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = MaterialTheme.colorScheme.onSurface)
-                }
-            }
-            CardType.ALARM -> {
-                // Which segment was tapped, so its spinner (not all three) shows while HA works
-                // through arming/exit delay. Cleared once the panel settles.
-                var tapped by remember { mutableStateOf<String?>(null) }
-                val transitional = device.rawState in ALARM_TRANSITIONAL
-                LaunchedEffect(pending, transitional) { if (!pending && !transitional) tapped = null }
-                ControlRow {
-                    ARM_BUTTONS.forEach { b ->
-                        ArmSegment(
-                            label = b.label,
-                            active = device.rawState == b.state,
-                            busy = (pending || transitional) && tapped == b.service,
-                            enabled = !pending,
-                            onClick = {
-                                haptics.toggleOn()
-                                tapped = b.service
-                                onCall(b.service, emptyMap())
-                            },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            }
+            CardType.CLIMATE -> ThermostatDial(
+                view = thermostatView(device.attributes, device.rawState),
+                pending = pending,
+                onCommitTemp = { onCall("set_temperature", mapOf("temperature" to it)) },
+                modifier = Modifier.padding(top = HawksnestTheme.spacing.md),
+            )
+            CardType.MEDIA_PLAYER -> MediaTransport(
+                playing = device.rawState == "playing",
+                onPrev = { onCall("media_previous_track", emptyMap()) },
+                onPlayPause = { onCall("media_play_pause", emptyMap()) },
+                onNext = { onCall("media_next_track", emptyMap()) },
+            )
+            CardType.ALARM -> ArmSegments(
+                rawState = device.rawState,
+                pending = pending,
+                onArm = { onCall(it, emptyMap()) },
+            )
             else -> Unit // BINARY_SENSOR / CAMERA / GENERIC are read-only (subtitle carries the state)
         }
     }
@@ -216,7 +168,7 @@ fun DeviceControlCard(
 private fun subtitle(d: DeviceUi): String = when (d.card) {
     CardType.LIGHT ->
         if (d.rawState != "on") "Off"
-        else if (isDimmableLight(d.attributes)) "On · ${d.attributes.num("brightness")?.let { (it / 2.55).roundToInt() } ?: 0}%"
+        else if (isDimmableLight(d.attributes)) "On · ${brightnessPct(d.attributes)}%"
         else "On"
     CardType.FAN -> if (d.rawState == "on") "On · ${d.attributes.num("percentage")?.roundToInt() ?: 0}%" else "Off"
     CardType.COVER -> "${d.stateText} · ${d.attributes.num("current_position")?.roundToInt() ?: 0}%"
@@ -248,8 +200,6 @@ private fun binarySensorText(state: String, deviceClass: String?): String {
         else -> if (on) "On" else "Off"
     }
 }
-
-private fun fmtTemp(t: Double): String = if (t % 1.0 == 0.0) t.toInt().toString() else "%.1f".format(t)
 
 /**
  * Optimistic switch for non-security domains: the thumb follows the finger *immediately* (a
@@ -337,39 +287,3 @@ private fun ControlRow(content: @Composable RowScope.() -> Unit) {
     }
 }
 
-/** HA alarm-panel states where a command is still settling (exit delays, entry countdowns). */
-private val ALARM_TRANSITIONAL = setOf("arming", "disarming", "pending")
-
-@Composable
-private fun ArmSegment(
-    label: String,
-    active: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    busy: Boolean = false,
-    enabled: Boolean = true,
-) {
-    val pulse = HawksnestTheme.pulse
-    Box(
-        modifier = modifier
-            .clip(MaterialTheme.shapes.small)
-            .background(if (active) pulse.effortDim else pulse.panelHigh)
-            .clickable(onClick = onClick, enabled = enabled && !busy)
-            .padding(vertical = HawksnestTheme.spacing.sm),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (busy) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                color = pulse.effort,
-                strokeWidth = 2.dp,
-            )
-        } else {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelLarge,
-                color = if (active) pulse.effort else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}

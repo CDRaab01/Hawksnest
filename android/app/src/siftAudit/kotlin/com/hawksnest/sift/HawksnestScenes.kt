@@ -31,12 +31,25 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.ha.ConnectionStatus
+import com.hawksnest.core.logic.CardType
+import com.hawksnest.core.logic.lockVaultView
+import com.hawksnest.core.logic.thermostatView
+import com.hawksnest.ui.components.ArmSegments
 import com.hawksnest.ui.components.ConnectionPill
-import com.hawksnest.ui.components.DataText
+import com.hawksnest.ui.components.DeviceControlCard
+import com.hawksnest.ui.components.DeviceUi
+import com.hawksnest.ui.components.LightPillar
+import com.hawksnest.ui.components.LockVault
+import com.hawksnest.ui.components.MediaTransport
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.PulseButton
+import com.hawksnest.ui.components.RockerSwitch
 import com.hawksnest.ui.components.SectionHeader
 import com.hawksnest.ui.components.StatTile
+import com.hawksnest.ui.components.ThermostatDial
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Representative Hawksnest scenes for the Sift design-slop audit. These render the **real**
@@ -136,7 +149,9 @@ fun SecurityHeroScene() {
 
 /**
  * Area detail — device controls and sensor stats: the kind of mixed-density content Sift's contrast,
- * touch-target, and type-hierarchy rules care about. Mirrors `ui/area/AreaDetailScreen.kt`.
+ * touch-target, and type-hierarchy rules care about. Mirrors `ui/area/AreaDetailScreen.kt`, and
+ * renders the **real** `DeviceControlCard` so the audit sees the widgets users actually touch —
+ * the light pillar and the lock vault.
  */
 @Composable
 fun ControlsScene() {
@@ -147,23 +162,82 @@ fun ControlsScene() {
                 StatTile(label = "Temperature", value = "71°", modifier = Modifier.weight(1f))
                 StatTile(label = "Humidity", value = "44%", modifier = Modifier.weight(1f))
             }
-            PanelCard {
-                Text("Ceiling Light", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(4.dp))
-                DataText(text = "On · 80%")
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    PulseButton(text = "Toggle", onClick = {})
-                    PulseButton(text = "Details", onClick = {}, tonal = true)
-                }
-            }
-            PanelCard {
-                Text("Front Door", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(4.dp))
-                DataText(text = "Locked")
-                Spacer(Modifier.height(12.dp))
-                PulseButton(text = "Unlock", onClick = {})
-            }
+            DeviceControlCard(
+                device = DeviceUi(
+                    entityId = "light.ceiling",
+                    name = "Ceiling Light",
+                    stateText = "on",
+                    rawState = "on",
+                    card = CardType.LIGHT,
+                    attributes = JsonObject(
+                        mapOf(
+                            "brightness" to JsonPrimitive(204),
+                            "supported_color_modes" to JsonArray(listOf(JsonPrimitive("color_temp"))),
+                            "color_temp_kelvin" to JsonPrimitive(3000),
+                        ),
+                    ),
+                ),
+                onCall = { _, _ -> },
+            )
+            DeviceControlCard(
+                device = DeviceUi(
+                    entityId = "lock.front_door",
+                    name = "Front Door",
+                    stateText = "locked",
+                    rawState = "locked",
+                    card = CardType.LOCK,
+                    attributes = JsonObject(emptyMap()),
+                ),
+                onCall = { _, _ -> },
+            )
+        }
+    }
+}
+
+/**
+ * The premium control widgets, one of each in a deterministic state: the dimmer pillar warm at
+ * 62%, the rocker on and off, the vault locked and jammed, the thermostat dial mid-heat, the arm
+ * segments and the media transport. Static props only — no pending spinners or infinite
+ * animations — so the Robolectric render is stable for the token/contrast/touch-target rules.
+ */
+@Composable
+fun WidgetsScene() {
+    Surface(color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            SectionHeader(title = "Controls")
+            LightPillar(
+                on = true,
+                dimmable = true,
+                pct = 62,
+                warmth = 0.7f,
+                pending = false,
+                onToggle = {},
+                onCommitPct = {},
+            )
+            RockerSwitch(on = true, pending = false, onToggle = {})
+            RockerSwitch(on = false, pending = false, onToggle = {})
+            LockVault(view = lockVaultView("locked"), pending = false, onCommit = {})
+            LockVault(view = lockVaultView("jammed"), pending = false, onCommit = {})
+            ThermostatDial(
+                view = thermostatView(
+                    JsonObject(
+                        mapOf(
+                            "temperature" to JsonPrimitive(72.0),
+                            "current_temperature" to JsonPrimitive(68.0),
+                            "min_temp" to JsonPrimitive(45.0),
+                            "max_temp" to JsonPrimitive(95.0),
+                            "target_temp_step" to JsonPrimitive(1.0),
+                            "unit_of_measurement" to JsonPrimitive("°F"),
+                            "hvac_action" to JsonPrimitive("heating"),
+                        ),
+                    ),
+                    "heat",
+                ),
+                pending = false,
+                onCommitTemp = {},
+            )
+            ArmSegments(rawState = "armed_home", pending = false, onArm = {})
+            MediaTransport(playing = true, onPrev = {}, onPlayPause = {}, onNext = {})
         }
     }
 }

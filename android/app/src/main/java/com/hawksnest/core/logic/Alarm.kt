@@ -66,6 +66,9 @@ fun alarmView(state: String): AlarmView {
     )
 }
 
+/** HA alarm-panel states where a command is still settling (exit delays, entry countdowns). */
+val ALARM_TRANSITIONAL = setOf("arming", "disarming", "pending")
+
 /** One segment of the Off / Home / Away control. [service] is the HA `alarm_control_panel.*` call. */
 data class ArmButton(val label: String, val service: String, val state: String)
 
