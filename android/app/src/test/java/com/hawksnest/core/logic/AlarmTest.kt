@@ -53,6 +53,13 @@ class AlarmTest {
     }
 
     @Test
+    fun `transitional set matches the transitioning flag`() {
+        for (s in ALARM_TRANSITIONAL) assertTrue(alarmView(s).transitioning)
+        assertFalse("disarmed" in ALARM_TRANSITIONAL)
+        assertFalse("armed_away" in ALARM_TRANSITIONAL)
+    }
+
+    @Test
     fun `exposes Off Home Away with their services`() {
         assertEquals(
             listOf("alarm_disarm", "alarm_arm_home", "alarm_arm_away"),
