@@ -374,6 +374,28 @@ class WidgetModelTest {
         assertTrue(blockerCopy(WidgetBlocker.UNREACHABLE).detail.contains("Tailscale"))
     }
 
+    // ── Size tiers ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a one-row widget lays out compact and a two-row one does not`() {
+        // A launcher row is roughly 40-100dp depending on grid; the full layout needs a two-line
+        // header over a 48dp control, which does not fit in one.
+        assertEquals(WidgetSizeTier.COMPACT, sizeTier(40))
+        assertEquals(WidgetSizeTier.COMPACT, sizeTier(90))
+        assertEquals(WidgetSizeTier.FULL, sizeTier(WIDGET_FULL_MIN_HEIGHT_DP))
+        assertEquals(WidgetSizeTier.FULL, sizeTier(180))
+    }
+
+    @Test
+    fun `squeezed to one line, a lock spends it on state and time — not its name`() {
+        // The name is recoverable from where the widget sits. The timestamp is the thing that
+        // stops a frame left on the home screen from quietly lying, so it cannot be what gets cut.
+        assertFalse(compactShowsName(WidgetKind.LOCK))
+        assertFalse(compactShowsName(WidgetKind.ALARM))
+        // A light has no such duty, and "which lamp?" is the only question worth answering.
+        assertTrue(compactShowsName(WidgetKind.LIGHT))
+    }
+
     // ── The picker's candidate list ───────────────────────────────────────────────────────────
 
     @Test

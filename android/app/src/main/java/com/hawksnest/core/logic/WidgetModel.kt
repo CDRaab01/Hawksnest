@@ -33,6 +33,32 @@ import kotlin.math.roundToInt
 enum class WidgetKind { LIGHT, LOCK, ALARM }
 
 /**
+ * How much room a widget has been given, and therefore how much it says.
+ *
+ * Two tiers, not three: the full layout wants a two-line header plus a 48dp control, which needs
+ * about 114dp, and a one-row widget has nowhere near that. Compact keeps every control and
+ * collapses the header to a single small line.
+ */
+enum class WidgetSizeTier { COMPACT, FULL }
+
+/** Below this a widget cannot fit a two-line header over a full-height control. */
+const val WIDGET_FULL_MIN_HEIGHT_DP = 112
+
+fun sizeTier(heightDp: Int): WidgetSizeTier =
+    if (heightDp < WIDGET_FULL_MIN_HEIGHT_DP) WidgetSizeTier.COMPACT else WidgetSizeTier.FULL
+
+/**
+ * Does the compact single line spend itself on the device's name?
+ *
+ * For a light, yes — "which lamp is this?" is the only thing that line has to answer, and a lamp
+ * shown wrong is a cosmetic error. For a lock or the alarm it must not: that line has to carry the
+ * state *and* the time it was read, because those are what stop a frame left on the home screen
+ * from quietly lying (see [LockWidgetView.readAtMs]). The name is the part that can be inferred
+ * from where the widget sits; the timestamp isn't.
+ */
+fun compactShowsName(kind: WidgetKind): Boolean = kind == WidgetKind.LIGHT
+
+/**
  * Which HA domains a widget of this kind can control.
  *
  * The light widget is `light` only. It briefly took `switch` too, on the theory that relay-style

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An engaged control wearing PULSE's energy gradient. Diagonal (315deg) matches Compose's
+     default Brush.linearGradient direction, so the widget and the in-app panels sweep alike. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:angle="315"
+        android:startColor="@color/widget_energy_start"
+        android:endColor="@color/widget_energy_end"
+        android:type="linear" />
+    <corners android:radius="12dp" />
+</shape>

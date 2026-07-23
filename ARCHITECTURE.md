@@ -222,9 +222,24 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     `provideGlance` asks for a refresh — so an unthrottled refresh feeds itself forever at
     whatever rate the network allows. Failed fetches count toward the throttle too, or an
     unreachable HA becomes a retry storm.
-  - Styling is `ui/glance/PulseGlanceTheme`, which feeds the app's existing `ColorScheme`s to
-    `glance-material3` and reads channel accents off the same `PulseColors`. No color originates
-    in the widget layer; edit `ui/theme/Color.kt` and both surfaces move.
+  - **Two size tiers** (`sizeTier`, `WIDGET_FULL_MIN_HEIGHT_DP = 112`). The full layout needs a
+    two-line header over a 48dp control; a one-row widget has nowhere near that, so compact
+    collapses the header to one small line, drops the light's level bar, and lets the controls take
+    the remaining height. **The XML rule that makes any of this reachable: `minResizeHeight` must be
+    *below* `minHeight`.** It used to equal it, so launchers offered no vertical resize at all —
+    which is why the widgets arrived oversized on a coarser home-screen grid and stayed that way.
+    Compact drops the *name* on lock/alarm, never the state or its timestamp (`compactShowsName`).
+  - **Styling** is `ui/glance/PulseGlanceTheme` (text and flat fills, from the app's own
+    `ColorScheme`s via `glance-material3`) plus `res/drawable/widget_*.xml` for anything Glance
+    can't express as a flat color. Glance has no border or gradient modifier, so the panel and the
+    controls are **shape drawables**: a panel lit from above (`panelHigh` → `ink`) held by a 1dp
+    hairline, engaged controls wearing PULSE's energy / hero / recovery gradients, and — the one
+    idea borrowed from Remnant — a **channel-lit rim** in place of a shadow, so a locked door glows
+    green at the edge and a jam glows orange. The drawables read `@color` from
+    `values{,-night}/widget_colors.xml`, which is the drawable-side mirror of `ui/theme/Color.kt`
+    and names the constant behind every value; the two must be edited together. Corner radii live
+    in the drawables, which is also why they work below API 31 where
+    `GlanceModifier.cornerRadius` is ignored.
 - Suite membership: signed with the suite key (secrets are `HAWKSNEST_`-prefixed), released by
   `android-release.yml` on `android/**` pushes, tagged `android-vX.Y.Z` (clear of web `v*`).
   Managed by the Dragonfly hub for updates — but **no** SuiteConfigReader/AppAuth (nothing to

@@ -22,10 +22,13 @@ import androidx.glance.layout.width
 import com.hawksnest.core.logic.Channel
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
+import com.hawksnest.core.logic.WidgetSizeTier
 import com.hawksnest.core.logic.blockerCopy
+import com.hawksnest.core.logic.compactShowsName
 import com.hawksnest.core.logic.dimDown
 import com.hawksnest.core.logic.dimUp
 import com.hawksnest.core.logic.lightWidgetView
+import com.hawksnest.core.logic.sizeTier
 import com.hawksnest.ui.glance.PulseGlanceTheme
 import com.hawksnest.ui.glance.channelColor
 import com.hawksnest.ui.glance.panelHigh
@@ -76,7 +79,11 @@ private fun LightBody(prefs: Preferences, json: Json) {
     val view = lightWidgetView(snapshot, System.currentTimeMillis(), prefs.pendingSince())
     val retry = actionRunCallback<WidgetRefreshAction>(widgetParams(WidgetKind.LIGHT))
 
-    WidgetPanel {
+    val size = LocalSize.current
+    val compact = sizeTier(size.height.value.toInt()) == WidgetSizeTier.COMPACT
+
+    // A lit lamp warms its own rim; an off one sits quiet behind the plain hairline.
+    WidgetPanel(compact = compact, accent = Channel.STREAK.takeIf { view.on && snapshot != null }) {
         if (snapshot == null) {
             // Nothing has ever been read. Say why, and make the whole face a retry.
             BlockerBody(blocker ?: WidgetBlocker.NOT_CONFIGURED, retry)
@@ -91,10 +98,13 @@ private fun LightBody(prefs: Preferences, json: Json) {
                 accent = if (view.on) Channel.STREAK else null,
                 pending = view.pending,
                 note = note,
+                compact = compact,
+                showName = compactShowsName(WidgetKind.LIGHT),
             )
             // The level, as a level. Read-only — it costs no touch target and gives the widget the
             // one thing the old ±20% buttons couldn't: somewhere to see what you just changed.
-            if (view.dimmable && view.on) {
+            // First thing to go when the widget is squeezed: the header already says the percent.
+            if (view.dimmable && view.on && !compact) {
                 Spacer(modifier = GlanceModifier.height(6.dp))
                 LinearProgressIndicator(
                     progress = view.pct / 100f,
@@ -103,9 +113,9 @@ private fun LightBody(prefs: Preferences, json: Json) {
                     backgroundColor = panelHigh,
                 )
             }
-            Spacer(modifier = GlanceModifier.height(8.dp))
-            val width = LocalSize.current.width
-            Row(modifier = GlanceModifier.fillMaxWidth()) {
+            Spacer(modifier = GlanceModifier.height(if (compact) 4.dp else 8.dp))
+            val width = size.width
+            Row(modifier = GlanceModifier.defaultWeight().fillMaxWidth()) {
                 val toggle = if (view.on) "turn_off" else "turn_on"
                 WidgetButton(
                     // The header already states what the light *is*; this button says what the tap
@@ -125,12 +135,13 @@ private fun LightBody(prefs: Preferences, json: Json) {
                     modifier = GlanceModifier.defaultWeight(),
                     accent = Channel.STREAK,
                     filled = view.on,
+                    fillHeight = compact,
                 )
                 if (view.dimmable && view.controllable) {
                     Spacer(modifier = GlanceModifier.width(6.dp))
-                    DimButton("−", dimDown(view.pct))
+                    DimButton("−", dimDown(view.pct), compact)
                     Spacer(modifier = GlanceModifier.width(6.dp))
-                    DimButton("+", dimUp(view.pct))
+                    DimButton("+", dimUp(view.pct), compact)
                 }
             }
         }
@@ -138,9 +149,10 @@ private fun LightBody(prefs: Preferences, json: Json) {
 }
 
 @Composable
-private fun DimButton(label: String, targetPct: Int) {
+private fun DimButton(label: String, targetPct: Int, compact: Boolean) {
     WidgetButton(
         label = label,
+        fillHeight = compact,
         action = actionRunCallback<WidgetServiceAction>(
             // `dimCommit` maps a level to a call; at these clamped levels that is always turn_on
             // with a brightness percent — stepping down never reaches the "off" case.

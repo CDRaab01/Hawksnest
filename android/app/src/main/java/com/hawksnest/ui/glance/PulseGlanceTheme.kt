@@ -1,6 +1,7 @@
 package com.hawksnest.ui.glance
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.glance.GlanceTheme
 import androidx.glance.color.ColorProvider
 import androidx.glance.material3.ColorProviders
@@ -10,9 +11,7 @@ import com.hawksnest.ui.theme.DarkColors
 import com.hawksnest.ui.theme.LightColors
 import com.hawksnest.ui.theme.color
 import com.hawksnest.ui.theme.darkPulseColors
-import com.hawksnest.ui.theme.dim
 import com.hawksnest.ui.theme.lightPulseColors
-import com.hawksnest.ui.theme.on
 
 /**
  * PULSE for the home screen.
@@ -42,18 +41,21 @@ fun PulseGlanceTheme(content: @Composable () -> Unit) {
 fun channelColor(channel: Channel): ColorProvider =
     ColorProvider(day = LightPulse.color(channel), night = DarkPulse.color(channel))
 
-/** A channel's container fill, for tinted panels behind content. */
-fun channelDim(channel: Channel): ColorProvider =
-    ColorProvider(day = LightPulse.dim(channel), night = DarkPulse.dim(channel))
-
-/** Content color atop a channel's base fill. */
-fun onChannel(channel: Channel): ColorProvider =
-    ColorProvider(day = LightPulse.on(channel), night = DarkPulse.on(channel))
-
-/** The 1px panel stroke that gives PULSE its instrument-panel edge. */
-val hairline: ColorProvider =
-    ColorProvider(day = LightPulse.hairline, night = DarkPulse.hairline)
-
-/** The raised panel tone — used for inactive segments and button faces. */
+/**
+ * The raised panel tone. Panel and button *fills* are shape drawables now (gradients and rim
+ * strokes exist nowhere else in Glance), so this is left for the flat cases — currently the track
+ * behind the light widget's level bar.
+ */
 val panelHigh: ColorProvider =
     ColorProvider(day = LightPulse.panelHigh, night = DarkPulse.panelHigh)
+
+/**
+ * Content atop the energy gradient. Dark in *both* themes, and deliberately so: the sweep is light
+ * orange-to-amber either way, where white manages about 2.1:1 and this warm ink 7.6–8.8:1. PULSE
+ * carries the same value as `PulseColors.onEnergy` for exactly this reason.
+ */
+val onEnergy: ColorProvider =
+    ColorProvider(day = LightPulse.onEnergy, night = DarkPulse.onEnergy)
+
+/** Content atop the hero and recovery gradients, both of which run dark enough to take white. */
+val onGradient: ColorProvider = ColorProvider(day = Color.White, night = Color.White)
