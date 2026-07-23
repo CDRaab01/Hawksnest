@@ -9,6 +9,7 @@ import androidx.glance.GlanceModifier
 import androidx.glance.LocalSize
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.LinearProgressIndicator
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
@@ -19,13 +20,15 @@ import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.width
 import com.hawksnest.core.logic.Channel
-import com.hawksnest.core.logic.WIDGET_DIM_STEP_PCT
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.blockerCopy
+import com.hawksnest.core.logic.dimDown
+import com.hawksnest.core.logic.dimUp
 import com.hawksnest.core.logic.lightWidgetView
-import com.hawksnest.core.logic.stepBrightnessPct
 import com.hawksnest.ui.glance.PulseGlanceTheme
+import com.hawksnest.ui.glance.channelColor
+import com.hawksnest.ui.glance.panelHigh
 import com.hawksnest.widget.data.WidgetEntryPoint
 import com.hawksnest.widget.data.blocker
 import com.hawksnest.widget.data.pendingSince
@@ -42,8 +45,13 @@ import kotlinx.serialization.json.Json
  *
  * The in-app control is `LightPillar`, whose whole surface is a drag-to-dim gesture. Glance has no
  * drag and no slider; RemoteViews only offer taps. Rather than fake a slider that can't be
- * dragged, the dimmer becomes discrete steps of [WIDGET_DIM_STEP_PCT], each one committing through
- * the same `dimCommit` the pillar uses on release. One gesture, one service call, as before.
+ * dragged, the dimmer steps along `WIDGET_DIM_STOPS` — a ladder geared like a real dimmer, tight
+ * at the bottom where the eye notices and wide at the top where it doesn't. Each step commits
+ * through the same `dimCommit` the pillar uses on release: one gesture, one service call.
+ *
+ * A thin bar under the name shows the level. It is deliberately not tappable: a home screen is
+ * ~250dp wide, so a bar split into enough zones to beat the step buttons would have targets around
+ * 20dp, and this way the level is visible without adding a control to mis-hit.
  */
 class LightWidget : GlanceAppWidget() {
     // Exact, so the dim controls can stand down on a widget too narrow to hold them honestly.
@@ -84,6 +92,17 @@ private fun LightBody(prefs: Preferences, json: Json) {
                 pending = view.pending,
                 note = note,
             )
+            // The level, as a level. Read-only — it costs no touch target and gives the widget the
+            // one thing the old ±20% buttons couldn't: somewhere to see what you just changed.
+            if (view.dimmable && view.on) {
+                Spacer(modifier = GlanceModifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = view.pct / 100f,
+                    modifier = GlanceModifier.fillMaxWidth().height(4.dp),
+                    color = channelColor(Channel.STREAK),
+                    backgroundColor = panelHigh,
+                )
+            }
             Spacer(modifier = GlanceModifier.height(8.dp))
             val width = LocalSize.current.width
             Row(modifier = GlanceModifier.fillMaxWidth()) {
@@ -109,9 +128,9 @@ private fun LightBody(prefs: Preferences, json: Json) {
                 )
                 if (view.dimmable && view.controllable) {
                     Spacer(modifier = GlanceModifier.width(6.dp))
-                    DimButton("−", stepBrightnessPct(view.pct, -WIDGET_DIM_STEP_PCT))
+                    DimButton("−", dimDown(view.pct))
                     Spacer(modifier = GlanceModifier.width(6.dp))
-                    DimButton("+", stepBrightnessPct(view.pct, WIDGET_DIM_STEP_PCT))
+                    DimButton("+", dimUp(view.pct))
                 }
             }
         }
