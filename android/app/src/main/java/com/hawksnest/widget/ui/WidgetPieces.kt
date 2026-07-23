@@ -296,23 +296,25 @@ fun WidgetButton(
     fillHeight: Boolean = false,
 ) {
     // An engaged control wears its channel's PULSE gradient; a resting one its soft wash or the
-    // plain panel face.
+    // plain panel face. [filled] outranks a null [action] deliberately: the engaged state is
+    // often the one whose tap is a no-op — the alarm segment the panel is already in — and it
+    // must still read as engaged, not as disabled.
     val face = when {
-        action == null -> R.drawable.widget_button_face
         filled && accent == Channel.STREAK -> R.drawable.widget_button_energy
         filled && accent == Channel.EFFORT -> R.drawable.widget_button_hero
         filled && accent == Channel.RECOVERY -> R.drawable.widget_button_recovery
+        action == null -> R.drawable.widget_button_face
         tinted && accent == Channel.STREAK -> R.drawable.widget_button_soft_streak
         tinted && accent == Channel.RECOVERY -> R.drawable.widget_button_soft_recovery
         else -> R.drawable.widget_button_face
     }
     val content: ColorProvider = when {
-        action == null -> GlanceTheme.colors.onSurfaceVariant
         // Content sitting on a gradient can't use the channel's flat `on` colour — that is tuned
         // for the base hue and fails against the far stop. The energy sweep stays light in both
         // themes so it takes PULSE's warm ink; the other two run dark enough for white.
         filled && accent == Channel.STREAK -> onEnergy
         filled && accent != null -> onGradient
+        action == null -> GlanceTheme.colors.onSurfaceVariant
         accent != null -> channelColor(accent)
         else -> GlanceTheme.colors.onSurface
     }

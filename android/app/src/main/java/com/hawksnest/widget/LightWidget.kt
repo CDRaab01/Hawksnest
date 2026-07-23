@@ -2,6 +2,7 @@ package com.hawksnest.widget
 
 import android.content.Context
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.GlanceId
@@ -23,6 +24,8 @@ import androidx.glance.layout.height
 import androidx.glance.layout.width
 import com.hawksnest.R
 import com.hawksnest.core.logic.Channel
+import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
+import com.hawksnest.core.logic.WIDGET_FULL_MIN_HEIGHT_DP
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.WidgetSizeTier
@@ -60,8 +63,19 @@ import kotlinx.serialization.json.Json
  * 20dp, and this way the level is visible without adding a control to mis-hit.
  */
 class LightWidget : GlanceAppWidget() {
-    // Exact, so the dim controls can stand down on a widget too narrow to hold them honestly.
-    override val sizeMode: SizeMode = SizeMode.Exact
+    // Responsive, not Exact. Exact re-renders on the launcher's options-changed broadcast, and
+    // some launchers report stale or floor sizes there — which is how an expanded widget kept
+    // its one-line compact layout and never showed the level bar. Responsive ships one layout
+    // per bucket up front and the *framework* picks by the size actually on screen, no broadcast
+    // involved. Buckets: the two tiers × the two toggle-label widths.
+    override val sizeMode: SizeMode = SizeMode.Responsive(
+        setOf(
+            DpSize(NARROW_WIDTH, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(VERBOSE_MIN_WIDTH, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(NARROW_WIDTH, WIDGET_FULL_MIN_HEIGHT_DP.dp),
+            DpSize(VERBOSE_MIN_WIDTH, WIDGET_FULL_MIN_HEIGHT_DP.dp),
+        )
+    )
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val deps = WidgetEntryPoint.get(context)
@@ -184,6 +198,9 @@ private fun DimButton(icon: Int, description: String, targetPct: Int, compact: B
 
 /** Below this the toggle drops to a single word so the dim steps keep their room. */
 private val VERBOSE_MIN_WIDTH = 220.dp
+
+/** The narrow bucket — the provider's own minimum width. */
+private val NARROW_WIDTH = 110.dp
 
 class LightWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = LightWidget()

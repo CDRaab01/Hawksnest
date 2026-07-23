@@ -44,6 +44,14 @@ enum class WidgetSizeTier { COMPACT, FULL }
 /** Below this a widget cannot fit the chipped two-line header over a full-height control row. */
 const val WIDGET_FULL_MIN_HEIGHT_DP = 120
 
+/**
+ * The compact tier's `SizeMode.Responsive` bucket height. Any value below
+ * [WIDGET_FULL_MIN_HEIGHT_DP] lands in [sizeTier]'s COMPACT; this one is roughly a launcher row
+ * less its gutters, so the framework can still pick the bucket on a squeezed placement (it only
+ * picks a layout whose bucket fits inside the real size).
+ */
+const val WIDGET_COMPACT_BUCKET_DP = 56
+
 fun sizeTier(heightDp: Int): WidgetSizeTier =
     if (heightDp < WIDGET_FULL_MIN_HEIGHT_DP) WidgetSizeTier.COMPACT else WidgetSizeTier.FULL
 

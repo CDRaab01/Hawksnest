@@ -2,6 +2,7 @@ package com.hawksnest.widget
 
 import android.content.Context
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.GlanceId
@@ -21,6 +22,8 @@ import androidx.glance.layout.width
 import com.hawksnest.R
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.ArmTap
+import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
+import com.hawksnest.core.logic.WIDGET_FULL_MIN_HEIGHT_DP
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.WidgetSizeTier
 import com.hawksnest.core.logic.alarmWidgetView
@@ -55,7 +58,14 @@ import kotlinx.serialization.json.Json
  * smoothed over, and a reading older than a minute is not shown at all.
  */
 class AlarmWidget : GlanceAppWidget() {
-    override val sizeMode: SizeMode = SizeMode.Exact
+    // Responsive so the framework picks the tier by the size actually on screen — see LightWidget
+    // for why Exact's options-changed path can't be trusted across launchers.
+    override val sizeMode: SizeMode = SizeMode.Responsive(
+        setOf(
+            DpSize(180.dp, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(180.dp, WIDGET_FULL_MIN_HEIGHT_DP.dp),
+        )
+    )
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val deps = WidgetEntryPoint.get(context)
