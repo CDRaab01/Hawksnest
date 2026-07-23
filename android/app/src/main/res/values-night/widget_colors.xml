@@ -26,6 +26,10 @@
     <color name="widget_soft_streak">#26FF8A5C</color>    <!-- PulseOrange -->
     <color name="widget_soft_recovery">#2634D399</color>  <!-- PulseGreen -->
 
+    <!-- Press ripple over the ink faces. The energy/gradient ripples need no night value —
+         those sweeps read the same in both themes, so values/ carries them alone. -->
+    <color name="widget_ripple">#29FFFFFF</color>
+
     <!-- energyGradient (dark): PulseOrange → PulseAmber. -->
     <color name="widget_energy_start">#FFFF8A5C</color>
     <color name="widget_energy_end">#FFF5A623</color>

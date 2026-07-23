@@ -31,6 +31,15 @@
     <color name="widget_soft_streak">#1FC2410C</color>    <!-- PulseOrangeDeep -->
     <color name="widget_soft_recovery">#1F047857</color>  <!-- PulseGreenDeep -->
 
+    <!-- Press ripples — the one animation RemoteViews grants a widget, drawn by the system when
+         the pressed state reaches the button's background. Ink over the pale faces here; the
+         night side flips to white. The gradient pair live only in values/: the energy sweep is
+         light in both themes (so its ripple is PULSE's warm ink, like onEnergy), and hero/
+         recovery run dark enough for white in both. -->
+    <color name="widget_ripple">#1F000000</color>
+    <color name="widget_ripple_energy">#402E1607</color>
+    <color name="widget_ripple_gradient">#47FFFFFF</color>
+
     <!-- energyGradient (light): the celebration/streak voice — a lit lamp, a cautionary confirm. -->
     <color name="widget_energy_start">#FFFF6B35</color>
     <color name="widget_energy_end">#FFF5A623</color>
