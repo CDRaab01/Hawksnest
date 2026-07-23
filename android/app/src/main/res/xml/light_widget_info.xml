@@ -5,7 +5,7 @@
   squeezed sideways — and why on a launcher with a coarser grid they arrived too big and stayed
   that way.
 
-  Placed at 3x1 and shrinkable to 2x1. Below ~112dp tall the layout switches to its compact tier
+  Placed at 3x2 — the full tier, glyph chip and all — and shrinkable to a single row. Below ~120dp tall the layout switches to its compact tier
   (single-line header, controls taking the remaining height) rather than clipping — see
   `sizeTier` in core/logic/WidgetModel.kt.
 
@@ -17,7 +17,7 @@
     android:minWidth="110dp"
     android:minHeight="40dp"
     android:targetCellWidth="3"
-    android:targetCellHeight="1"
+    android:targetCellHeight="2"
     android:minResizeWidth="110dp"
     android:minResizeHeight="40dp"
     android:resizeMode="horizontal|vertical"

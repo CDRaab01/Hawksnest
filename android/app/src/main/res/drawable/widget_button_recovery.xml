@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- An engaged control wearing PULSE's recovery gradient. Diagonal (315deg) matches Compose's
-     default Brush.linearGradient direction, so the widget and the in-app panels sweep alike. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <gradient
-        android:angle="315"
-        android:startColor="@color/widget_recovery_start"
-        android:endColor="@color/widget_recovery_end"
-        android:type="linear" />
-    <corners android:radius="12dp" />
-</shape>
+<!-- An engaged control wearing the recovery gradient, under a white press ripple (this sweep
+     runs dark enough for it in both themes). Diagonal (315deg) matches Compose's default
+     Brush.linearGradient direction, so the widget and the in-app panels sweep alike. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/widget_ripple_gradient">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="315"
+                android:startColor="@color/widget_recovery_start"
+                android:endColor="@color/widget_recovery_end"
+                android:type="linear" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+</ripple>

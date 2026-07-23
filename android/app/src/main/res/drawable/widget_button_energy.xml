@@ -1,11 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- An engaged control wearing PULSE's energy gradient. Diagonal (315deg) matches Compose's
-     default Brush.linearGradient direction, so the widget and the in-app panels sweep alike. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <gradient
-        android:angle="315"
-        android:startColor="@color/widget_energy_start"
-        android:endColor="@color/widget_energy_end"
-        android:type="linear" />
-    <corners android:radius="12dp" />
-</shape>
+<!-- An engaged control wearing PULSE's energy gradient, under a warm-ink press ripple (the sweep
+     is light in both themes, so a white ripple would vanish — same reasoning as onEnergy).
+     Diagonal (315deg) matches Compose's default Brush.linearGradient direction, so the widget
+     and the in-app panels sweep alike. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/widget_ripple_energy">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="315"
+                android:startColor="@color/widget_energy_start"
+                android:endColor="@color/widget_energy_end"
+                android:type="linear" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+</ripple>

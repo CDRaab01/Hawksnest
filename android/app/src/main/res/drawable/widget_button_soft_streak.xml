@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A live-but-resting control wearing a soft streak wash under the channel rim: the panel
+     treatment at button scale, with the channel itself as the press ripple. Sits between the
+     plain face (idle/disabled) and the full gradient (engaged). -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/widget_rim_streak">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_soft_streak" />
+            <corners android:radius="14dp" />
+            <stroke android:width="1dp" android:color="@color/widget_rim_streak" />
+        </shape>
+    </item>
+</ripple>
