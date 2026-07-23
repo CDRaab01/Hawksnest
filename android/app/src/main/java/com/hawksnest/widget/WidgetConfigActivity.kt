@@ -35,6 +35,8 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.lifecycle.lifecycleScope
 import com.hawksnest.MainActivity
 import com.hawksnest.config.overrides
+import com.hawksnest.core.ha.ConnectionManager
+import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
@@ -45,7 +47,10 @@ import com.hawksnest.ui.theme.HawksnestTheme
 import com.hawksnest.widget.data.HaCall
 import com.hawksnest.widget.data.WidgetEntryPoint
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import javax.inject.Inject
 
 /**
  * The "which device?" screen the launcher shows when a widget is dropped on the home screen.
@@ -56,6 +61,14 @@ import kotlinx.coroutines.launch
  */
 @AndroidEntryPoint
 class WidgetConfigActivity : ComponentActivity() {
+
+    /**
+     * Unlike the widgets themselves, this screen is an ordinary activity in the app process — so
+     * it can use the app's own connection rather than the widgets' REST path, and with it HA's
+     * entity registry. That registry is what lets the list hide diagnostic entities and collapse
+     * the Ring/ring-mqtt twins, neither of which REST can see.
+     */
+    @Inject lateinit var connectionManager: ConnectionManager
 
     private var appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
 
@@ -90,6 +103,7 @@ class WidgetConfigActivity : ComponentActivity() {
                 ) {
                     PickerScreen(
                         kind = kind,
+                        connectionManager = connectionManager,
                         onPick = { entity -> save(kind, entity) },
                         onOpenApp = { startActivity(Intent(this, MainActivity::class.java)) },
                     )
@@ -135,6 +149,7 @@ private sealed interface PickerState {
 @Composable
 private fun PickerScreen(
     kind: WidgetKind,
+    connectionManager: ConnectionManager,
     onPick: (HassEntity) -> Unit,
     onOpenApp: () -> Unit,
 ) {
@@ -142,12 +157,35 @@ private fun PickerScreen(
     var state by remember { mutableStateOf<PickerState>(PickerState.Loading) }
 
     LaunchedEffect(kind) {
-        state = when (val result = WidgetEntryPoint.get(context).haClient().states()) {
-            is HaCall.Ok -> PickerState.Ready(
-                widgetCandidates(kind, result.value)
-                    .sortedBy { resolveName(it, overrides).lowercase() }
+        val ha = connectionManager.state
+        // The socket is already starting (HawksnestApp.onCreate), so wait a beat for it: HaSource
+        // loads the registries *before* it reports CONNECTED, which means status alone is proof
+        // the categories and platforms below are populated. DEMO doesn't qualify — a picker
+        // offering fixture lights would be a trap.
+        val live = withTimeoutOrNull(SOCKET_WAIT_MS) {
+            ha.status.first { it == ConnectionStatus.CONNECTED }
+            ha.entities.first { it.isNotEmpty() }
+        }
+
+        state = if (live != null) {
+            PickerState.Ready(
+                widgetCandidates(
+                    kind = kind,
+                    entities = live.values.toList(),
+                    categories = ha.entityCategories.value,
+                    platforms = ha.entityPlatforms.value,
+                ).sortedBy { resolveName(it, overrides).lowercase() }
             )
-            is HaCall.Failed -> PickerState.Problem(result.blocker)
+        } else {
+            // No socket in time — off the tailnet, or signed out. Fall back to the widgets' own
+            // REST path, which also produces the right "signed out"/"can't reach" message.
+            when (val result = WidgetEntryPoint.get(context).haClient().states()) {
+                is HaCall.Ok -> PickerState.Ready(
+                    widgetCandidates(kind, result.value)
+                        .sortedBy { resolveName(it, overrides).lowercase() }
+                )
+                is HaCall.Failed -> PickerState.Problem(result.blocker)
+            }
         }
     }
 
@@ -222,6 +260,12 @@ private fun PickerScreen(
         }
     }
 }
+
+/**
+ * How long the picker waits for the app's socket before falling back to REST. Long enough for a
+ * connect on the tailnet, short enough that being off it doesn't feel like a hang.
+ */
+private const val SOCKET_WAIT_MS = 4_000L
 
 @Composable
 private fun Centred(content: @Composable () -> Unit) {

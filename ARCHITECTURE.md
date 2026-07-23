@@ -200,11 +200,18 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   - **The picker offers `light` only, not `switch`.** It briefly took both, on the theory that
     relay-style lights land in `switch` — but here `switch.*` is overwhelmingly ring-mqtt camera
     plumbing (live/event streams, motion toggles, sirens), which buried the real lights. The app
-    keeps the domains apart too (`Cards.kt`). The picker also applies the app's `isNoiseEntity`
-    suffix filter. It **cannot** apply the full `isPrimaryEntity` or `dedupeRingMqtt`: both need the
-    entity registry (`entity_category`, integration platform), which is WebSocket-only — the widget
-    layer has REST and REST alone. So a house running both the Ring integration and ring-mqtt may
-    see a duplicate name in the picker; either twin controls the same device.
+    keeps the domains apart too (`Cards.kt`).
+  - **`WidgetConfigActivity` is the one part of this feature that is not REST-only**, and
+    deliberately: it is an ordinary activity in the app process, so it can use `ConnectionManager`
+    and with it HA's **entity registry** — which REST cannot see. That buys the picker the full
+    `isPrimaryEntity` (hides `config`/`diagnostic` entities) and `dedupeRingMqtt` (collapses the
+    Ring-vs-ring-mqtt twins), the same two filters the Devices list gets. `HaSource` loads the
+    registries *before* it reports `CONNECTED`, so that status alone is proof the maps are
+    populated; `DEMO` deliberately does not qualify, or the picker would offer fixture entities.
+    It waits ~4s for the socket and otherwise falls back to the widgets' REST path. One code path
+    handles both: `widgetCandidates` takes the registry maps as parameters, and each filter
+    degrades to a no-op on an empty map (`isPrimaryEntity` falls back to the suffix denylist,
+    `dedupeRingMqtt` returns its input), so the fallback list is worse but never wrong.
   - **Refresh** is on render, after every action, on tapping an error, and — while the app happens
     to be running — pushed from the live socket by `widget/WidgetLiveBridge` (throttled to one
     pass every 3 s). `updatePeriodMillis` is the platform's 30-minute floor and is cosmetic only.

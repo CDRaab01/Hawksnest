@@ -409,6 +409,51 @@ class WidgetModelTest {
     }
 
     @Test
+    fun `the registry demotes diagnostic entities when the picker has it`() {
+        // The config screen runs in the app, so it can hand over HA's entity_category map — which
+        // catches the config/diagnostic entities the suffix denylist has no way to know about.
+        val entities = listOf(
+            entity("light.kitchen", state = "on"),
+            entity("light.kitchen_calibration", state = "on"),
+        )
+        val categories = mapOf("light.kitchen_calibration" to "config")
+        assertEquals(
+            listOf("light.kitchen"),
+            widgetCandidates(WidgetKind.LIGHT, entities, categories = categories).map { it.entityId },
+        )
+    }
+
+    @Test
+    fun `the registry collapses the Ring and ring-mqtt twins`() {
+        // The household runs both integrations, so one physical light lands twice under one name.
+        // ring-mqtt is this app's backend, so the `ring` twin is the one that goes.
+        val entities = listOf(
+            entity("light.front_light", friendlyName = "Front Light", state = "on"),
+            entity("light.front_light_2", friendlyName = "Front Light", state = "on"),
+        )
+        val platforms = mapOf(
+            "light.front_light" to RING_PLATFORM,
+            "light.front_light_2" to MQTT_PLATFORM,
+        )
+        assertEquals(
+            listOf("light.front_light_2"),
+            widgetCandidates(WidgetKind.LIGHT, entities, platforms = platforms).map { it.entityId },
+        )
+    }
+
+    @Test
+    fun `without the registry the list still works, just less well`() {
+        // Off the tailnet the picker falls back to REST, which carries no registry. Both filters
+        // have to degrade to a no-op rather than emptying the list.
+        val entities = listOf(
+            entity("light.front_light", friendlyName = "Front Light", state = "on"),
+            entity("light.front_light_2", friendlyName = "Front Light", state = "on"),
+            entity("light.kitchen_calibration", state = "on"),
+        )
+        assertEquals(3, widgetCandidates(WidgetKind.LIGHT, entities).size)
+    }
+
+    @Test
     fun `an unreachable entity is not offered`() {
         // Nothing worth pinning to a home screen; it would render "Unavailable" forever.
         val candidates = widgetCandidates(

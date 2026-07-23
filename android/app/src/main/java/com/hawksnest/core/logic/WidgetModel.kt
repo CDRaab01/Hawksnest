@@ -48,22 +48,32 @@ fun widgetCandidateDomains(kind: WidgetKind): Set<String> = when (kind) {
 }
 
 /**
- * The entities worth offering for a widget of this kind: the right domain, reachable, and not
- * ring-mqtt housekeeping.
+ * The entities worth offering for a widget of this kind: the right domain, reachable, not
+ * housekeeping, and not a duplicate of something already in the list.
  *
- * The noise filter is the app's own ([isNoiseEntity]) — the picker had been skipping it, which is
- * half of why it read as a dump of everything HA knows. It can't use the full [isPrimaryEntity]
- * because that needs `entity_category` from the entity registry, and the registry is
- * WebSocket-only; the widget layer has REST and REST alone. Suffix matching is what's available,
- * and it catches the worst of it.
+ * [categories] and [platforms] come from HA's entity registry, which is WebSocket-only. The
+ * configuration screen runs inside the app, so it can hand them over from the live connection;
+ * when it can't — no socket yet, off the tailnet — both default to empty and the filters degrade
+ * on their own. [isPrimaryEntity] with no categories falls back to the suffix denylist, and
+ * [dedupeRingMqtt] with no platforms returns the list untouched. So this is one code path that
+ * gets better when the registry is there rather than two paths to keep in step.
  */
-fun widgetCandidates(kind: WidgetKind, entities: List<HassEntity>): List<HassEntity> {
+fun widgetCandidates(
+    kind: WidgetKind,
+    entities: List<HassEntity>,
+    categories: Map<String, String> = emptyMap(),
+    platforms: Map<String, String> = emptyMap(),
+): List<HassEntity> {
     val domains = widgetCandidateDomains(kind)
-    return entities.filter { entity ->
+    val inScope = entities.filter { entity ->
         entity.entityId.substringBefore('.') in domains &&
+            // Nothing worth pinning to a home screen; it would render "Unavailable" forever.
             entity.state != "unavailable" &&
-            !isNoiseEntity(entity.entityId)
+            isPrimaryEntity(entity.entityId, categories)
     }
+    // The household runs both the Ring integration and ring-mqtt, so a Ring light can appear
+    // twice under one name. Same collapse the Devices list does.
+    return dedupeRingMqtt(inScope.associateBy { it.entityId }, platforms).values.toList()
 }
 
 /**

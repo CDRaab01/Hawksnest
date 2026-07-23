@@ -80,8 +80,11 @@ Things worth knowing before relying on them:
   the deliberate gesture.
 - **The light picker lists lights only** — not `switch` entities, which on this house are mostly
   ring-mqtt camera plumbing (live streams, motion toggles, sirens) and drowned out the real lights.
-  All three pickers also drop the housekeeping entities the rest of the app hides. If a lamp you
-  want is wired as a `switch` rather than a `light`, say so and it's a one-line change.
+  If a lamp you want is wired as a `switch` rather than a `light`, say so and it's a one-line change.
+- **The picker hides what the Devices list hides.** It borrows the app's live connection to read
+  HA's entity registry, so it drops diagnostic/config entities and collapses the duplicate a device
+  gets from running both the Ring integration and ring-mqtt. Opened with no connection (off the
+  tailnet), it still works from a plain REST read — the list is just longer.
 
 On-device behaviour (placement, resize, and a tap landing while the app is dead) is the seam unit
 tests can't reach — worth a smoke test after the first install that carries them.
