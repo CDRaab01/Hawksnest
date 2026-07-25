@@ -228,14 +228,17 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     the remaining height. **The XML rule that makes any of this reachable: `minResizeHeight` must be
     *below* `minHeight`.** It used to equal it, so launchers offered no vertical resize at all —
     which is why the widgets arrived oversized on a coarser home-screen grid and stayed that way.
-    Within compact, the *name* is the only part of the header that may be dropped or truncated,
-    never the state or its timestamp: `compactShowsName` keeps it past `WIDGET_NAME_MIN_WIDTH_DP`
-    (200dp — a squeezed lock is usually still three cells wide, and "Locked · 7:45 PM" alone doesn't
-    say which door), and the header lays the state out at its natural width so a long name
-    ellipsizes into the leftover rather than pushing the state off the line. Reaching that decision
-    needs a **wide compact size bucket** in each widget's `SizeMode.Responsive` set — under
-    Responsive, `LocalSize` reports the *bucket*, so a width the buckets don't distinguish can't be
-    seen at all.
+    Within compact, the *name* is the only part of the header that may be moved, truncated, or
+    dropped — never the state or its timestamp. `compactNamePlacement` spends the room it has:
+    `INLINE` beside the state past `WIDGET_NAME_MIN_WIDTH_DP` (200dp), else `STACKED` on a second
+    line past `WIDGET_COMPACT_TALL_BUCKET_DP` (90dp — the control below gives up the height), else
+    `HIDDEN`. Only a widget both narrow *and* one row high hits `HIDDEN`; **narrow is not the same
+    as no room**, and gating on width alone (the first fix for "the lock never says which door")
+    left small-but-tall placements nameless. Inline, the header lays the state out at its natural
+    width and weights the name, so a long name ellipsizes into the leftover instead of pushing the
+    state off the line. Each decision needs a **matching size bucket** in the widget's
+    `SizeMode.Responsive` set — under Responsive `LocalSize` reports the *bucket*, so a dimension
+    the buckets don't distinguish cannot be seen at all.
   - **Styling** is `ui/glance/PulseGlanceTheme` (text and flat fills, from the app's own
     `ColorScheme`s via `glance-material3`) plus `res/drawable/widget_*.xml` for anything Glance
     can't express as a flat color. Glance has no border or gradient modifier, so the panel and the

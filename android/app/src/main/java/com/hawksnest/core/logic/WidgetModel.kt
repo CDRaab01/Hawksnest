@@ -52,35 +52,59 @@ const val WIDGET_FULL_MIN_HEIGHT_DP = 120
  */
 const val WIDGET_COMPACT_BUCKET_DP = 56
 
+/**
+ * The compact tier's *taller* bucket — roughly two launcher rows less their gutters, and still
+ * short of [WIDGET_FULL_MIN_HEIGHT_DP]. A widget this tall has room for a second header line even
+ * though it has nowhere near enough for the full tier's chip and 52dp control row, and that second
+ * line is the only way a narrow widget can name itself (see [compactNamePlacement]).
+ */
+const val WIDGET_COMPACT_TALL_BUCKET_DP = 90
+
 fun sizeTier(heightDp: Int): WidgetSizeTier =
     if (heightDp < WIDGET_FULL_MIN_HEIGHT_DP) WidgetSizeTier.COMPACT else WidgetSizeTier.FULL
 
 /**
- * Below this width, a compact lock or alarm line has no room for the device name on top of its
- * state and read time. Sized for the worst case that still has to fit: an inline glyph plus
- * "Locked · 10:42 PM" at 12sp leaves roughly a short name's worth of room at ~200dp, which is
- * about a three-cell placement — the width these widgets are placed at by default.
+ * Below this width a compact header cannot fit the device name *beside* its state and read time.
+ * Sized for the worst case that has to survive: an inline glyph, the panel's padding, and
+ * "Unlocked · 10:42 PM" at 12sp come to about 145dp on their own, so 200dp — about a three-cell
+ * placement — is the point where a short name still has somewhere to go.
  */
 const val WIDGET_NAME_MIN_WIDTH_DP = 200
 
+/** Where a compact header puts the device name, given the room it actually has. */
+enum class CompactName {
+    /** Nowhere for it: the one line is the state and the time it was read, nothing else. */
+    HIDDEN,
+
+    /** Beside the state, sharing the single line. */
+    INLINE,
+
+    /** On its own line above the state — too narrow to share, tall enough not to have to. */
+    STACKED,
+}
+
 /**
- * Does the compact single line spend itself on the device's name?
+ * How a compact header spends its room on the device's name.
  *
- * For a light, always — "which lamp is this?" is the only thing that line has to answer, and a lamp
- * shown wrong is a cosmetic error. For a lock or the alarm the state *and* the time it was read
- * come first, because those are what stop a frame left on the home screen from quietly lying (see
- * [LockWidgetView.readAtMs]); the name is the part that can be inferred from where the widget sits,
- * so it is what yields when the line is short of room.
+ * The state *and* the time it was read always come first on a lock or the alarm, because those are
+ * what stop a frame left on the home screen from quietly lying (see [LockWidgetView.readAtMs]).
+ * The name is the part that can be inferred from where the widget sits, so it is what yields.
  *
- * That yielding is a width question, though, not a kind question — which is what this used to get
- * wrong. A lock squeezed to one row is usually still three cells *wide*, and a line reading
- * "Locked · 7:45 PM" on a house with more than one lock leaves the owner guessing at which door.
- * So: past [WIDGET_NAME_MIN_WIDTH_DP] the name is shown as well, and the header renders it as the
- * one part of the line allowed to be truncated, so a long name can eat its own tail but never the
- * state or the timestamp.
+ * But "yields" is not "never appears", which is what the first two passes at this got wrong. It
+ * was a kind question, then a width question; it is really a question of *room*, and room has two
+ * dimensions. A lock squeezed small is usually short rather than narrow — the button below it is
+ * enormous — so when the width won't take a name beside the state, the height very often will take
+ * it above. Only a widget that is both narrow and a single row genuinely has nowhere to put it, and
+ * there [HIDDEN] still holds the line.
  */
-fun compactShowsName(kind: WidgetKind, widthDp: Int): Boolean =
-    kind == WidgetKind.LIGHT || widthDp >= WIDGET_NAME_MIN_WIDTH_DP
+fun compactNamePlacement(kind: WidgetKind, widthDp: Int, heightDp: Int): CompactName = when {
+    // A light's state line is short ("On · 60%") and carries no timestamp, so its name has always
+    // shared the line at any width — and a lamp shown wrong is a cosmetic error, not a security one.
+    kind == WidgetKind.LIGHT -> CompactName.INLINE
+    widthDp >= WIDGET_NAME_MIN_WIDTH_DP -> CompactName.INLINE
+    heightDp >= WIDGET_COMPACT_TALL_BUCKET_DP -> CompactName.STACKED
+    else -> CompactName.HIDDEN
+}
 
 /**
  * Which HA domains a widget of this kind can control.
