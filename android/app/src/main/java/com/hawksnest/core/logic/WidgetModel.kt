@@ -53,12 +53,18 @@ const val WIDGET_FULL_MIN_HEIGHT_DP = 120
 const val WIDGET_COMPACT_BUCKET_DP = 56
 
 /**
- * The compact tier's *taller* bucket — roughly two launcher rows less their gutters, and still
- * short of [WIDGET_FULL_MIN_HEIGHT_DP]. A widget this tall has room for a second header line even
- * though it has nowhere near enough for the full tier's chip and 52dp control row, and that second
- * line is the only way a narrow widget can name itself (see [compactNamePlacement]).
+ * The compact tier's *taller* bucket — a two-row placement on a coarse launcher grid, and still
+ * well short of [WIDGET_FULL_MIN_HEIGHT_DP]. A widget this tall has room for a second header line
+ * even though it has nowhere near enough for the full tier's chip and 52dp control row, and that
+ * second line is the only way a narrow widget can name itself (see [compactNamePlacement]).
+ *
+ * Sized from what the stacked layout actually costs, not from the grid: 12dp of panel padding, two
+ * 12sp lines at ~16dp each, and the 4dp spacer come to 48dp, so 80dp leaves a ~32dp full-width
+ * button at the very bottom of the range and a comfortable one immediately above it. It was 90dp
+ * first, which is a real two-row widget on most launchers but *just* missed a measured 86dp
+ * placement — and missing means the name vanishes entirely, so this errs low on purpose.
  */
-const val WIDGET_COMPACT_TALL_BUCKET_DP = 90
+const val WIDGET_COMPACT_TALL_BUCKET_DP = 80
 
 fun sizeTier(heightDp: Int): WidgetSizeTier =
     if (heightDp < WIDGET_FULL_MIN_HEIGHT_DP) WidgetSizeTier.COMPACT else WidgetSizeTier.FULL

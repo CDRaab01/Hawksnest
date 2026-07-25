@@ -231,7 +231,7 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     Within compact, the *name* is the only part of the header that may be moved, truncated, or
     dropped — never the state or its timestamp. `compactNamePlacement` spends the room it has:
     `INLINE` beside the state past `WIDGET_NAME_MIN_WIDTH_DP` (200dp), else `STACKED` on a second
-    line past `WIDGET_COMPACT_TALL_BUCKET_DP` (90dp — the control below gives up the height), else
+    line past `WIDGET_COMPACT_TALL_BUCKET_DP` (80dp — the control below gives up the height), else
     `HIDDEN`. Only a widget both narrow *and* one row high hits `HIDDEN`; **narrow is not the same
     as no room**, and gating on width alone (the first fix for "the lock never says which door")
     left small-but-tall placements nameless. Inline, the header lays the state out at its natural
