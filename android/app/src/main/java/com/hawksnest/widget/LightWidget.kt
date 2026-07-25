@@ -30,7 +30,7 @@ import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.WidgetSizeTier
 import com.hawksnest.core.logic.blockerCopy
-import com.hawksnest.core.logic.compactShowsName
+import com.hawksnest.core.logic.compactNamePlacement
 import com.hawksnest.core.logic.dimDown
 import com.hawksnest.core.logic.dimUp
 import com.hawksnest.core.logic.lightWidgetView
@@ -117,7 +117,11 @@ private fun LightBody(prefs: Preferences, json: Json) {
                 pending = view.pending,
                 note = note,
                 compact = compact,
-                showName = compactShowsName(WidgetKind.LIGHT, size.width.value.toInt()),
+                namePlacement = compactNamePlacement(
+                    WidgetKind.LIGHT,
+                    size.width.value.toInt(),
+                    size.height.value.toInt(),
+                ),
             )
             // The flexible middle, full tier only: the controls sit on the panel's bottom edge
             // whatever height the launcher grants, and the level bar rides centred in the room

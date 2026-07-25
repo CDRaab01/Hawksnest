@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- See light_widget_info.xml for the sizing and refresh reasoning; the lock widget is the same
-     shape with one full-width action button. Squeezed to its compact tier the header collapses to
-     a single line; the name is the only part of it allowed to be dropped or truncated, and below
-     ~200dp wide it is (see `compactShowsName`). The state and the time it was read never are. -->
+     shape with one full-width action button. Squeezed to its compact tier the name is the only
+     part of the header allowed to move, truncate, or vanish: beside the state when it is wide
+     enough, on a second line when it is merely tall enough, and gone only when it is neither (see
+     `compactNamePlacement`). The state and the time it was read never are. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="110dp"
     android:minHeight="40dp"

@@ -387,22 +387,43 @@ class WidgetModelTest {
     }
 
     @Test
-    fun `a one-line lock names itself when it is wide enough to`() {
-        // The bug: a lock squeezed to one row read "Locked · 7:45 PM" and never said which door,
-        // even at the three-cell width it is placed at by default. Width, not kind, decides.
-        assertTrue(compactShowsName(WidgetKind.LOCK, WIDGET_NAME_MIN_WIDTH_DP))
-        assertTrue(compactShowsName(WidgetKind.ALARM, 250))
+    fun `a wide compact lock names itself on the same line`() {
+        // The original bug: a lock squeezed to one row read "Locked · 7:45 PM" and never said which
+        // door, even at the three-cell width it is placed at by default.
+        val short = WIDGET_COMPACT_BUCKET_DP
+        assertEquals(CompactName.INLINE, compactNamePlacement(WidgetKind.LOCK, 200, short))
+        assertEquals(CompactName.INLINE, compactNamePlacement(WidgetKind.ALARM, 250, short))
     }
 
     @Test
-    fun `narrowed past that, it spends the line on state and time — not its name`() {
-        // The name is recoverable from where the widget sits. The timestamp is the thing that
-        // stops a frame left on the home screen from quietly lying, so it cannot be what gets cut.
-        assertFalse(compactShowsName(WidgetKind.LOCK, WIDGET_NAME_MIN_WIDTH_DP - 1))
-        assertFalse(compactShowsName(WidgetKind.ALARM, 110))
-        // A light has no such duty at any width, and "which lamp?" is the only question worth
+    fun `a narrow compact lock names itself on a second line instead`() {
+        // The follow-up bug: gating only on width meant a genuinely small widget still couldn't say
+        // which door, even though the button under it had height to spare. Narrow is not the same
+        // as no room — room has two dimensions, and the height is usually the one going spare.
+        assertEquals(
+            CompactName.STACKED,
+            compactNamePlacement(WidgetKind.LOCK, 110, WIDGET_COMPACT_TALL_BUCKET_DP),
+        )
+        assertEquals(
+            CompactName.STACKED,
+            compactNamePlacement(WidgetKind.ALARM, 180, WIDGET_COMPACT_TALL_BUCKET_DP),
+        )
+    }
+
+    @Test
+    fun `narrow and one row high, it spends the line on state and time — not its name`() {
+        // The one placement with genuinely nowhere to put a name. The name is recoverable from
+        // where the widget sits; the timestamp is what stops a frame left on the home screen from
+        // quietly lying, so it is never what gets cut.
+        val short = WIDGET_COMPACT_TALL_BUCKET_DP - 1
+        assertEquals(
+            CompactName.HIDDEN,
+            compactNamePlacement(WidgetKind.LOCK, WIDGET_NAME_MIN_WIDTH_DP - 1, short),
+        )
+        assertEquals(CompactName.HIDDEN, compactNamePlacement(WidgetKind.ALARM, 110, short))
+        // A light has no such duty at any size, and "which lamp?" is the only question worth
         // answering — a lamp shown wrong is a cosmetic error, not a security one.
-        assertTrue(compactShowsName(WidgetKind.LIGHT, 110))
+        assertEquals(CompactName.INLINE, compactNamePlacement(WidgetKind.LIGHT, 110, short))
     }
 
     // ── The picker's candidate list ───────────────────────────────────────────────────────────

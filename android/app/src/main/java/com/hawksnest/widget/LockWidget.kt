@@ -20,11 +20,12 @@ import androidx.glance.layout.height
 import com.hawksnest.R
 import com.hawksnest.core.logic.LockPhase
 import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
+import com.hawksnest.core.logic.WIDGET_COMPACT_TALL_BUCKET_DP
 import com.hawksnest.core.logic.WIDGET_FULL_MIN_HEIGHT_DP
 import com.hawksnest.core.logic.WIDGET_NAME_MIN_WIDTH_DP
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.WidgetSizeTier
-import com.hawksnest.core.logic.compactShowsName
+import com.hawksnest.core.logic.compactNamePlacement
 import com.hawksnest.core.logic.lockWidgetView
 import com.hawksnest.core.logic.sizeTier
 import com.hawksnest.ui.glance.PulseGlanceTheme
@@ -56,14 +57,19 @@ import kotlinx.serialization.json.Json
  */
 class LockWidget : GlanceAppWidget() {
     // Responsive so the framework picks the tier by the size actually on screen — see LightWidget
-    // for why Exact's options-changed path can't be trusted across launchers. Three buckets, not
-    // two: a squeezed widget is still usually three cells wide, and the wide compact bucket is how
-    // the header learns it has room for the lock's name as well as its state (`compactShowsName`).
-    // Glance picks the largest bucket that fits, so a tall placement still lands on the full tier.
+    // for why Exact's options-changed path can't be trusted across launchers.
+    //
+    // Four buckets, and the two compact ones beyond the smallest exist for the same reason: under
+    // Responsive, `LocalSize` reports the *bucket*, so a dimension the buckets don't distinguish
+    // cannot be seen at all. The wide one is how the header learns it can put the lock's name
+    // beside the state; the tall one is how it learns it can put the name above instead
+    // (`compactNamePlacement`). Glance picks the largest bucket that fits, and the full tier has
+    // the largest area of the four, so a genuinely tall placement still lands there.
     override val sizeMode: SizeMode = SizeMode.Responsive(
         setOf(
             DpSize(NARROW_WIDTH, WIDGET_COMPACT_BUCKET_DP.dp),
             DpSize(WIDGET_NAME_MIN_WIDTH_DP.dp, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(NARROW_WIDTH, WIDGET_COMPACT_TALL_BUCKET_DP.dp),
             DpSize(NARROW_WIDTH, WIDGET_FULL_MIN_HEIGHT_DP.dp),
         )
     )
@@ -115,7 +121,11 @@ private fun LockBody(prefs: Preferences, json: Json) {
                 // reading behind it expired, and it must say so itself.
                 note = readAtLabel(view.readAtMs),
                 compact = compact,
-                showName = compactShowsName(WidgetKind.LOCK, size.width.value.toInt()),
+                namePlacement = compactNamePlacement(
+                    WidgetKind.LOCK,
+                    size.width.value.toInt(),
+                    size.height.value.toInt(),
+                ),
             )
             // Full tier: the action sits on the panel's bottom edge and the room above stays
             // panel, so a tall widget reads as a surface with one control rather than one

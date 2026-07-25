@@ -23,13 +23,14 @@ import com.hawksnest.R
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.ArmTap
 import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
+import com.hawksnest.core.logic.WIDGET_COMPACT_TALL_BUCKET_DP
 import com.hawksnest.core.logic.WIDGET_FULL_MIN_HEIGHT_DP
 import com.hawksnest.core.logic.WIDGET_NAME_MIN_WIDTH_DP
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.WidgetSizeTier
 import com.hawksnest.core.logic.alarmWidgetView
 import com.hawksnest.core.logic.armTap
-import com.hawksnest.core.logic.compactShowsName
+import com.hawksnest.core.logic.compactNamePlacement
 import com.hawksnest.core.logic.sizeTier
 import com.hawksnest.ui.glance.PulseGlanceTheme
 import com.hawksnest.widget.data.WidgetEntryPoint
@@ -61,13 +62,14 @@ import kotlinx.serialization.json.Json
 class AlarmWidget : GlanceAppWidget() {
     // Responsive so the framework picks the tier by the size actually on screen — see LightWidget
     // for why Exact's options-changed path can't be trusted across launchers. The extra compact
-    // bucket is the one that tells a squeezed-but-wide placement it has room for the panel's name
-    // beside its state — see LockWidget.
+    // buckets are what let the header see it has room for the panel's name — beside the state on a
+    // wide placement, above it on a merely tall one. See LockWidget for the whole reasoning.
     override val sizeMode: SizeMode = SizeMode.Responsive(
         setOf(
-            DpSize(180.dp, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(NARROW_WIDTH, WIDGET_COMPACT_BUCKET_DP.dp),
             DpSize(WIDGET_NAME_MIN_WIDTH_DP.dp, WIDGET_COMPACT_BUCKET_DP.dp),
-            DpSize(180.dp, WIDGET_FULL_MIN_HEIGHT_DP.dp),
+            DpSize(NARROW_WIDTH, WIDGET_COMPACT_TALL_BUCKET_DP.dp),
+            DpSize(NARROW_WIDTH, WIDGET_FULL_MIN_HEIGHT_DP.dp),
         )
     )
 
@@ -110,7 +112,11 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
                 // See LockWidget: the read time keeps a persisted frame honest.
                 note = readAtLabel(view.readAtMs),
                 compact = compact,
-                showName = compactShowsName(WidgetKind.ALARM, size.width.value.toInt()),
+                namePlacement = compactNamePlacement(
+                    WidgetKind.ALARM,
+                    size.width.value.toInt(),
+                    size.height.value.toInt(),
+                ),
             )
             // Full tier: segments on the bottom edge, air above — see LockWidget. Compact: the
             // segments take whatever height is left.
@@ -153,6 +159,12 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
         }
     }
 }
+
+/**
+ * The narrow bucket — the provider's own minimum width. Wider than the lock's, because three
+ * separable segments need the room; see alarm_widget_info.xml.
+ */
+private val NARROW_WIDTH = 180.dp
 
 /** Each segment's glyph, keyed by the panel state the segment commands. */
 private fun segmentGlyph(state: String): Int = when (state) {

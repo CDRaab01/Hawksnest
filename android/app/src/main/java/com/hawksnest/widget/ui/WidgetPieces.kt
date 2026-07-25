@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hawksnest.MainActivity
 import com.hawksnest.core.logic.Channel
+import com.hawksnest.core.logic.CompactName
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.blockerCopy
 import com.hawksnest.R
@@ -151,8 +152,8 @@ fun WidgetHeader(
      */
     note: String? = null,
     compact: Boolean = false,
-    /** Whether the compact single line spends itself on the name — see `compactShowsName`. */
-    showName: Boolean = true,
+    /** Where the compact tier puts the name, if anywhere — see `compactNamePlacement`. */
+    namePlacement: CompactName = CompactName.INLINE,
 ) {
     Row(
         modifier = GlanceModifier.fillMaxWidth().clickable(openApp()),
@@ -160,10 +161,7 @@ fun WidgetHeader(
     ) {
         val accentColor = accent?.let { channelColor(it) } ?: GlanceTheme.colors.onSurfaceVariant
         if (compact) {
-            // One line for everything, and the order of precedence is the point. The state and the
-            // read time are laid out at their natural width so nothing can shorten them; the name
-            // takes the leftover and ellipsizes into it. A long name therefore eats its own tail
-            // rather than the state — the single line a lock can least afford to lose.
+            // No chip out here — just the small inline glyph, and then whatever the room allows.
             Image(
                 provider = ImageProvider(icon),
                 contentDescription = null,
@@ -171,26 +169,47 @@ fun WidgetHeader(
                 colorFilter = ColorFilter.tint(accentColor),
             )
             Spacer(modifier = GlanceModifier.width(6.dp))
-            if (showName) {
+            val status = listOfNotNull(detail, note).joinToString(" · ")
+            val nameStyle = TextStyle(
+                color = GlanceTheme.colors.onSurface,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            if (namePlacement == CompactName.STACKED) {
+                // Too narrow to share a line, tall enough not to have to. The control below simply
+                // gets that much less height — on a widget this shape it has height to spare, and
+                // a lock that can't say which door it is has no business being on a home screen.
+                Column(modifier = GlanceModifier.defaultWeight()) {
+                    Text(text = name, style = nameStyle, maxLines = 1)
+                    Text(
+                        text = status,
+                        style = TextStyle(color = accentColor, fontSize = 12.sp),
+                        maxLines = 1,
+                    )
+                }
+            } else {
+                // One line, and the order of precedence is the point. The state and the read time
+                // are laid out at their natural width so nothing can shorten them; the name takes
+                // the leftover and ellipsizes into it. A long name therefore eats its own tail
+                // rather than the state — the part a lock can least afford to lose.
+                val inline = namePlacement == CompactName.INLINE
+                if (inline) {
+                    Text(
+                        text = name,
+                        modifier = GlanceModifier.defaultWeight(),
+                        style = nameStyle,
+                        maxLines = 1,
+                    )
+                    Spacer(modifier = GlanceModifier.width(6.dp))
+                }
                 Text(
-                    text = name,
-                    modifier = GlanceModifier.defaultWeight(),
-                    style = TextStyle(
-                        color = GlanceTheme.colors.onSurface,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                    ),
+                    text = status,
+                    // Weighted only when it is the whole line; beside a name it keeps its own width.
+                    modifier = if (inline) GlanceModifier else GlanceModifier.defaultWeight(),
+                    style = TextStyle(color = accentColor, fontSize = 12.sp),
                     maxLines = 1,
                 )
-                Spacer(modifier = GlanceModifier.width(6.dp))
             }
-            Text(
-                text = listOfNotNull(detail, note).joinToString(" · "),
-                // Weighted only when it is the whole line; beside a name it keeps its own width.
-                modifier = if (showName) GlanceModifier else GlanceModifier.defaultWeight(),
-                style = TextStyle(color = accentColor, fontSize = 12.sp),
-                maxLines = 1,
-            )
         } else {
             Box(
                 modifier = GlanceModifier.size(32.dp).background(ImageProvider(chipFace(accent))),
