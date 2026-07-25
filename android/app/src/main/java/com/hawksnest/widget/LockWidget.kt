@@ -21,6 +21,7 @@ import com.hawksnest.R
 import com.hawksnest.core.logic.LockPhase
 import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
 import com.hawksnest.core.logic.WIDGET_FULL_MIN_HEIGHT_DP
+import com.hawksnest.core.logic.WIDGET_NAME_MIN_WIDTH_DP
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.WidgetSizeTier
 import com.hawksnest.core.logic.compactShowsName
@@ -55,11 +56,15 @@ import kotlinx.serialization.json.Json
  */
 class LockWidget : GlanceAppWidget() {
     // Responsive so the framework picks the tier by the size actually on screen — see LightWidget
-    // for why Exact's options-changed path can't be trusted across launchers.
+    // for why Exact's options-changed path can't be trusted across launchers. Three buckets, not
+    // two: a squeezed widget is still usually three cells wide, and the wide compact bucket is how
+    // the header learns it has room for the lock's name as well as its state (`compactShowsName`).
+    // Glance picks the largest bucket that fits, so a tall placement still lands on the full tier.
     override val sizeMode: SizeMode = SizeMode.Responsive(
         setOf(
-            DpSize(110.dp, WIDGET_COMPACT_BUCKET_DP.dp),
-            DpSize(110.dp, WIDGET_FULL_MIN_HEIGHT_DP.dp),
+            DpSize(NARROW_WIDTH, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(WIDGET_NAME_MIN_WIDTH_DP.dp, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(NARROW_WIDTH, WIDGET_FULL_MIN_HEIGHT_DP.dp),
         )
     )
 
@@ -86,7 +91,8 @@ private fun LockBody(prefs: Preferences, json: Json) {
     val params = widgetParams(WidgetKind.LOCK)
     val retry = actionRunCallback<WidgetRefreshAction>(params)
 
-    val compact = sizeTier(LocalSize.current.height.value.toInt()) == WidgetSizeTier.COMPACT
+    val size = LocalSize.current
+    val compact = sizeTier(size.height.value.toInt()) == WidgetSizeTier.COMPACT
 
     WidgetPanel(compact = compact, accent = view.channel) {
         // A lock with a live problem shows the problem, full stop — no half-state behind a banner.
@@ -109,7 +115,7 @@ private fun LockBody(prefs: Preferences, json: Json) {
                 // reading behind it expired, and it must say so itself.
                 note = readAtLabel(view.readAtMs),
                 compact = compact,
-                showName = compactShowsName(WidgetKind.LOCK),
+                showName = compactShowsName(WidgetKind.LOCK, size.width.value.toInt()),
             )
             // Full tier: the action sits on the panel's bottom edge and the room above stays
             // panel, so a tall widget reads as a surface with one control rather than one
@@ -149,6 +155,9 @@ private fun LockBody(prefs: Preferences, json: Json) {
         }
     }
 }
+
+/** The narrow bucket — the provider's own minimum width. */
+private val NARROW_WIDTH = 110.dp
 
 class LockWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = LockWidget()

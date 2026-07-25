@@ -56,15 +56,31 @@ fun sizeTier(heightDp: Int): WidgetSizeTier =
     if (heightDp < WIDGET_FULL_MIN_HEIGHT_DP) WidgetSizeTier.COMPACT else WidgetSizeTier.FULL
 
 /**
+ * Below this width, a compact lock or alarm line has no room for the device name on top of its
+ * state and read time. Sized for the worst case that still has to fit: an inline glyph plus
+ * "Locked · 10:42 PM" at 12sp leaves roughly a short name's worth of room at ~200dp, which is
+ * about a three-cell placement — the width these widgets are placed at by default.
+ */
+const val WIDGET_NAME_MIN_WIDTH_DP = 200
+
+/**
  * Does the compact single line spend itself on the device's name?
  *
- * For a light, yes — "which lamp is this?" is the only thing that line has to answer, and a lamp
- * shown wrong is a cosmetic error. For a lock or the alarm it must not: that line has to carry the
- * state *and* the time it was read, because those are what stop a frame left on the home screen
- * from quietly lying (see [LockWidgetView.readAtMs]). The name is the part that can be inferred
- * from where the widget sits; the timestamp isn't.
+ * For a light, always — "which lamp is this?" is the only thing that line has to answer, and a lamp
+ * shown wrong is a cosmetic error. For a lock or the alarm the state *and* the time it was read
+ * come first, because those are what stop a frame left on the home screen from quietly lying (see
+ * [LockWidgetView.readAtMs]); the name is the part that can be inferred from where the widget sits,
+ * so it is what yields when the line is short of room.
+ *
+ * That yielding is a width question, though, not a kind question — which is what this used to get
+ * wrong. A lock squeezed to one row is usually still three cells *wide*, and a line reading
+ * "Locked · 7:45 PM" on a house with more than one lock leaves the owner guessing at which door.
+ * So: past [WIDGET_NAME_MIN_WIDTH_DP] the name is shown as well, and the header renders it as the
+ * one part of the line allowed to be truncated, so a long name can eat its own tail but never the
+ * state or the timestamp.
  */
-fun compactShowsName(kind: WidgetKind): Boolean = kind == WidgetKind.LIGHT
+fun compactShowsName(kind: WidgetKind, widthDp: Int): Boolean =
+    kind == WidgetKind.LIGHT || widthDp >= WIDGET_NAME_MIN_WIDTH_DP
 
 /**
  * Which HA domains a widget of this kind can control.
