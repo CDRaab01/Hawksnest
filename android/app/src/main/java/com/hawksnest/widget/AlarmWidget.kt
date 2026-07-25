@@ -24,6 +24,7 @@ import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.ArmTap
 import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
 import com.hawksnest.core.logic.WIDGET_FULL_MIN_HEIGHT_DP
+import com.hawksnest.core.logic.WIDGET_NAME_MIN_WIDTH_DP
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.WidgetSizeTier
 import com.hawksnest.core.logic.alarmWidgetView
@@ -59,10 +60,13 @@ import kotlinx.serialization.json.Json
  */
 class AlarmWidget : GlanceAppWidget() {
     // Responsive so the framework picks the tier by the size actually on screen — see LightWidget
-    // for why Exact's options-changed path can't be trusted across launchers.
+    // for why Exact's options-changed path can't be trusted across launchers. The extra compact
+    // bucket is the one that tells a squeezed-but-wide placement it has room for the panel's name
+    // beside its state — see LockWidget.
     override val sizeMode: SizeMode = SizeMode.Responsive(
         setOf(
             DpSize(180.dp, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(WIDGET_NAME_MIN_WIDTH_DP.dp, WIDGET_COMPACT_BUCKET_DP.dp),
             DpSize(180.dp, WIDGET_FULL_MIN_HEIGHT_DP.dp),
         )
     )
@@ -90,7 +94,8 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
     )
     val retry = actionRunCallback<WidgetRefreshAction>(widgetParams(WidgetKind.ALARM))
 
-    val compact = sizeTier(LocalSize.current.height.value.toInt()) == WidgetSizeTier.COMPACT
+    val size = LocalSize.current
+    val compact = sizeTier(size.height.value.toInt()) == WidgetSizeTier.COMPACT
 
     WidgetPanel(compact = compact, accent = view.channel) {
         if (blocker != null) {
@@ -105,7 +110,7 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
                 // See LockWidget: the read time keeps a persisted frame honest.
                 note = readAtLabel(view.readAtMs),
                 compact = compact,
-                showName = compactShowsName(WidgetKind.ALARM),
+                showName = compactShowsName(WidgetKind.ALARM, size.width.value.toInt()),
             )
             // Full tier: segments on the bottom edge, air above — see LockWidget. Compact: the
             // segments take whatever height is left.

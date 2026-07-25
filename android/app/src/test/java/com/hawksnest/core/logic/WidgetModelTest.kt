@@ -387,13 +387,22 @@ class WidgetModelTest {
     }
 
     @Test
-    fun `squeezed to one line, a lock spends it on state and time — not its name`() {
+    fun `a one-line lock names itself when it is wide enough to`() {
+        // The bug: a lock squeezed to one row read "Locked · 7:45 PM" and never said which door,
+        // even at the three-cell width it is placed at by default. Width, not kind, decides.
+        assertTrue(compactShowsName(WidgetKind.LOCK, WIDGET_NAME_MIN_WIDTH_DP))
+        assertTrue(compactShowsName(WidgetKind.ALARM, 250))
+    }
+
+    @Test
+    fun `narrowed past that, it spends the line on state and time — not its name`() {
         // The name is recoverable from where the widget sits. The timestamp is the thing that
         // stops a frame left on the home screen from quietly lying, so it cannot be what gets cut.
-        assertFalse(compactShowsName(WidgetKind.LOCK))
-        assertFalse(compactShowsName(WidgetKind.ALARM))
-        // A light has no such duty, and "which lamp?" is the only question worth answering.
-        assertTrue(compactShowsName(WidgetKind.LIGHT))
+        assertFalse(compactShowsName(WidgetKind.LOCK, WIDGET_NAME_MIN_WIDTH_DP - 1))
+        assertFalse(compactShowsName(WidgetKind.ALARM, 110))
+        // A light has no such duty at any width, and "which lamp?" is the only question worth
+        // answering — a lamp shown wrong is a cosmetic error, not a security one.
+        assertTrue(compactShowsName(WidgetKind.LIGHT, 110))
     }
 
     // ── The picker's candidate list ───────────────────────────────────────────────────────────

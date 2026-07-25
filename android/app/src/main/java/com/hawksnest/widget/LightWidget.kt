@@ -117,7 +117,7 @@ private fun LightBody(prefs: Preferences, json: Json) {
                 pending = view.pending,
                 note = note,
                 compact = compact,
-                showName = compactShowsName(WidgetKind.LIGHT),
+                showName = compactShowsName(WidgetKind.LIGHT, size.width.value.toInt()),
             )
             // The flexible middle, full tier only: the controls sit on the panel's bottom edge
             // whatever height the launcher grants, and the level bar rides centred in the room

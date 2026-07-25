@@ -222,13 +222,20 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     `provideGlance` asks for a refresh — so an unthrottled refresh feeds itself forever at
     whatever rate the network allows. Failed fetches count toward the throttle too, or an
     unreachable HA becomes a retry storm.
-  - **Two size tiers** (`sizeTier`, `WIDGET_FULL_MIN_HEIGHT_DP = 112`). The full layout needs a
+  - **Two size tiers** (`sizeTier`, `WIDGET_FULL_MIN_HEIGHT_DP = 120`). The full layout needs a
     two-line header over a 48dp control; a one-row widget has nowhere near that, so compact
     collapses the header to one small line, drops the light's level bar, and lets the controls take
     the remaining height. **The XML rule that makes any of this reachable: `minResizeHeight` must be
     *below* `minHeight`.** It used to equal it, so launchers offered no vertical resize at all —
     which is why the widgets arrived oversized on a coarser home-screen grid and stayed that way.
-    Compact drops the *name* on lock/alarm, never the state or its timestamp (`compactShowsName`).
+    Within compact, the *name* is the only part of the header that may be dropped or truncated,
+    never the state or its timestamp: `compactShowsName` keeps it past `WIDGET_NAME_MIN_WIDTH_DP`
+    (200dp — a squeezed lock is usually still three cells wide, and "Locked · 7:45 PM" alone doesn't
+    say which door), and the header lays the state out at its natural width so a long name
+    ellipsizes into the leftover rather than pushing the state off the line. Reaching that decision
+    needs a **wide compact size bucket** in each widget's `SizeMode.Responsive` set — under
+    Responsive, `LocalSize` reports the *bucket*, so a width the buckets don't distinguish can't be
+    seen at all.
   - **Styling** is `ui/glance/PulseGlanceTheme` (text and flat fills, from the app's own
     `ColorScheme`s via `glance-material3`) plus `res/drawable/widget_*.xml` for anything Glance
     can't express as a flat color. Glance has no border or gradient modifier, so the panel and the

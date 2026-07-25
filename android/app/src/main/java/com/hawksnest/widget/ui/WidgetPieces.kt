@@ -160,8 +160,10 @@ fun WidgetHeader(
     ) {
         val accentColor = accent?.let { channelColor(it) } ?: GlanceTheme.colors.onSurfaceVariant
         if (compact) {
-            // One line for everything. Whatever is dropped here is dropped on purpose: for a lock
-            // that is the name, never the state or the time it was read.
+            // One line for everything, and the order of precedence is the point. The state and the
+            // read time are laid out at their natural width so nothing can shorten them; the name
+            // takes the leftover and ellipsizes into it. A long name therefore eats its own tail
+            // rather than the state — the single line a lock can least afford to lose.
             Image(
                 provider = ImageProvider(icon),
                 contentDescription = null,
@@ -169,9 +171,23 @@ fun WidgetHeader(
                 colorFilter = ColorFilter.tint(accentColor),
             )
             Spacer(modifier = GlanceModifier.width(6.dp))
+            if (showName) {
+                Text(
+                    text = name,
+                    modifier = GlanceModifier.defaultWeight(),
+                    style = TextStyle(
+                        color = GlanceTheme.colors.onSurface,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                    ),
+                    maxLines = 1,
+                )
+                Spacer(modifier = GlanceModifier.width(6.dp))
+            }
             Text(
-                text = listOfNotNull(name.takeIf { showName }, detail, note).joinToString(" · "),
-                modifier = GlanceModifier.defaultWeight(),
+                text = listOfNotNull(detail, note).joinToString(" · "),
+                // Weighted only when it is the whole line; beside a name it keeps its own width.
+                modifier = if (showName) GlanceModifier else GlanceModifier.defaultWeight(),
                 style = TextStyle(color = accentColor, fontSize = 12.sp),
                 maxLines = 1,
             )
