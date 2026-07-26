@@ -31,7 +31,7 @@ Channel hues intentionally shift between themes so a vivid accent still clears c
 
 | Area | Responsibility |
 |---|---|
-| `src/lib/` | The domain kernel. `cameraModel.ts` collapses ring-mqtt's split entities (`_live`/`_snapshot`/`_event` + selectors/ding/motion) into one logical camera; `cards.ts` maps HA domains → card components (**must never throw** — unknown domains render `GenericCard`); `resolve.ts` centralizes label/icon resolution (per-entity overrides go in `src/config/overrides.ts`, never in components) |
+| `src/lib/` | The domain kernel. `cameraModel.ts` collapses ring-mqtt's split entities (`_snapshot` + selectors/ding/motion, plus `_live`/`_event` cameras on ring-mqtt 4.x) into one logical camera; `cards.ts` maps HA domains → card components (**must never throw** — unknown domains render `GenericCard`); `resolve.ts` centralizes label/icon resolution (per-entity overrides go in `src/config/overrides.ts`, never in components) |
 | `src/store/` | Client state: HA WebSocket connection, auth, entity registry, reconnect logic. The entity sink dedupes the Ring-vs-ring-mqtt double exposure centrally (`src/lib/dedupe.ts`, platform map from the registry): when both integrations expose the same light, the ring-platform twin is dropped so every consumer sees one entity per physical device. The store also keeps the offline bookkeeping (`lastConnectedAt`/`staleSince`, stamped on leaving `connected`) and masks lock/alarm states to `unavailable` at the drop moment (`lib/offline.ts` — see the offline invariant below); `retryConnection()` restarts the source to skip the websocket lib's internal backoff |
 | `src/screens/` + `src/cards/` + `src/components/` | Presentation; no raw hex — PULSE tokens only. Loading states use the shared `Skeleton` (one hairline-strong shimmer sweep — camera first-frame decode, history fetch); the dashboard arm discs activate via a channel fill-sweep, still non-optimistic (the sweep follows HA's echo, pinned in tests) |
 | `src/config/` | Entity/room overrides |
@@ -60,9 +60,15 @@ under the center playhead during a drag (`onScrub`, rAF-throttled) and the playh
 inside a kept clip the video seeks in real time (forward and reverse) at the in-clip offset
 (`clipSeek.ts`, mirrored in `core/logic/ClipSeek.kt`; a ring clip's real span is learned from the
 loaded media's duration since `endMs` arrives null), and release keeps playing from that moment.
-Ring clip streams resolve through an explicit per-clip state machine (`RingClipState`:
-resolving → ready/**failed**): a stream HA can't produce (15 s timeout, sleeping battery cam,
-rotated-out event, playback error) surfaces as "Couldn't load this recording" **with a Retry** —
+Ring clip **URLs come off the selector itself**: ring-mqtt 5.x has no `camera.<base>_event` entity —
+selecting an option makes it fetch Ring's signed cloud recording (an expiring S3 mp4) and republish
+the selector with a `recordingUrl` attribute, so `store/ringClip.ts` (mirrored in
+`CameraPlayerViewModel.resolveRingClip`) selects, then waits for that attribute to arrive **for the
+selected option** (20 s bound; `<Recording Not Found>` fails immediately, `<Transcoding in Progress>`
+keeps waiting). A `camera.<base>_event` entity, where one exists (ring-mqtt 4.x), still takes the
+`camera/stream` path. Resolution runs through an explicit per-clip state machine (`RingClipState`:
+resolving → ready/**failed**): a recording Ring can't produce (timeout, rotated-out event, no Protect
+subscription, playback error) surfaces as "Couldn't load this recording" **with a Retry** —
 never a stuck loader — while a time with no kept recording shows the honest "no saved recording"
 note over the snapshot. Rendered Ring-style — solid `effort`-blue blocks, a triangle playhead, a
 dim "Live" region right of now, a "TODAY" header (`Timeline24h`) — over the tested

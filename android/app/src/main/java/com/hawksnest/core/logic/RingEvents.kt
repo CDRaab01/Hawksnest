@@ -1,6 +1,7 @@
 package com.hawksnest.core.logic
 
 import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.ha.stringAttr
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -16,6 +17,25 @@ private const val RING_SNOWFLAKE_OFFSET_MS = 42_790_053_458L
 /** Decode a ring-mqtt event id to its real epoch-ms event time, or null if it isn't a valid id. */
 fun ringEventIdToMs(eventId: String?): Long? =
     eventId?.trim()?.toLongOrNull()?.let { (it ushr 22) - RING_SNOWFLAKE_OFFSET_MS }
+
+/**
+ * The recording ring-mqtt has published for the selector's **current** option.
+ *
+ * ring-mqtt 5.x does not create a `camera.<base>_event` entity — selecting an option makes it fetch
+ * Ring's signed cloud recording and publish the URL as the selector's `recordingUrl` attribute (an
+ * expiring S3 mp4, playable directly). Non-URL sentinels (`<Recording Not Found>`,
+ * `<Transcoding in Progress>`) are not playable, so they read as "no URL". Mirrors the web helper.
+ */
+fun ringRecordingUrl(select: HassEntity?): String? =
+    select?.stringAttr("recordingUrl")?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+
+/**
+ * True when ring-mqtt has said this selection has nothing to play — the event rotated out of Ring's
+ * history, or there is no recording for it. Terminal (fail now), unlike `<Transcoding in Progress>`,
+ * which resolves into a URL shortly.
+ */
+fun ringRecordingMissing(select: HassEntity?): Boolean =
+    select?.stringAttr("recordingUrl")?.contains("Recording Not Found", ignoreCase = true) == true
 
 /** The event selector's current options (`Motion 1`, `Ding 1`, …), newest-first, or empty. */
 fun ringEventOptions(select: HassEntity?): List<String> =

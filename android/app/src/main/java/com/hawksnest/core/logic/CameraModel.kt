@@ -5,16 +5,21 @@ import com.hawksnest.core.ha.domainOf
 
 /**
  * One logical camera, independent of how the backend models it. **ring-mqtt**
- * splits a Ring camera across several HA entities (`camera.<base>_live`,
- * `_snapshot`, `_event`, `select.<base>_event_select`, `binary_sensor.<base>_motion`/
- * `_ding`); this collapses them into one camera. Plain HA / Frigate cameras map
- * 1:1. Ported from `src/lib/cameraModel.ts`.
+ * splits a Ring camera across several HA entities (`camera.<base>_snapshot`,
+ * `select.<base>_event_select`, `binary_sensor.<base>_motion`/`_ding`, plus
+ * `camera.<base>_live`/`_event` on older ring-mqtt); this collapses them into one
+ * camera. Plain HA / Frigate cameras map 1:1. Ported from `src/lib/cameraModel.ts`.
  */
 data class LogicalCamera(
     val id: String,
     val name: String,
     val liveEntity: HassEntity,
     val snapshotEntity: HassEntity,
+    /**
+     * Recorded-event playback stream entity (`camera.<base>_event`) — ring-mqtt 4.x only. 5.x
+     * publishes the selected event's recording as the selector's `recordingUrl` attribute instead,
+     * so this is null on current deployments and recorded playback goes through that.
+     */
     val eventStreamId: String?,
     val eventSelectId: String?,
     val dingId: String?,

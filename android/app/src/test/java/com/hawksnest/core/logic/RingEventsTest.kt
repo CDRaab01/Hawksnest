@@ -4,9 +4,11 @@ import com.hawksnest.core.ha.HassEntity
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** Ports `ringEvents.ts` behavior. */
@@ -76,5 +78,39 @@ class RingEventsTest {
         )
         // Motion 1 → NOW, Motion 2 → NOW-6min, sorted oldest-first.
         assertEquals(listOf(NOW - 6 * 60_000L, NOW), events.map { it.startMs })
+    }
+
+    /** The selector as ring-mqtt 5.x publishes it: the chosen event's recording URL as an attribute. */
+    private fun selectWithRecording(recordingUrl: String?): HassEntity = HassEntity(
+        entityId = "select.front_event_select",
+        state = "Motion 1",
+        attributes = buildJsonObject {
+            putJsonArray("options") { add("Motion 1") }
+            if (recordingUrl != null) put("recordingUrl", recordingUrl)
+        },
+    )
+
+    @Test
+    fun `reads the published recording URL`() {
+        assertEquals(
+            "https://ring.example/clip.mp4",
+            ringRecordingUrl(selectWithRecording("https://ring.example/clip.mp4")),
+        )
+    }
+
+    @Test
+    fun `sentinels are not playable URLs`() {
+        assertEquals(null, ringRecordingUrl(selectWithRecording("<Recording Not Found>")))
+        assertEquals(null, ringRecordingUrl(selectWithRecording("<Transcoding in Progress>")))
+        assertEquals(null, ringRecordingUrl(selectWithRecording(null)))
+        assertEquals(null, ringRecordingUrl(null))
+    }
+
+    @Test
+    fun `only a missing recording is terminal — a transcode is still coming`() {
+        assertTrue(ringRecordingMissing(selectWithRecording("<Recording Not Found>")))
+        assertFalse(ringRecordingMissing(selectWithRecording("<Transcoding in Progress>")))
+        assertFalse(ringRecordingMissing(selectWithRecording("https://ring.example/clip.mp4")))
+        assertFalse(ringRecordingMissing(null))
     }
 }

@@ -24,7 +24,12 @@ This file adds the things that are easy to get wrong and the suite context.
   to just *not add* XFF while the app was reached via a plain portproxy, but the TLS front
   (Tailscale Serve, `https://<host>.ts.net:8443`) injects XFF and nginx passes inbound headers
   through, so it must be stripped. Alternative: add the flannel pod CIDR `10.42.0.0/16` to HA's
-  `trusted_proxies`. Never half-do it. Details: deploy/README.md.
+  `trusted_proxies`. Never half-do it. Details: deploy/README.md. **This is also why the phone
+  must reach HA through the Hawksnest proxy, not HA directly:** Tailscale Serve `:8443` → the
+  Hawksnest nginx pod (host `8090` → NodePort 30080), which strips XFF; pointing Serve straight at
+  HA (`:8123`) 400s. Host-side exposure changed 2026-07-22 — the netsh portproxy is retired; WSL
+  runs mirrored networking and the pod is reached via on-disk `socat` systemd units in the
+  `Dragonfly` distro behind Hyper-V firewall rules (host runbook: OPERATIONS.md §1.2 / §6).
 - **The service worker never caches `/api`** and never touches the HA token (localStorage).
   Offline = app shell + Offline/Demo state, never stale entity data. Keep it that way when
   editing `vite.config`/SW code.
@@ -45,10 +50,15 @@ This file adds the things that are easy to get wrong and the suite context.
   this was deliberately `true` because the HA host could be a bare `100.x` IP a scoped
   `<domain-config>` can't match — TLS fronting the proxy removed that constraint.)
 - **Camera model:** the backend is **ring-mqtt** (+ embedded go2rtc). Its split entities
-  (`_live`/`_snapshot`/`_event` + selectors/ding/motion) are collapsed into one logical camera in
-  `src/lib/cameraModel.ts` (web) / the Android equivalent. Recorded playback = last ~5 Ring
-  events via the event-selector entity, not continuous VOD (Frigate support exists for that,
-  unused). WebRTC negotiates over the existing `/api/websocket`; media is UDP direct to go2rtc.
+  (`_snapshot` + selectors/ding/motion; `_live`/`_event` cameras only on ring-mqtt 4.x) are
+  collapsed into one logical camera in `src/lib/cameraModel.ts` (web) / the Android equivalent.
+  Recorded playback = last ~5 Ring events via the event-selector entity, not continuous VOD
+  (Frigate support exists for that, unused). **ring-mqtt 5.x has no `camera.<base>_event`
+  entity**: selecting an option makes it fetch Ring's signed cloud recording and publish it as the
+  selector's `recordingUrl` attribute, which is what the players load (`src/store/ringClip.ts` /
+  `CameraPlayerViewModel.resolveRingClip`). Assuming the 4.x `_event` camera is what pinned every
+  recorded clip on "Loading recording…" (fixed 2026-07-26). WebRTC negotiates over the existing
+  `/api/websocket`; media is UDP direct to go2rtc.
 
 ## Testing map (all real seams are covered without real hardware)
 

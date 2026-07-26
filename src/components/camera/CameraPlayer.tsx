@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LogicalCamera } from "../../lib/cameraModel";
-import {
-  fetchCameraEvents,
-  recordingUrlAt,
-  streamUrl,
-  callService,
-} from "../../store/connection";
+import { fetchCameraEvents, recordingUrlAt } from "../../store/connection";
+import { resolveRingClipUrl } from "../../store/ringClip";
 import { useEntity } from "../../store/entityStore";
 import type { CameraEvent } from "../../lib/cameraEvents";
 import { vodPositionSeconds } from "../../lib/cameraEvents";
@@ -50,9 +46,9 @@ type RingClipState =
  * watchable). Recorded events come from one of two backends, transparently:
  * - **ring-mqtt** (`camera.eventSelectId` present): the last ~5 events from the
  *   event-selector entity; seeking inside one sets the selector
- *   (`select.select_option`) and plays the `camera.<base>_event` stream at the
- *   in-clip offset. A clip's real span is learned from the loaded media's
- *   duration (`endMs` arrives null).
+ *   (`select.select_option`) and plays the recording ring-mqtt publishes back on
+ *   that selector (`recordingUrl`), at the in-clip offset. A clip's real span is
+ *   learned from the loaded media's duration (`endMs` arrives null).
  * - **Frigate / demo**: `fetchCameraEvents` (clip-bearing events only) + a
  *   continuous `recordingUrlAt` VOD (demo synthesizes both and plays the
  *   bundled clip).
@@ -160,14 +156,13 @@ export function CameraPlayer({
     setPlayhead("live");
   }
 
-  // ring recorded playback: select the event, then stream the `_event` camera.
-  // Tri-state per clip — resolving / ready / failed — so a stream HA can't
-  // produce (15s timeout, sleeping battery cam, rotated-out event) surfaces as
-  // an honest error with a Retry, never a permanent "Loading…".
+  // ring recorded playback: select the event, then take the recording URL
+  // ring-mqtt publishes for it (see resolveRingClipUrl). Tri-state per clip —
+  // resolving / ready / failed — so a recording Ring can't produce (timeout,
+  // rotated-out event, no Protect subscription) surfaces as an honest error with
+  // a Retry, never a permanent "Loading…".
   useEffect(() => {
-    if (!isRing || isLive || !selected || !camera.eventSelectId || !camera.eventStreamId) {
-      return;
-    }
+    if (!isRing || isLive || !selected || !camera.eventSelectId) return;
     const clipId = selected.id;
     // Already resolving/ready for this clip (e.g. scrub within its span, or a
     // scrub that left and re-entered it) — don't re-fire select_option/stream.
@@ -180,17 +175,13 @@ export function CameraPlayer({
     const run = async () => {
       setRingClip({ status: "resolving", clipId });
       setLoadedClip((lc) => (lc && lc.id === clipId ? lc : null));
-      try {
-        await callService("select", "select_option", {
-          entity_id: camera.eventSelectId!,
-          option: clipId,
-        });
-      } catch {
-        /* selecting failed — still try to read whatever the event stream has */
-      }
       let url: string | null = null;
       try {
-        url = await streamUrl(camera.eventStreamId!);
+        url = await resolveRingClipUrl({
+          selectId: camera.eventSelectId!,
+          option: clipId,
+          eventStreamId: camera.eventStreamId,
+        });
       } catch {
         url = null;
       }

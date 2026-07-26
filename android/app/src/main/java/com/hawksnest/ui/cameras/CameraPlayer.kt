@@ -136,15 +136,16 @@ fun CameraPlayer(
         playhead = null
     }
 
-    // ring recorded playback: select the event, then stream the `_event` camera. Tri-state per clip
-    // — Resolving / Ready / Failed — so a stream HA can't produce (15s timeout, sleeping battery
-    // cam, rotated-out event) surfaces as an honest error with a Retry, never a permanent
-    // "Loading…". Kept in remember(cam.id) state (not produceState's value) so a camera switch
-    // resets it — ring-mqtt option ids ("Motion 1"…) repeat across cameras.
+    // ring recorded playback: select the event, then take the recording URL ring-mqtt publishes for
+    // it (see resolveRingClip). Tri-state per clip — Resolving / Ready / Failed — so a recording
+    // Ring can't produce (timeout, rotated-out event, no Protect subscription) surfaces as an honest
+    // error with a Retry, never a permanent "Loading…". Kept in remember(cam.id) state (not
+    // produceState's value) so a camera switch resets it — ring-mqtt option ids ("Motion 1"…) repeat
+    // across cameras.
     var ringClip by remember(cam.id) { mutableStateOf<RingClipState>(RingClipState.Idle) }
     LaunchedEffect(isLive, selected?.id, retryNonce) {
         val sel = selected
-        if (!isRing || isLive || sel == null || cam.eventSelectId == null || cam.eventStreamId == null) {
+        if (!isRing || isLive || sel == null || cam.eventSelectId == null) {
             return@LaunchedEffect
         }
         // Already resolving/ready for this clip (e.g. scrub within its span, or a scrub that left
