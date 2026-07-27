@@ -52,9 +52,13 @@ This file adds the things that are easy to get wrong and the suite context.
 - **Camera model:** the backend is **ring-mqtt** (+ embedded go2rtc). Its split entities
   (`_snapshot` + selectors/ding/motion; `_live`/`_event` cameras only on ring-mqtt 4.x) are
   collapsed into one logical camera in `src/lib/cameraModel.ts` (web) / the Android equivalent.
-  Recorded playback = last ~5 Ring events via the event-selector entity, not continuous VOD
-  (Frigate support exists for that, unused). **ring-mqtt 5.x has no `camera.<base>_event`
-  entity**: selecting an option makes it fetch Ring's signed cloud recording and publish it as the
+  Recorded playback comes from the **`ring-timeline` service** (sibling repo
+  `hawksnest-automation`, nginx `/ring-timeline/`), which serves Ring's own `video_search`
+  timeline — real event times + pre-signed mp4 URLs — because HA has neither. Its URLs expire in
+  ~15 min, so the timeline is refetched, never held. The ring-mqtt selector path is the fallback
+  when that service is down, and it is: last ~5 Ring events via the event-selector entity, not
+  continuous VOD (Frigate support exists for that, unused). **ring-mqtt 5.x has no
+  `camera.<base>_event` entity**: selecting an option makes it fetch Ring's signed cloud recording and publish it as the
   selector's `recordingUrl` attribute, which is what the players load (`src/store/ringClip.ts` /
   `CameraPlayerViewModel.resolveRingClip`). Assuming the 4.x `_event` camera is what pinned every
   recorded clip on "Loading recording…" (fixed 2026-07-26). WebRTC negotiates over the existing

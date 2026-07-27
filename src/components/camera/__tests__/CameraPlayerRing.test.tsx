@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -89,6 +89,15 @@ async function seekToFirstClip(user: ReturnType<typeof userEvent.setup>) {
   const markers = screen.getAllByRole("button", { name: /at / });
   await user.click(markers[0]);
 }
+
+/** No ring-timeline service by default: these tests cover the ring-mqtt selector fallback. */
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: false, status: 502, json: async () => ({}) })),
+  );
+});
+afterEach(() => vi.unstubAllGlobals());
 
 describe("CameraPlayer (ring recorded playback)", () => {
   it("shows Loading while the stream resolves, then plays the clip", async () => {
@@ -194,6 +203,48 @@ describe("CameraPlayer (ring recorded playback)", () => {
     expect(await screen.findByLabelText("Camera footage")).toBeInTheDocument();
     expect(screen.queryByText("Loading recordingâ€¦")).toBeNull();
     // No `_event` camera to ask HA about â€” the URL came off the selector.
+    expect(eventStreamCalls()).toBe(0);
+  });
+});
+
+describe("CameraPlayer (ring-timeline service)", () => {
+  const DEVICE = { id: 42, name: "Gate", slug: "gate" };
+  const RECORDING = {
+    id: "7667005335319651402",
+    startMs: NOW - 3600_000,
+    endMs: NOW - 3600_000 + 37_000,
+    durationSec: 37,
+    kind: "motion",
+    person: true,
+    url: "https://ring.test/clip.mp4",
+    urlExpiresAtMs: NOW + 900_000,
+    thumbnailUrl: "https://ring.test/thumb.jpg",
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => ({
+        ok: true,
+        status: 200,
+        json: async () =>
+          String(input).includes("/cameras") ? [DEVICE] : { events: [RECORDING], truncated: false },
+      })),
+    );
+  });
+
+  // The whole point of the service: the event arrives WITH its playable URL, so scrubbing to a
+  // recording plays it — no select_option, no waiting on ring-mqtt, no "Loading recording…".
+  it("plays a recording immediately, without touching the ring-mqtt selector", async () => {
+    const user = userEvent.setup();
+    renderPlayer();
+
+    await screen.findByText("1 moments");
+    await user.click(screen.getAllByRole("button", { name: /at / })[0]);
+
+    expect(await screen.findByLabelText("Camera footage")).toBeInTheDocument();
+    expect(screen.queryByText("Loading recording…")).toBeNull();
+    expect(callServiceMock).not.toHaveBeenCalled();
     expect(eventStreamCalls()).toBe(0);
   });
 });

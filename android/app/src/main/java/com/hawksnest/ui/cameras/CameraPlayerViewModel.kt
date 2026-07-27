@@ -11,8 +11,11 @@ import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
 import com.hawksnest.core.logic.ringEventsFromOptions
+import com.hawksnest.core.logic.RingTimeline
+import com.hawksnest.core.logic.matchDevice
 import com.hawksnest.core.logic.ringRecordingMissing
 import com.hawksnest.core.logic.ringRecordingUrl
+import com.hawksnest.core.net.RingTimelineClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -43,7 +46,27 @@ private const val CAMERA_FEATURE_STREAM = 2
 @HiltViewModel
 class CameraPlayerViewModel @Inject constructor(
     private val connection: ConnectionManager,
+    private val ringTimelineClient: RingTimelineClient,
 ) : ViewModel() {
+
+    /**
+     * Ring's OWN recorded timeline for a camera — real event times, real spans, and directly
+     * playable pre-signed URLs — or null when the ring-timeline service isn't reachable or this
+     * camera isn't one of its devices, in which case the player falls back to the ring-mqtt
+     * selector. Matched by DISPLAY NAME, not entity id: the ids froze at first discovery and have
+     * drifted from Ring since (HA's `camera.front_*` is Ring's "Front Driveway").
+     */
+    suspend fun ringTimeline(
+        displayName: String,
+        cameraName: String,
+        fromMs: Long,
+        toMs: Long,
+    ): RingTimeline? {
+        val baseUrl = baseUrl()
+        val devices = ringTimelineClient.devices(baseUrl) ?: return null
+        val device = matchDevice(devices, displayName, cameraName) ?: return null
+        return ringTimelineClient.timeline(baseUrl, device.id, cameraName, fromMs, toMs)
+    }
 
     suspend fun liveStreamUrl(entityId: String): String? = connection.streamUrl(entityId)
 
@@ -170,9 +193,14 @@ class CameraPlayerViewModel @Inject constructor(
      * Wait for the selector to report [option] **with a recording URL that belongs to it**.
      * ring-mqtt publishes state and attributes together (it awaits the URL before publishing), but
      * HA delivers them as two updates — requiring the URL to have changed keeps that window from
-     * playing the previous clip. On the deadline we take whatever is published for the current
-     * selection rather than failing outright: two options can map to the same Ring event
-     * (`Motion 1` / `Person 1`), in which case the URL legitimately never changes.
+     * playing the previous clip.
+     *
+     * The deadline **fails**; it never falls back to whatever is currently published. ring-mqtt
+     * silently leaves the old URL in place when its event lookup finds nothing new (common on the
+     * 24/7 cameras, whose footage is continuous rather than per-event), so "take what's there"
+     * would quietly play a *different* moment's clip. Failing is honest, and the Retry recovers the
+     * one case the fallback existed for — two options mapping to a single Ring event: by then the
+     * selection is already active, so the published URL is accepted directly.
      */
     private suspend fun awaitRecordingUrl(
         eventSelectId: String,
@@ -189,12 +217,10 @@ class CameraPlayerViewModel @Inject constructor(
             return if (alreadySelected || url != urlBefore) url else ""
         }
 
-        val settled = withTimeoutOrNull(RING_CLIP_TIMEOUT_MS) {
+        // A terminal "no recording" and the deadline both land here as null — both are failures.
+        return withTimeoutOrNull(RING_CLIP_TIMEOUT_MS) {
             connection.state.entities.map { read(it) }.first { it != "" }
         }
-        // Both a terminal "no recording" and the deadline land here as null; re-reading what is
-        // published is correct for either — a sentinel yields null (failure), a URL plays.
-        return settled ?: ringRecordingUrl(entity(eventSelectId)?.takeIf { it.state == option })
     }
 }
 

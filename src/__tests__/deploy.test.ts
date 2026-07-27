@@ -62,6 +62,16 @@ describe("nginx.conf — same-origin HA reverse proxy", () => {
     }
   });
 
+  it("proxies /ring-timeline/ to the recorded-footage service, in-cluster only", () => {
+    // The recorded timeline (real event times + playable URLs) comes from ring-timeline
+    // in the sibling automation repo, not from HA. It is ClusterIP-only and its JSON
+    // carries signed media URLs, so this same-origin location is the only route in —
+    // pinned here because a stray edit would either break recorded playback or, worse,
+    // expose it. Note it is deliberately NOT an /api/ path: those go to HA.
+    expect(nginx).toMatch(/location\s+\/ring-timeline\//);
+    expect(nginx).toContain("ring-timeline.home-automation.svc.cluster.local:8080");
+  });
+
   it("falls back to the SPA index for client-side routes", () => {
     expect(nginx).toContain("try_files $uri $uri/ /index.html");
   });

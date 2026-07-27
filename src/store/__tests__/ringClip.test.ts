@@ -95,13 +95,21 @@ describe("resolveRingClipUrl", () => {
     await expect(pending).resolves.toBeNull();
   });
 
-  it("on the deadline takes the published URL when two options share one event", async () => {
+  // ring-mqtt leaves the previous clip's URL in place when its event lookup finds nothing new
+  // (the 24/7 cameras do this constantly), so an unchanged URL must never be served as this clip.
+  it("fails rather than serving a URL that never changed — it may be another event's clip", async () => {
     vi.useFakeTimers();
     const pending = resolveRingClipUrl({ selectId: SELECT, option: "Motion 2", timeoutMs: 50 });
-    // Selection landed, but the URL is unchanged (same underlying Ring event).
     publish("Motion 2", "https://ring.example/old.mp4");
     await vi.advanceTimersByTimeAsync(60);
-    await expect(pending).resolves.toBe("https://ring.example/old.mp4");
+    await expect(pending).resolves.toBeNull();
+  });
+
+  it("the retry then plays it, because the option is active by then (one Ring event, two options)", async () => {
+    publish("Motion 2", "https://ring.example/old.mp4");
+    await expect(
+      resolveRingClipUrl({ selectId: SELECT, option: "Motion 2", timeoutMs: 50 }),
+    ).resolves.toBe("https://ring.example/old.mp4");
   });
 
   it("a rejected select_option still yields whatever is published (best-effort select)", async () => {

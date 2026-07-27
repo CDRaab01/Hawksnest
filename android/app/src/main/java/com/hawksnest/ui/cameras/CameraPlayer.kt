@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.clipContaining
 import com.hawksnest.core.logic.clipSpanEndMs
 import com.hawksnest.core.logic.offsetInClipMs
@@ -72,9 +73,32 @@ fun CameraPlayer(
     val window = remember { System.currentTimeMillis().let { it - DAY_MS to it } }
     val (startMs, endMs) = window
 
-    // Only real recordings make the timeline (Ring-style: every block is watchable) — ring's ~5
-    // selector events at their real times, or Frigate/demo events that carry a clip.
-    val events: List<CameraEvent> by produceState<List<CameraEvent>>(emptyList(), cam.id) {
+    // Ring's OWN timeline via the ring-timeline service — real event times, real spans and directly
+    // playable URLs. Preferred over the selector for ring cameras: the selector has no event times
+    // at all (its blocks were plotted on fabricated 6-minute spacing) and yields nothing playable on
+    // the wired cameras. Null = service unreachable / camera not one of its devices → selector path.
+    // The nonce refetches: Ring signs its URLs for ~15 minutes, so a timeline left open goes
+    // unplayable.
+    var timelineNonce by remember(cam.id) { mutableStateOf(0) }
+    // Which clip we've already spent our one expired-signature refetch on.
+    var refetchedFor by remember(cam.id) { mutableStateOf<String?>(null) }
+    val timeline: RingTimeline? by produceState<RingTimeline?>(null, cam.id, timelineNonce) {
+        value = if (isRing) {
+            runCatching { viewModel.ringTimeline(cam.name, cameraName, startMs, endMs) }.getOrNull()
+        } else {
+            null
+        }
+    }
+    LaunchedEffect(timeline?.expiresAtMs) {
+        val expiry = timeline?.expiresAtMs ?: return@LaunchedEffect
+        // Refetch a minute ahead of the earliest expiry so every block on screen stays watchable.
+        delay((expiry - System.currentTimeMillis() - 60_000).coerceAtLeast(5_000))
+        timelineNonce += 1
+    }
+
+    // Only real recordings make the timeline (Ring-style: every block is watchable) — Ring's own
+    // events, ring's ~5 selector events, or Frigate/demo events that carry a clip.
+    val fallbackEvents: List<CameraEvent> by produceState<List<CameraEvent>>(emptyList(), cam.id) {
         value = runCatching {
             if (isRing) {
                 viewModel.ringEvents(cam.eventSelectId!!, cameraName, startMs, endMs)
@@ -83,6 +107,7 @@ fun CameraPlayer(
             }
         }.getOrDefault(emptyList())
     }
+    val events: List<CameraEvent> = timeline?.events ?: fallbackEvents
     // null playhead = live; reset to live whenever the camera changes.
     var playhead by remember(cam.id) { mutableStateOf<Long?>(null) }
     var paused by remember(cam.id) { mutableStateOf(false) }
@@ -143,9 +168,11 @@ fun CameraPlayer(
     // produceState's value) so a camera switch resets it — ring-mqtt option ids ("Motion 1"…) repeat
     // across cameras.
     var ringClip by remember(cam.id) { mutableStateOf<RingClipState>(RingClipState.Idle) }
-    LaunchedEffect(isLive, selected?.id, retryNonce) {
+    LaunchedEffect(isLive, selected?.id, retryNonce, timeline) {
         val sel = selected
-        if (!isRing || isLive || sel == null || cam.eventSelectId == null) {
+        // Skipped entirely when the ring-timeline service answered: its events already carry a
+        // playable URL, so there is nothing to select, wait for, or fail at.
+        if (!isRing || isLive || sel == null || cam.eventSelectId == null || timeline != null) {
             return@LaunchedEffect
         }
         // Already resolving/ready for this clip (e.g. scrub within its span, or a scrub that left
@@ -176,14 +203,21 @@ fun CameraPlayer(
     // and could crash ExoPlayer on a backwards seek. A ring clip seeks from ITS start (so scrubbing
     // inside a clip previews live).
     val ringReady = (ringClip as? RingClipState.Ready)?.takeIf { it.clipId == selected?.id }
+    // A ring-timeline event is playable the moment it's selected � its pre-signed URL came down
+    // with the timeline, so there's no per-clip round trip and no loading state at all.
+    val serviceUrl = selected?.id?.let { timeline?.urls?.get(it) }
     val recordingUrl = when {
         isLive -> null
-        isRing -> ringReady?.url
+        isRing -> serviceUrl ?: ringReady?.url
         else -> viewModel.recordingUrl(cameraName, startMs, endMs)
     }
     val seekToMs = when {
         isLive -> null
-        isRing -> if (ringReady != null && selected != null) offsetInClipMs(selected, headTime) else null
+        isRing -> if ((serviceUrl != null || ringReady != null) && selected != null) {
+            offsetInClipMs(selected, headTime)
+        } else {
+            null
+        }
         else -> vodPositionMs(headTime, startMs)
     }
 
@@ -250,8 +284,18 @@ fun CameraPlayer(
                     },
                     onError = if (isRing) {
                         {
-                            (ringClip as? RingClipState.Ready)?.let { rc ->
-                                ringClip = RingClipState.Failed(rc.clipId)
+                            // On the ring-timeline path the overwhelmingly likely cause is Ring's
+                            // ~15-minute signature having expired, so refetch (fresh URLs) once per
+                            // clip before calling it a failure � the guard stops a genuinely dead
+                            // clip from looping.
+                            val clipId = selected?.id
+                            if (timeline != null && clipId != null && refetchedFor != clipId) {
+                                refetchedFor = clipId
+                                timelineNonce += 1
+                            } else {
+                                (ringClip as? RingClipState.Ready)?.let { rc ->
+                                    ringClip = RingClipState.Failed(rc.clipId)
+                                }
                             }
                         }
                     } else {
@@ -264,12 +308,19 @@ fun CameraPlayer(
             !isLive -> ScrubbedPlaceholder(
                 snapshotUrl = cam.snapshotUrl,
                 state = when {
+                    // On the ring-timeline path there is no resolving step: an event on the
+                    // timeline arrived with its URL, so no source for it is a failure, not a spinner.
+                    selected != null && timeline != null -> PlaceholderState.Failed
                     selected != null && (ringClip as? RingClipState.Failed)?.clipId == selected.id ->
                         PlaceholderState.Failed
                     selected != null -> PlaceholderState.Resolving
                     else -> PlaceholderState.None
                 },
-                onRetry = { retryNonce += 1 },
+                // Retrying means fresh signed URLs on the service path, re-resolution on the other.
+                onRetry = {
+                    refetchedFor = null
+                    if (timeline != null) timelineNonce += 1 else retryNonce += 1
+                },
                 modifier = frame,
             )
             isLive && canGo2rtc && !go2rtcFailed -> Go2rtcPlayer(
