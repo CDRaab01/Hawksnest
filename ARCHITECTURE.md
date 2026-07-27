@@ -60,6 +60,17 @@ under the center playhead during a drag (`onScrub`, rAF-throttled) and the playh
 inside a kept clip the video seeks in real time (forward and reverse) at the in-clip offset
 (`clipSeek.ts`, mirrored in `core/logic/ClipSeek.kt`; a ring clip's real span is learned from the
 loaded media's duration since `endMs` arrives null), and release keeps playing from that moment.
+**Recorded ring events come from the `ring-timeline` service** (sibling repo `hawksnest-automation`,
+proxied same-origin at `/ring-timeline/`), not from HA: it serves Ring's own `video_search` timeline
+— real event times, real spans, thumbnails, person flags, and pre-signed mp4 URLs the player loads
+directly (`lib/ringTimeline.ts`). This exists because HA cannot supply it: ring-mqtt's event
+selector carries **no event times** (blocks used to be plotted on fabricated 6-minute spacing) and
+produces nothing playable at all on the wired cameras. Cameras are matched to Ring devices by
+**display name**, not entity id — the ids froze at first discovery and have drifted (`camera.front_*`
+is Ring's "Front Driveway"). Ring signs those URLs for ~15 minutes, so the player refetches a minute
+ahead of the earliest expiry and once more on a playback error before calling a clip failed. When
+the service is unreachable the player falls back to the ring-mqtt selector path below, which is:
+
 Ring clip **URLs come off the selector itself**: ring-mqtt 5.x has no `camera.<base>_event` entity —
 selecting an option makes it fetch Ring's signed cloud recording (an expiring S3 mp4) and republish
 the selector with a `recordingUrl` attribute, so `store/ringClip.ts` (mirrored in

@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LogicalCamera } from "../../lib/cameraModel";
 import { fetchCameraEvents, recordingUrlAt } from "../../store/connection";
 import { resolveRingClipUrl } from "../../store/ringClip";
+import {
+  fetchRingDevices,
+  fetchRingTimeline,
+  matchDevice,
+  type RingTimeline,
+} from "../../lib/ringTimeline";
 import { useEntity } from "../../store/entityStore";
 import type { CameraEvent } from "../../lib/cameraEvents";
 import { vodPositionSeconds } from "../../lib/cameraEvents";
@@ -110,12 +116,58 @@ export function CameraPlayer({
     };
   }, [isRing, cameraName, window.start, window.end]);
 
+  // Ring's OWN timeline, via the ring-timeline service — real event times, real spans, and
+  // directly playable URLs. Preferred over the selector for ring cameras because the selector
+  // has no event times at all (its blocks were plotted on fabricated 6-minute spacing) and
+  // yields nothing playable on the wired cameras. Null = service unreachable or this camera
+  // isn't one of its devices; the selector path below still covers that.
+  const [timeline, setTimeline] = useState<RingTimeline | null>(null);
+  const [timelineNonce, setTimelineNonce] = useState(0);
+  useEffect(() => {
+    if (!isRing) return;
+    let active = true;
+    const abort = new AbortController();
+    void (async () => {
+      try {
+        const devices = await fetchRingDevices(abort.signal);
+        const device = matchDevice(devices, camera.name, cameraName);
+        if (!device) throw new Error(`no ring-timeline device for ${camera.name}`);
+        const next = await fetchRingTimeline(
+          device.id,
+          cameraName,
+          window.start,
+          window.end,
+          abort.signal,
+        );
+        if (active) setTimeline(next);
+      } catch {
+        // Degrade to the ring-mqtt selector rather than showing an empty timeline.
+        if (active) setTimeline(null);
+      }
+    })();
+    return () => {
+      active = false;
+      abort.abort();
+    };
+  }, [isRing, camera.id, camera.name, cameraName, window.start, window.end, timelineNonce]);
+
+  // Ring signs its media URLs for ~15 minutes, so a timeline left open goes unplayable.
+  // Refetch a minute before the earliest expiry — cheap (the service caches) and keeps every
+  // block on screen watchable for as long as the player is open.
+  useEffect(() => {
+    if (!timeline?.expiresAtMs) return;
+    const delay = Math.max(5_000, timeline.expiresAtMs - Date.now() - 60_000);
+    const timer = setTimeout(() => setTimelineNonce((n) => n + 1), delay);
+    return () => clearTimeout(timer);
+  }, [timeline?.expiresAtMs]);
+
   // Only real recordings make the timeline (Ring-style: every block is watchable —
   // no history-derived "maybe" markers).
   const events = useMemo(() => {
     if (!isRing) return fetched.filter((e) => e.hasClip);
+    if (timeline) return timeline.events;
     return ringEventsFromSelect(ringSelect, cameraName, window.end);
-  }, [isRing, ringSelect, cameraName, window.end, fetched]);
+  }, [isRing, timeline, ringSelect, cameraName, window.end, fetched]);
 
   const isLive = playhead === "live";
   const headTime = isLive ? window.end : playhead;
@@ -161,8 +213,10 @@ export function CameraPlayer({
   // resolving / ready / failed — so a recording Ring can't produce (timeout,
   // rotated-out event, no Protect subscription) surfaces as an honest error with
   // a Retry, never a permanent "Loading…".
+  // Skipped entirely when the ring-timeline service answered: its events already carry a
+  // playable URL, so there is nothing to select, wait for, or fail at.
   useEffect(() => {
-    if (!isRing || isLive || !selected || !camera.eventSelectId) return;
+    if (!isRing || isLive || !selected || !camera.eventSelectId || timeline) return;
     const clipId = selected.id;
     // Already resolving/ready for this clip (e.g. scrub within its span, or a
     // scrub that left and re-entered it) — don't re-fire select_option/stream.
@@ -205,7 +259,7 @@ export function CameraPlayer({
     // selected is intentionally tracked by id only — its object identity changes
     // each render, but re-selecting the same event would re-trigger the stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRing, isLive, selected?.id, retryNonce, camera.eventSelectId, camera.eventStreamId]);
+  }, [isRing, isLive, selected?.id, retryNonce, camera.eventSelectId, camera.eventStreamId, timeline]);
 
   // Continuous (Frigate) VOD spans the WHOLE window and is built once — scrubbing seeks within it
   // (see `seekSeconds`) rather than rebuilding a new playlist per seek, which used to tear down and
@@ -214,17 +268,20 @@ export function CameraPlayer({
     selected && ringClip.status === "ready" && ringClip.clipId === selected.id
       ? ringClip
       : null;
+  // A ring-timeline event is playable the moment it's selected — its pre-signed URL came down
+  // with the timeline, so there's no per-clip round trip and no loading state at all.
+  const serviceUrl = timeline && selected ? (timeline.urls.get(selected.id) ?? null) : null;
   const recordingSrc = isLive
     ? null
     : isRing
-      ? (ringReady?.url ?? null)
+      ? (serviceUrl ?? ringReady?.url ?? null)
       : recordingUrlAt(cameraName, window.start, window.end);
   // In-media seek position: the continuous VOD seeks from the window start; a
   // ring clip seeks from ITS start (so scrubbing inside a clip previews live).
   const seekSeconds = isLive
     ? undefined
     : isRing
-      ? ringReady && selected
+      ? (serviceUrl || ringReady) && selected
         ? offsetInClipSeconds(selected, headTime)
         : undefined
       : vodPositionSeconds(headTime, window.start);
@@ -242,9 +299,19 @@ export function CameraPlayer({
     );
   }, []);
   // An HLS error after the URL resolved is a failure too (dead playlist, expired token).
+  // On the ring-timeline path the overwhelmingly likely cause is Ring's ~15-minute signature
+  // having expired, so refetch the timeline (fresh URLs) once per clip before calling it a
+  // failure — the once-per-clip guard is what stops a genuinely dead clip from looping.
+  const refetchedFor = useRef<string | null>(null);
   const onPlaybackError = useCallback(() => {
+    const clipId = selected?.id ?? null;
+    if (timeline && clipId && refetchedFor.current !== clipId) {
+      refetchedFor.current = clipId;
+      setTimelineNonce((n) => n + 1);
+      return;
+    }
     setRingClip((s) => (s.status === "ready" ? { status: "failed", clipId: s.clipId } : s));
-  }, []);
+  }, [timeline, selected?.id]);
 
   // Give the timeline the loaded clip's real span so chip width agrees with containment.
   const displayEvents = useMemo(
@@ -259,11 +326,15 @@ export function CameraPlayer({
     [events, loadedClip],
   );
 
+  // On the ring-timeline path there is no resolving step: an event on the timeline arrived with
+  // its URL, so if we somehow have no source for it that's a failure, never a spinner.
   const placeholderState: "resolving" | "failed" | "none" =
     isRing && selected
-      ? ringClip.status === "failed" && ringClip.clipId === selected.id
+      ? timeline
         ? "failed"
-        : "resolving"
+        : ringClip.status === "failed" && ringClip.clipId === selected.id
+          ? "failed"
+          : "resolving"
       : "none";
 
   return (
@@ -312,7 +383,13 @@ export function CameraPlayer({
         <ScrubbedPlaceholder
           snapshot={snapshotUrl(camera.snapshotEntity)}
           state={placeholderState}
-          onRetry={() => setRetryNonce((n) => n + 1)}
+          onRetry={() => {
+            // On the service path, retrying means fetching fresh signed URLs; on the
+            // selector path it means re-running the per-clip resolution.
+            refetchedFor.current = null;
+            if (timeline) setTimelineNonce((n) => n + 1);
+            else setRetryNonce((n) => n + 1);
+          }}
         />
       )}
 
