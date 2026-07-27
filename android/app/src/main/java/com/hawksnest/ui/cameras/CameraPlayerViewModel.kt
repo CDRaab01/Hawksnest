@@ -11,9 +11,13 @@ import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
 import com.hawksnest.core.logic.ringEventsFromOptions
+import com.hawksnest.core.logic.ringRecordingMissing
+import com.hawksnest.core.logic.ringRecordingUrl
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 /**
@@ -122,17 +126,23 @@ class CameraPlayerViewModel @Inject constructor(
     }
 
     /**
-     * Select which ring-mqtt event plays, then resolve the `_event` stream URL. The select is
-     * best-effort (a rotated-out option fails, but the event stream may still hold footage); a null
-     * or thrown stream resolution lands in [RingClipState.Failed] — an honest, retryable error
-     * instead of a stuck loader. Never throws (this runs in produceState's coroutine; an uncaught
-     * throw would crash the whole player).
+     * Select which ring-mqtt event plays, then resolve a playable URL for it. The select is
+     * best-effort (a rotated-out option fails, but a URL may still be published); a null or thrown
+     * resolution lands in [RingClipState.Failed] — an honest, retryable error instead of a stuck
+     * loader. Never throws (this runs in produceState's coroutine; an uncaught throw would crash the
+     * whole player). Mirrors the web `resolveRingClipUrl`.
      */
     suspend fun resolveRingClip(
         eventSelectId: String,
         option: String,
-        eventStreamId: String,
+        eventStreamId: String?,
     ): RingClipState = runCatching {
+        val before = entity(eventSelectId)
+        // Already the active option? Then its published URL is the answer as-is — re-selecting
+        // won't change it, so there is no "did it update yet" to wait for.
+        val alreadySelected = before?.state == option
+        val urlBefore = ringRecordingUrl(before)
+
         runCatching {
             connection.callService(
                 "select",
@@ -140,7 +150,14 @@ class CameraPlayerViewModel @Inject constructor(
                 ServiceData(entityId = eventSelectId, extra = mapOf("option" to option)),
             )
         }
-        val url = connection.streamUrl(eventStreamId)
+
+        // Legacy ring-mqtt (4.x): a real `camera.<base>_event` entity HA can stream. 5.x has none —
+        // the recording arrives as the selector's `recordingUrl` attribute instead.
+        val url = if (eventStreamId != null) {
+            connection.streamUrl(eventStreamId)
+        } else {
+            awaitRecordingUrl(eventSelectId, option, alreadySelected, urlBefore)
+        }
         if (url != null) RingClipState.Ready(option, url) else RingClipState.Failed(option)
     }.getOrElse { e ->
         // Cancellation must propagate (produceState relaunching on a key change),
@@ -148,4 +165,42 @@ class CameraPlayerViewModel @Inject constructor(
         if (e is kotlinx.coroutines.CancellationException) throw e
         RingClipState.Failed(option)
     }
+
+    /**
+     * Wait for the selector to report [option] **with a recording URL that belongs to it**.
+     * ring-mqtt publishes state and attributes together (it awaits the URL before publishing), but
+     * HA delivers them as two updates — requiring the URL to have changed keeps that window from
+     * playing the previous clip. On the deadline we take whatever is published for the current
+     * selection rather than failing outright: two options can map to the same Ring event
+     * (`Motion 1` / `Person 1`), in which case the URL legitimately never changes.
+     */
+    private suspend fun awaitRecordingUrl(
+        eventSelectId: String,
+        option: String,
+        alreadySelected: Boolean,
+        urlBefore: String?,
+    ): String? {
+        /** null = terminal failure, "" = keep waiting, else the playable URL. */
+        fun read(entities: Map<String, HassEntity>): String? {
+            val entity = entities[eventSelectId]
+            if (entity?.state != option) return ""
+            if (ringRecordingMissing(entity)) return null
+            val url = ringRecordingUrl(entity) ?: return ""
+            return if (alreadySelected || url != urlBefore) url else ""
+        }
+
+        val settled = withTimeoutOrNull(RING_CLIP_TIMEOUT_MS) {
+            connection.state.entities.map { read(it) }.first { it != "" }
+        }
+        // Both a terminal "no recording" and the deadline land here as null; re-reading what is
+        // published is correct for either — a sentinel yields null (failure), a URL plays.
+        return settled ?: ringRecordingUrl(entity(eventSelectId)?.takeIf { it.state == option })
+    }
 }
+
+/**
+ * How long ring-mqtt gets to publish the selected event's recording URL. It has to round-trip
+ * Ring's cloud (history lookup + a signed media URL, sometimes a transcode), which is slow but not
+ * minutes-slow. Mirrors the web `RING_CLIP_TIMEOUT_MS`.
+ */
+private const val RING_CLIP_TIMEOUT_MS = 20_000L

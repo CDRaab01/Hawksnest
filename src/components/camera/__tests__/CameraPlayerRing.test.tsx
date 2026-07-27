@@ -150,4 +150,50 @@ describe("CameraPlayer (ring recorded playback)", () => {
       await screen.findByText("Couldn't load this recording"),
     ).toBeInTheDocument();
   });
+
+  // ring-mqtt 5.x: no `camera.<base>_event` entity at all — the selected event's
+  // recording arrives as the selector's `recordingUrl` attribute. Before this was
+  // handled, every recorded clip sat on "Loading recording…" forever.
+  it("plays the recording ring-mqtt publishes on the selector (no _event entity)", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <CameraPlayer
+          camera={{ ...GATE, eventStreamId: null }}
+          cameras={[GATE]}
+          onSelectCamera={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    await seekToFirstClip(user);
+
+    expect(await screen.findByText("Loading recording…")).toBeInTheDocument();
+    await vi.waitFor(() =>
+      expect(callServiceMock).toHaveBeenCalledWith(
+        "select",
+        "select_option",
+        expect.objectContaining({ entity_id: "select.gate_event_select" }),
+      ),
+    );
+
+    // ring-mqtt answers: selection lands together with that event's recording.
+    const option = callServiceMock.mock.calls[0][2]?.option as string;
+    act(() =>
+      useEntityStore.setState({
+        entities: {
+          "select.gate_event_select": {
+            entity_id: "select.gate_event_select",
+            state: option,
+            // A plain mp4 URL keeps jsdom off the hls.js path.
+            attributes: { options: OPTIONS, recordingUrl: "https://ring.test/clip.mp4" },
+          } as HassEntity,
+        },
+      }),
+    );
+
+    expect(await screen.findByLabelText("Camera footage")).toBeInTheDocument();
+    expect(screen.queryByText("Loading recording…")).toBeNull();
+    // No `_event` camera to ask HA about — the URL came off the selector.
+    expect(eventStreamCalls()).toBe(0);
+  });
 });

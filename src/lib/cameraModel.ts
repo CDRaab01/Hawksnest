@@ -6,10 +6,12 @@ import { resolveName, type OverrideMap } from "./resolve";
  * One logical camera, independent of how the backend models it.
  *
  * **ring-mqtt** splits a single Ring camera across several HA entities —
- * `camera.<base>_live` (stream), `camera.<base>_snapshot` (still),
- * `camera.<base>_event` (recorded-event playback), `select.<base>_event_select`
- * (which of the last ~5 events to play), and `binary_sensor.<base>_motion`/
- * `_ding`. This collapses them into one camera so the wall shows one tile and the
+ * `camera.<base>_snapshot` (still), `select.<base>_event_select` (which of the
+ * last ~5 events to play, carrying that event's recording URL), and
+ * `binary_sensor.<base>_motion`/`_ding`. Older ring-mqtt also published
+ * `camera.<base>_live` (stream) and `camera.<base>_event` (recorded playback);
+ * 5.x drops both — live is go2rtc/WebRTC, recorded is the selector's
+ * `recordingUrl`. This collapses them into one camera so the wall shows one tile and the
  * player binds the right feed + events. Plain HA / Frigate cameras (a single
  * `camera.<x>`) map to a logical camera with no siblings — fully backward-compatible.
  */
@@ -21,7 +23,12 @@ export interface LogicalCamera {
   liveEntity: HassEntity;
   /** Entity for the still/snapshot tile (the `_snapshot` one, or the camera itself). */
   snapshotEntity: HassEntity;
-  /** ring-mqtt recorded-event playback stream entity (`camera.<base>_event`), if present. */
+  /**
+   * Recorded-event playback stream entity (`camera.<base>_event`), if present.
+   * ring-mqtt 4.x created one; 5.x does **not** — there, the selected event's
+   * recording arrives as the selector's `recordingUrl` attribute instead, so this
+   * is null on current deployments and recorded playback goes through that.
+   */
   eventStreamId: string | null;
   /** ring-mqtt event selector (`select.<base>_event_select`) — picks the event to play. */
   eventSelectId: string | null;
