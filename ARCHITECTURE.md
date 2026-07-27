@@ -102,6 +102,11 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   (`RetrySignal`) and fires one bounded `core/net/ReachabilityProbe` per cycle — see the offline
   invariant below and `core/logic/Offline.kt` (the pure model: grace window, countdown,
   "as of" formatting, mask).
+- `core/net/RingTimelineClient.kt` + `core/logic/RingTimeline.kt` — the `ring-timeline` service
+  (Ring's own recorded timeline), read through the SAME origin the app already talks to, so it
+  needs no new host, credential, or external surface. Ports the web `lib/ringTimeline.ts` 1:1,
+  including matching cameras to Ring devices by display name. Returns null on any failure —
+  the player falls back to the ring-mqtt selector rather than breaking the camera screen.
 - `core/logic/`, `core/automations/` — entity → domain-model mapping, automation surfaces.
   Includes the ring/ring-mqtt dedupe (`Dedupe.kt`, applied centrally at `HaSource`'s entity sink,
   mirroring the web) and the Devices sectioning model (`DeviceSections.kt`: per-room three-tier

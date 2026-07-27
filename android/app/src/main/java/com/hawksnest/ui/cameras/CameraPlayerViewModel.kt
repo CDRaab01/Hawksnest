@@ -11,8 +11,11 @@ import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
 import com.hawksnest.core.logic.ringEventsFromOptions
+import com.hawksnest.core.logic.RingTimeline
+import com.hawksnest.core.logic.matchDevice
 import com.hawksnest.core.logic.ringRecordingMissing
 import com.hawksnest.core.logic.ringRecordingUrl
+import com.hawksnest.core.net.RingTimelineClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -43,7 +46,27 @@ private const val CAMERA_FEATURE_STREAM = 2
 @HiltViewModel
 class CameraPlayerViewModel @Inject constructor(
     private val connection: ConnectionManager,
+    private val ringTimelineClient: RingTimelineClient,
 ) : ViewModel() {
+
+    /**
+     * Ring's OWN recorded timeline for a camera — real event times, real spans, and directly
+     * playable pre-signed URLs — or null when the ring-timeline service isn't reachable or this
+     * camera isn't one of its devices, in which case the player falls back to the ring-mqtt
+     * selector. Matched by DISPLAY NAME, not entity id: the ids froze at first discovery and have
+     * drifted from Ring since (HA's `camera.front_*` is Ring's "Front Driveway").
+     */
+    suspend fun ringTimeline(
+        displayName: String,
+        cameraName: String,
+        fromMs: Long,
+        toMs: Long,
+    ): RingTimeline? {
+        val baseUrl = baseUrl()
+        val devices = ringTimelineClient.devices(baseUrl) ?: return null
+        val device = matchDevice(devices, displayName, cameraName) ?: return null
+        return ringTimelineClient.timeline(baseUrl, device.id, cameraName, fromMs, toMs)
+    }
 
     suspend fun liveStreamUrl(entityId: String): String? = connection.streamUrl(entityId)
 
