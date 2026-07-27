@@ -56,9 +56,13 @@ export async function resolveRingClipUrl({
  * before publishing), but HA delivers them as two updates — requiring the URL to
  * have changed keeps the sub-millisecond window from playing the previous clip.
  *
- * On the deadline we take whatever is published for the current selection rather
- * than failing outright: two options can map to the same Ring event (`Motion 1` /
- * `Person 1`), in which case the URL legitimately never changes.
+ * The deadline **fails**; it never falls back to whatever is currently published.
+ * ring-mqtt silently leaves the old URL in place when its event lookup finds
+ * nothing new (common on the 24/7 cameras, whose footage is continuous rather than
+ * per-event), so "take what's there" would quietly play a *different* moment's
+ * clip. Failing is honest, and the Retry recovers the one case the fallback
+ * existed for — two options mapping to a single Ring event: by then the selection
+ * is already active, so the published URL is accepted directly.
  */
 function waitForRecordingUrl(
   selectId: string,
@@ -95,9 +99,6 @@ function waitForRecordingUrl(
       const next = read();
       if (next !== undefined) finish(next);
     });
-    const timer = setTimeout(() => {
-      const entity = useEntityStore.getState().entities[selectId];
-      finish(entity?.state === option ? ringRecordingUrl(entity) : null);
-    }, timeoutMs);
+    const timer = setTimeout(() => finish(null), timeoutMs);
   });
 }
