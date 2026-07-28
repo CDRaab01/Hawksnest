@@ -11,6 +11,7 @@ import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
 import com.hawksnest.core.logic.ringEventsFromOptions
+import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.matchDevice
 import com.hawksnest.core.logic.ringRecordingMissing
@@ -35,6 +36,17 @@ sealed interface RingClipState {
     data class Failed(val clipId: String) : RingClipState
 }
 
+/**
+ * What the ring-timeline service knows about one camera's recorded past: the discrete events and
+ * the 24/7 continuous track. Either half is null when the service couldn't answer for it; the
+ * player degrades each independently (no events → ring-mqtt selector, no footage → no lane).
+ */
+data class RingRecorded(val timeline: RingTimeline?, val footage: RingFootage?) {
+    companion object {
+        val NONE = RingRecorded(null, null)
+    }
+}
+
 /** Home Assistant `CameraEntityFeature.STREAM` bit (camera supports a live video stream). */
 private const val CAMERA_FEATURE_STREAM = 2
 
@@ -55,17 +67,26 @@ class CameraPlayerViewModel @Inject constructor(
      * camera isn't one of its devices, in which case the player falls back to the ring-mqtt
      * selector. Matched by DISPLAY NAME, not entity id: the ids froze at first discovery and have
      * drifted from Ring since (HA's `camera.front_*` is Ring's "Front Driveway").
+     *
+     * The 24/7 continuous track comes back in the same call because both need the same device
+     * lookup and both expire on the same ~15-minute signature clock — fetching them together keeps
+     * one refresh cycle instead of two that drift apart.
      */
-    suspend fun ringTimeline(
+    suspend fun ringRecorded(
         displayName: String,
         cameraName: String,
         fromMs: Long,
         toMs: Long,
-    ): RingTimeline? {
+    ): RingRecorded {
         val baseUrl = baseUrl()
-        val devices = ringTimelineClient.devices(baseUrl) ?: return null
-        val device = matchDevice(devices, displayName, cameraName) ?: return null
-        return ringTimelineClient.timeline(baseUrl, device.id, cameraName, fromMs, toMs)
+        val devices = ringTimelineClient.devices(baseUrl) ?: return RingRecorded.NONE
+        val device = matchDevice(devices, displayName, cameraName) ?: return RingRecorded.NONE
+        return RingRecorded(
+            timeline = ringTimelineClient.timeline(baseUrl, device.id, cameraName, fromMs, toMs),
+            // A camera with no 24/7 recording is the common case (battery cams, doorbell) and is
+            // not a failure — it just leaves the continuous lane empty.
+            footage = ringTimelineClient.footage(baseUrl, device.id, fromMs, toMs),
+        )
     }
 
     suspend fun liveStreamUrl(entityId: String): String? = connection.streamUrl(entityId)

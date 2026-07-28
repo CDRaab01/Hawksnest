@@ -4,10 +4,16 @@ import { fetchCameraEvents, recordingUrlAt } from "../../store/connection";
 import { resolveRingClipUrl } from "../../store/ringClip";
 import {
   fetchRingDevices,
+  fetchRingFootage,
   fetchRingTimeline,
   matchDevice,
   type RingTimeline,
 } from "../../lib/ringTimeline";
+import {
+  chooseRecordedSource,
+  footageSpans,
+  type RingFootage,
+} from "../../lib/ringFootage";
 import { useEntity } from "../../store/entityStore";
 import type { CameraEvent } from "../../lib/cameraEvents";
 import { vodPositionSeconds } from "../../lib/cameraEvents";
@@ -122,6 +128,9 @@ export function CameraPlayer({
   // yields nothing playable on the wired cameras. Null = service unreachable or this camera
   // isn't one of its devices; the selector path below still covers that.
   const [timeline, setTimeline] = useState<RingTimeline | null>(null);
+  // The 24/7 continuous track for the same window. Null = no track (battery cams, doorbell) or the
+  // service couldn't answer; either way there's simply no continuous lane and no continuous source.
+  const [footage, setFootage] = useState<RingFootage | null>(null);
   const [timelineNonce, setTimelineNonce] = useState(0);
   useEffect(() => {
     if (!isRing) return;
@@ -132,17 +141,23 @@ export function CameraPlayer({
         const devices = await fetchRingDevices(abort.signal);
         const device = matchDevice(devices, camera.name, cameraName);
         if (!device) throw new Error(`no ring-timeline device for ${camera.name}`);
-        const next = await fetchRingTimeline(
-          device.id,
-          cameraName,
-          window.start,
-          window.end,
-          abort.signal,
-        );
-        if (active) setTimeline(next);
+        // Both halves of the recorded past, from one device lookup and on one refresh cycle —
+        // they expire on the same ~15-minute signature clock. `allSettled`, not `all`: a camera
+        // with no 24/7 track (or a /footage that errors) must not cost us the event timeline.
+        const [t, f] = await Promise.allSettled([
+          fetchRingTimeline(device.id, cameraName, window.start, window.end, abort.signal),
+          fetchRingFootage(device.id, window.start, window.end, abort.signal),
+        ]);
+        if (!active) return;
+        if (t.status === "rejected") throw t.reason;
+        setTimeline(t.value);
+        setFootage(f.status === "fulfilled" && f.value.continuous ? f.value : null);
       } catch {
         // Degrade to the ring-mqtt selector rather than showing an empty timeline.
-        if (active) setTimeline(null);
+        if (active) {
+          setTimeline(null);
+          setFootage(null);
+        }
       }
     })();
     return () => {
@@ -153,13 +168,20 @@ export function CameraPlayer({
 
   // Ring signs its media URLs for ~15 minutes, so a timeline left open goes unplayable.
   // Refetch a minute before the earliest expiry — cheap (the service caches) and keeps every
-  // block on screen watchable for as long as the player is open.
+  // block on screen watchable for as long as the player is open. The continuous track's URLs are
+  // signed the same way, so whichever dies first drives the refresh for both.
+  const expiresAtMs = useMemo(() => {
+    const candidates = [timeline?.expiresAtMs, footage?.expiresAtMs].filter(
+      (v): v is number => typeof v === "number",
+    );
+    return candidates.length ? Math.min(...candidates) : null;
+  }, [timeline?.expiresAtMs, footage?.expiresAtMs]);
   useEffect(() => {
-    if (!timeline?.expiresAtMs) return;
-    const delay = Math.max(5_000, timeline.expiresAtMs - Date.now() - 60_000);
+    if (!expiresAtMs) return;
+    const delay = Math.max(5_000, expiresAtMs - Date.now() - 60_000);
     const timer = setTimeout(() => setTimelineNonce((n) => n + 1), delay);
     return () => clearTimeout(timer);
-  }, [timeline?.expiresAtMs]);
+  }, [expiresAtMs]);
 
   // Only real recordings make the timeline (Ring-style: every block is watchable —
   // no history-derived "maybe" markers).
@@ -268,22 +290,39 @@ export function CameraPlayer({
     selected && ringClip.status === "ready" && ringClip.clipId === selected.id
       ? ringClip
       : null;
-  // A ring-timeline event is playable the moment it's selected — its pre-signed URL came down
-  // with the timeline, so there's no per-clip round trip and no loading state at all.
-  const serviceUrl = timeline && selected ? (timeline.urls.get(selected.id) ?? null) : null;
+  // On the ring-timeline service path, ONE pure function decides which recorded source plays: the
+  // 24/7 continuous track when it covers this moment, else the event clip (both arrive with their
+  // URLs already signed, so neither has a round trip or a loading state). The ring-mqtt selector
+  // path has neither a urls map nor footage, so it keeps its own per-clip resolution above.
+  const recorded = useMemo(
+    () =>
+      isLive || !isRing || !timeline
+        ? null
+        : chooseRecordedSource({
+            headMs: headTime,
+            segments: footage?.segments ?? [],
+            events,
+            urls: timeline.urls,
+            loadedClipId: loadedClip?.id ?? null,
+            loadedDurationMs: loadedClip?.durationMs ?? null,
+          }),
+    [isLive, isRing, timeline, footage, events, headTime, loadedClip],
+  );
+  const playable = recorded?.kind === "footage" || recorded?.kind === "clip" ? recorded : null;
+
   const recordingSrc = isLive
     ? null
     : isRing
-      ? (serviceUrl ?? ringReady?.url ?? null)
+      ? (playable?.url ?? ringReady?.url ?? null)
       : recordingUrlAt(cameraName, window.start, window.end);
   // In-media seek position: the continuous VOD seeks from the window start; a
-  // ring clip seeks from ITS start (so scrubbing inside a clip previews live).
+  // ring clip (or a stitched footage segment) seeks from ITS start, so scrubbing
+  // inside it previews live.
   const seekSeconds = isLive
     ? undefined
     : isRing
-      ? (serviceUrl || ringReady) && selected
-        ? offsetInClipSeconds(selected, headTime)
-        : undefined
+      ? (playable?.seekSeconds ??
+        (ringReady && selected ? offsetInClipSeconds(selected, headTime) : undefined))
       : vodPositionSeconds(headTime, window.start);
 
   // Learn the loaded ring clip's real duration from the media, refining the
@@ -302,16 +341,19 @@ export function CameraPlayer({
   // On the ring-timeline path the overwhelmingly likely cause is Ring's ~15-minute signature
   // having expired, so refetch the timeline (fresh URLs) once per clip before calling it a
   // failure — the once-per-clip guard is what stops a genuinely dead clip from looping.
+  // Keyed by the *source* being played, not the event: on the continuous track the user can sit on
+  // one stitched segment for far longer than a signature lives, and that segment has no event id.
+  const sourceKey =
+    recorded?.kind === "footage" ? `footage:${recorded.segment.startMs}` : (selected?.id ?? null);
   const refetchedFor = useRef<string | null>(null);
   const onPlaybackError = useCallback(() => {
-    const clipId = selected?.id ?? null;
-    if (timeline && clipId && refetchedFor.current !== clipId) {
-      refetchedFor.current = clipId;
+    if (timeline && sourceKey && refetchedFor.current !== sourceKey) {
+      refetchedFor.current = sourceKey;
       setTimelineNonce((n) => n + 1);
       return;
     }
     setRingClip((s) => (s.status === "ready" ? { status: "failed", clipId: s.clipId } : s));
-  }, [timeline, selected?.id]);
+  }, [timeline, sourceKey]);
 
   // Give the timeline the loaded clip's real span so chip width agrees with containment.
   const displayEvents = useMemo(
@@ -327,15 +369,25 @@ export function CameraPlayer({
   );
 
   // On the ring-timeline path there is no resolving step: an event on the timeline arrived with
-  // its URL, so if we somehow have no source for it that's a failure, never a spinner.
-  const placeholderState: "resolving" | "failed" | "none" =
-    isRing && selected
-      ? timeline
-        ? "failed"
-        : ringClip.status === "failed" && ringClip.clipId === selected.id
+  // its URL, so if we somehow have no source for it that's a failure, never a spinner. A moment
+  // covered only by an end-to-end-encrypted segment is its own case — footage WAS recorded, this
+  // player just has no key for it, which is neither a failure to retry nor "nothing recorded".
+  const placeholderState: "resolving" | "failed" | "encrypted" | "none" = !isRing
+    ? "none"
+    : timeline
+      ? recorded?.kind === "encrypted"
+        ? "encrypted"
+        : selected
+          ? "failed"
+          : "none"
+      : selected
+        ? ringClip.status === "failed" && ringClip.clipId === selected.id
           ? "failed"
           : "resolving"
-      : "none";
+        : "none";
+
+  // The continuous track as drawable spans (coalesced so a stitch seam doesn't read as a gap).
+  const footageLane = useMemo(() => (footage ? footageSpans(footage.segments) : []), [footage]);
 
   return (
     <div className="space-y-md">
@@ -395,6 +447,7 @@ export function CameraPlayer({
 
       <Timeline24h
         events={displayEvents}
+        footage={footageLane}
         startMs={window.start}
         endMs={window.end}
         playhead={playhead}
@@ -430,7 +483,7 @@ function ScrubbedPlaceholder({
   onRetry,
 }: {
   snapshot: string | null;
-  state: "resolving" | "failed" | "none";
+  state: "resolving" | "failed" | "encrypted" | "none";
   onRetry?: () => void;
 }) {
   return (
@@ -452,7 +505,9 @@ function ScrubbedPlaceholder({
             ? "Loading recording…"
             : state === "failed"
               ? "Couldn't load this recording"
-              : "No saved recording for this moment"}
+              : state === "encrypted"
+                ? "This footage is end-to-end encrypted"
+                : "No saved recording for this moment"}
         </span>
         {state === "failed" && onRetry && (
           <button

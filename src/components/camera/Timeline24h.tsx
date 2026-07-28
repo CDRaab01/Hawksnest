@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CameraEvent } from "../../lib/cameraEvents";
+import type { FootageSpan } from "../../lib/ringFootage";
 import { clockTime } from "../../lib/relativeTime";
 import {
   HOUR_MS,
@@ -65,6 +66,7 @@ function dayHeader(ms: number): string {
  */
 export function Timeline24h({
   events,
+  footage = [],
   startMs,
   endMs,
   playhead,
@@ -73,6 +75,13 @@ export function Timeline24h({
   onLive,
 }: {
   events: CameraEvent[];
+  /**
+   * The 24/7 continuous track, as coalesced spans. Drawn as a low strip UNDER the event blocks:
+   * the events are the moments worth looking at, the strip is the answer to "was anything even
+   * recorded here?" — which, on a 24/7 camera, is yes across the whole day even where no event
+   * fired. Empty for the battery cameras and the doorbell, which record events only.
+   */
+  footage?: FootageSpan[];
   startMs: number;
   endMs: number;
   playhead: number | "live";
@@ -237,6 +246,31 @@ export function Timeline24h({
             );
           })}
 
+        {/* 24/7 continuous track — a low strip along the bottom, below the event blocks (which
+            keep their `bottom-2.5` inset, so the two never overlap). Translucent effort rather
+            than a second hue: it is the same material as the blocks, at lower emphasis. A span
+            that exists but can't be decoded (Ring end-to-end encryption) is drawn neutral, so
+            "recorded but unplayable" never masquerades as playable footage. */}
+        {vp &&
+          footage.map((span) => {
+            const left = timeToX(span.startMs, vp, width);
+            const w = Math.max(1, timeToX(span.endMs, vp, width) - left);
+            return (
+              <div
+                key={`${span.startMs}-${span.playable}`}
+                aria-hidden
+                style={{ left: `${left}px`, width: `${w}px` }}
+                className={[
+                  // `opacity-*`, not a `/45` color modifier: these tokens are `var()`-valued, and
+                  // Tailwind 3 can't apply an alpha to those — it silently drops it and the lane
+                  // would render at FULL effort, indistinguishable from the event blocks above it.
+                  "pointer-events-none absolute bottom-1 h-1.5 rounded-sm",
+                  span.playable ? "bg-effort opacity-40" : "bg-ink-faint opacity-50",
+                ].join(" ")}
+              />
+            );
+          })}
+
         {/* Recording blocks — solid effort-blue, tall like Ring's; every block is a
             playable clip. (All rendered; off-screen ones are clipped by overflow-hidden.) */}
         {vp &&
@@ -289,7 +323,12 @@ export function Timeline24h({
         <span className="caption-label text-ink-faint">
           {playhead === "live" ? "Live" : clockTime(scrubTime)}
         </span>
-        <span className="caption-label text-ink-faint">{events.length} moments</span>
+        <span className="caption-label text-ink-faint">
+          {events.length} moments
+          {/* Say when the gaps between those moments are still watchable — otherwise a day with
+              few events reads as a day with little footage. */}
+          {footage.length > 0 && " · 24/7"}
+        </span>
       </div>
     </div>
   );
