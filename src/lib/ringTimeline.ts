@@ -1,4 +1,5 @@
 import type { CameraEvent } from "./cameraEvents";
+import { parseRingFootage, type RingFootage } from "./ringFootage";
 
 /**
  * The `ring-timeline` service (sibling repo `hawksnest-automation`) — Ring's own recorded-footage
@@ -138,4 +139,25 @@ export async function fetchRingTimeline(
     expiresAtMs: expiries.length ? Math.min(...expiries) : null,
     truncated: Boolean(body.truncated),
   };
+}
+
+/**
+ * One camera's **24/7 continuous track** over `[fromMs, toMs]` — the footage that exists between
+ * the events. Rejects when the service is unreachable, exactly like {@link fetchRingTimeline}, so
+ * the caller degrades to the event-only timeline.
+ *
+ * A camera without 24/7 recording answers 200 with an empty list (`continuous: false`), which is a
+ * real answer and not an error — the player simply shows no lane for it.
+ */
+export async function fetchRingFootage(
+  deviceId: number,
+  fromMs: number,
+  toMs: number,
+  signal?: AbortSignal,
+): Promise<RingFootage> {
+  const body = await getJson(
+    `/footage?device_id=${deviceId}&from=${Math.round(fromMs)}&to=${Math.round(toMs)}`,
+    signal,
+  );
+  return parseRingFootage(body);
 }

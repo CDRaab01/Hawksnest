@@ -85,6 +85,24 @@ note over the snapshot. Rendered Ring-style — solid `effort`-blue blocks, a tr
 dim "Live" region right of now, a "TODAY" header (`Timeline24h`) — over the tested
 `timelineViewport` math.
 
+**The 24/7 continuous track is a second, separate source** (`/footage`, `lib/ringFootage.ts`,
+mirrored in `core/logic/RingFootage.kt`). `video_search` returns only discrete *events*, so before
+this a quiet 3–5 AM window read as "no recording" on the seven cameras that record all night. Ring
+stitches the window server-side, so the normal answer is ONE segment spanning the whole request —
+the same "one VOD, seek within it" shape the Frigate path uses. It is drawn as a low strip along
+the bottom of the timeline, under the event blocks, and marked `· 24/7` in the caption; the battery
+cameras and the doorbell have no such track and get no lane. **Which source plays is decided by one
+pure function** (`chooseRecordedSource`, ported 1:1 and tested on both platforms, so the platforms
+cannot drift on the behaviour users actually see): continuous footage wins wherever it covers the
+moment — one media source means scrubbing seeks instead of re-initialising the player per clip —
+and the event clip is the fallback in its gaps and on the event-only cameras. Ring can mark a span
+end-to-end encrypted; those stay in the model and draw neutral, and a moment covered *only* by one
+says "This footage is end-to-end encrypted" (not a failure, and not "nothing recorded"). Footage
+URLs are signed on the same ~15-minute clock as the event URLs, so both are fetched together and
+whichever expires first drives one shared refresh; the once-per-source error refetch is keyed by
+segment for the continuous track, since the user can sit on one segment longer than a signature
+lives.
+
 ## 2. Android app (`android/`, package `com.hawksnest`)
 
 Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Full guide:
@@ -102,11 +120,15 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   (`RetrySignal`) and fires one bounded `core/net/ReachabilityProbe` per cycle — see the offline
   invariant below and `core/logic/Offline.kt` (the pure model: grace window, countdown,
   "as of" formatting, mask).
-- `core/net/RingTimelineClient.kt` + `core/logic/RingTimeline.kt` — the `ring-timeline` service
-  (Ring's own recorded timeline), read through the SAME origin the app already talks to, so it
-  needs no new host, credential, or external surface. Ports the web `lib/ringTimeline.ts` 1:1,
-  including matching cameras to Ring devices by display name. Returns null on any failure —
-  the player falls back to the ring-mqtt selector rather than breaking the camera screen.
+- `core/net/RingTimelineClient.kt` + `core/logic/RingTimeline.kt` + `core/logic/RingFootage.kt` —
+  the `ring-timeline` service (Ring's own recorded timeline **and** its 24/7 continuous track),
+  read through the SAME origin the app already talks to, so it needs no new host, credential, or
+  external surface. Ports the web `lib/ringTimeline.ts` / `lib/ringFootage.ts` 1:1, including
+  matching cameras to Ring devices by display name and the shared `chooseRecordedSource` policy.
+  Both halves come back from one call (`CameraPlayerViewModel.ringRecorded`) because they need the
+  same device lookup and expire on the same clock. Returns null on any failure — the player falls
+  back to the ring-mqtt selector rather than breaking the camera screen; an empty footage list is
+  a real answer (event-only camera), not a failure.
 - `core/logic/`, `core/automations/` — entity → domain-model mapping, automation surfaces.
   Includes the ring/ring-mqtt dedupe (`Dedupe.kt`, applied centrally at `HaSource`'s entity sink,
   mirroring the web) and the Devices sectioning model (`DeviceSections.kt`: per-room three-tier

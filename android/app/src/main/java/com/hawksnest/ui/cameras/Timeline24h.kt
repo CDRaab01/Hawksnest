@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hawksnest.core.logic.HOUR_MS
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.FootageSpan
 import com.hawksnest.core.logic.TimeWindow
 import com.hawksnest.core.logic.Viewport
 import com.hawksnest.core.logic.pan
@@ -92,6 +93,13 @@ fun Timeline24h(
     playhead: Long?,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * The 24/7 continuous track, as coalesced spans. Drawn as a low strip UNDER the event blocks:
+     * the events are the moments worth looking at, the strip is the answer to "was anything even
+     * recorded here?" — which, on a 24/7 camera, is yes across the whole day even where no event
+     * fired. Empty for the battery cameras and the doorbell, which record events only.
+     */
+    footage: List<FootageSpan> = emptyList(),
     /** Streams the time under the playhead during an active drag (Compose delivers pointer events
      *  roughly per frame). Release always follows with onSeek/onLive. */
     onScrub: ((Long) -> Unit)? = null,
@@ -215,6 +223,29 @@ fun Timeline24h(
                 }
             }
 
+            // 24/7 continuous track — a low strip along the bottom, below the event blocks (whose
+            // band starts at 0.16h and ends at 0.84h, so the two never overlap). Translucent effort
+            // rather than a second hue: it is the same material as the blocks, at lower emphasis.
+            // A span that exists but can't be decoded (Ring end-to-end encryption) is drawn neutral,
+            // so "recorded but unplayable" never masquerades as playable footage.
+            val laneH = size.height * 0.09f
+            val laneTop = size.height - laneH - size.height * 0.05f
+            for (span in footage) {
+                val x1 = timeToX(span.startMs, v, wpx)
+                val w = (timeToX(span.endMs, v, wpx) - x1).coerceAtLeast(1f)
+                if (x1 + w < 0f || x1 > wpx) continue // off-screen
+                drawRoundRect(
+                    color = if (span.playable) {
+                        pulse.effort.copy(alpha = 0.40f)
+                    } else {
+                        Color.White.copy(alpha = 0.22f)
+                    },
+                    topLeft = Offset(x1, laneTop),
+                    size = Size(w, laneH),
+                    cornerRadius = CornerRadius(2f, 2f),
+                )
+            }
+
             // Recording blocks — solid effort-blue, tall like Ring's; every block is a playable clip.
             val blockTop = size.height * 0.16f
             val blockH = size.height * 0.68f
@@ -285,7 +316,9 @@ fun Timeline24h(
             )
             Spacer(Modifier.weight(1f))
             Text(
-                "${events.size} moments",
+                // Say when the gaps between those moments are still watchable — otherwise a day
+                // with few events reads as a day with little footage.
+                "${events.size} moments" + if (footage.isNotEmpty()) " · 24/7" else "",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

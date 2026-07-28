@@ -33,9 +33,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.RecordedSource
+import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
+import com.hawksnest.core.logic.chooseRecordedSource
 import com.hawksnest.core.logic.clipContaining
 import com.hawksnest.core.logic.clipSpanEndMs
+import com.hawksnest.core.logic.footageSpans
 import com.hawksnest.core.logic.offsetInClipMs
 import com.hawksnest.core.logic.vodPositionMs
 import com.hawksnest.ui.home.CameraUi
@@ -80,21 +84,31 @@ fun CameraPlayer(
     // The nonce refetches: Ring signs its URLs for ~15 minutes, so a timeline left open goes
     // unplayable.
     var timelineNonce by remember(cam.id) { mutableStateOf(0) }
-    // Which clip we've already spent our one expired-signature refetch on.
+    // Which source we've already spent our one expired-signature refetch on.
     var refetchedFor by remember(cam.id) { mutableStateOf<String?>(null) }
-    val timeline: RingTimeline? by produceState<RingTimeline?>(null, cam.id, timelineNonce) {
+    val recorded: RingRecorded by produceState(RingRecorded.NONE, cam.id, timelineNonce) {
         value = if (isRing) {
-            runCatching { viewModel.ringTimeline(cam.name, cameraName, startMs, endMs) }.getOrNull()
+            runCatching { viewModel.ringRecorded(cam.name, cameraName, startMs, endMs) }
+                .getOrDefault(RingRecorded.NONE)
         } else {
-            null
+            RingRecorded.NONE
         }
     }
-    LaunchedEffect(timeline?.expiresAtMs) {
-        val expiry = timeline?.expiresAtMs ?: return@LaunchedEffect
+    val timeline: RingTimeline? = recorded.timeline
+    // The 24/7 continuous track. Null (or empty) = no track — the battery cameras and the doorbell
+    // record events only — which is a real answer, not a failure: there is simply no lane.
+    val footage: RingFootage? = recorded.footage?.takeIf { it.continuous }
+    // Both halves are signed on the same ~15-minute clock, so whichever URL dies first drives the
+    // refresh for both.
+    val expiresAtMs = listOfNotNull(timeline?.expiresAtMs, footage?.expiresAtMs).minOrNull()
+    LaunchedEffect(expiresAtMs) {
+        val expiry = expiresAtMs ?: return@LaunchedEffect
         // Refetch a minute ahead of the earliest expiry so every block on screen stays watchable.
         delay((expiry - System.currentTimeMillis() - 60_000).coerceAtLeast(5_000))
         timelineNonce += 1
     }
+    // The continuous track as drawable spans (coalesced so a stitch seam doesn't read as a gap).
+    val footageLane = remember(footage) { footage?.let { footageSpans(it.segments) } ?: emptyList() }
 
     // Only real recordings make the timeline (Ring-style: every block is watchable) — Ring's own
     // events, ring's ~5 selector events, or Frigate/demo events that carry a clip.
@@ -203,21 +217,41 @@ fun CameraPlayer(
     // and could crash ExoPlayer on a backwards seek. A ring clip seeks from ITS start (so scrubbing
     // inside a clip previews live).
     val ringReady = (ringClip as? RingClipState.Ready)?.takeIf { it.clipId == selected?.id }
-    // A ring-timeline event is playable the moment it's selected � its pre-signed URL came down
-    // with the timeline, so there's no per-clip round trip and no loading state at all.
-    val serviceUrl = selected?.id?.let { timeline?.urls?.get(it) }
+    // On the ring-timeline service path, ONE pure function decides which recorded source plays: the
+    // 24/7 continuous track when it covers this moment, else the event clip (both arrive with their
+    // URLs already signed, so neither has a round trip or a loading state). The ring-mqtt selector
+    // path has neither a urls map nor footage, so it keeps its own per-clip resolution above.
+    val source = if (isLive || !isRing || timeline == null) {
+        null
+    } else {
+        chooseRecordedSource(
+            headMs = headTime,
+            segments = footage?.segments.orEmpty(),
+            events = events,
+            urls = timeline.urls,
+            loadedClipId = loadedClip?.first,
+            loadedDurationMs = loadedClip?.second,
+        )
+    }
+    val playable: Pair<String, Long>? = when (source) {
+        is RecordedSource.Footage -> source.url to source.seekToMs
+        is RecordedSource.Clip -> source.url to source.seekToMs
+        else -> null
+    }
+    // Keyed by the *source* being played, not the event: on the continuous track the user can sit
+    // on one stitched segment for far longer than a signature lives, and that segment has no event
+    // id to key on.
+    val sourceKey = (source as? RecordedSource.Footage)?.let { "footage:${it.segment.startMs}" }
+        ?: selected?.id
     val recordingUrl = when {
         isLive -> null
-        isRing -> serviceUrl ?: ringReady?.url
+        isRing -> playable?.first ?: ringReady?.url
         else -> viewModel.recordingUrl(cameraName, startMs, endMs)
     }
     val seekToMs = when {
         isLive -> null
-        isRing -> if ((serviceUrl != null || ringReady != null) && selected != null) {
-            offsetInClipMs(selected, headTime)
-        } else {
-            null
-        }
+        isRing -> playable?.second
+            ?: if (ringReady != null && selected != null) offsetInClipMs(selected, headTime) else null
         else -> vodPositionMs(headTime, startMs)
     }
 
@@ -286,11 +320,10 @@ fun CameraPlayer(
                         {
                             // On the ring-timeline path the overwhelmingly likely cause is Ring's
                             // ~15-minute signature having expired, so refetch (fresh URLs) once per
-                            // clip before calling it a failure � the guard stops a genuinely dead
+                            // source before calling it a failure — the guard stops a genuinely dead
                             // clip from looping.
-                            val clipId = selected?.id
-                            if (timeline != null && clipId != null && refetchedFor != clipId) {
-                                refetchedFor = clipId
+                            if (timeline != null && sourceKey != null && refetchedFor != sourceKey) {
+                                refetchedFor = sourceKey
                                 timelineNonce += 1
                             } else {
                                 (ringClip as? RingClipState.Ready)?.let { rc ->
@@ -308,6 +341,9 @@ fun CameraPlayer(
             !isLive -> ScrubbedPlaceholder(
                 snapshotUrl = cam.snapshotUrl,
                 state = when {
+                    // Footage WAS recorded here, this player just has no key for it — neither a
+                    // failure to retry nor "nothing recorded". Its own message.
+                    source is RecordedSource.Encrypted -> PlaceholderState.Encrypted
                     // On the ring-timeline path there is no resolving step: an event on the
                     // timeline arrived with its URL, so no source for it is a failure, not a spinner.
                     selected != null && timeline != null -> PlaceholderState.Failed
@@ -355,6 +391,7 @@ fun CameraPlayer(
             endMs = endMs,
             playhead = playhead,
             onSeek = ::seek,
+            footage = footageLane,
             onScrub = { ms ->
                 scrubbing = true
                 playhead = ms.coerceIn(startMs, endMs)
@@ -376,7 +413,7 @@ fun CameraPlayer(
 }
 
 /** What the scrubbed-placeholder frame should say (mirrors the web's placeholder states). */
-private enum class PlaceholderState { Resolving, Failed, None }
+private enum class PlaceholderState { Resolving, Failed, Encrypted, None }
 
 /**
  * The frame shown when the timeline is scrubbed to a moment with no footage on screen — the
@@ -404,6 +441,7 @@ private fun ScrubbedPlaceholder(
                 when (state) {
                     PlaceholderState.Resolving -> "Loading recording…"
                     PlaceholderState.Failed -> "Couldn't load this recording"
+                    PlaceholderState.Encrypted -> "This footage is end-to-end encrypted"
                     PlaceholderState.None -> "No saved recording for this moment"
                 },
                 style = MaterialTheme.typography.labelMedium,

@@ -1,8 +1,10 @@
 package com.hawksnest.core.net
 
 import com.hawksnest.core.logic.RingDevice
+import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.parseRingDevices
+import com.hawksnest.core.logic.parseRingFootage
 import com.hawksnest.core.logic.parseRingTimeline
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -68,6 +70,25 @@ class RingTimelineClient @Inject constructor(private val client: OkHttpClient) {
         val body = get(url) ?: return null
         return try {
             parseRingTimeline(json.parseToJsonElement(body) as? JsonObject ?: return null, cameraName)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * One camera's **24/7 continuous track** over `[fromMs, toMs]` — the footage that exists
+     * between the events — or null when the service isn't reachable.
+     *
+     * A camera without 24/7 recording answers 200 with an empty list, which parses to
+     * [RingFootage.EMPTY]: a real "no continuous track", distinct from the null that means the
+     * service is down. The player draws no lane for either, but only null falls back.
+     */
+    suspend fun footage(baseUrl: String, deviceId: Long, fromMs: Long, toMs: Long): RingFootage? {
+        if (baseUrl.isBlank()) return null
+        val url = "${base(baseUrl)}/footage?device_id=$deviceId&from=$fromMs&to=$toMs"
+        val body = get(url) ?: return null
+        return try {
+            parseRingFootage(json.parseToJsonElement(body) as? JsonObject ?: return null)
         } catch (_: Exception) {
             null
         }

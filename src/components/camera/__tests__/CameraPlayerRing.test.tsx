@@ -77,7 +77,8 @@ beforeEach(() => {
 });
 
 function renderPlayer() {
-  render(
+  // Returned so a test can unmount and re-render against a different service response.
+  return render(
     <MemoryRouter>
       <CameraPlayer camera={GATE} cameras={[GATE]} onSelectCamera={vi.fn()} />
     </MemoryRouter>,
@@ -234,7 +235,7 @@ describe("CameraPlayer (ring-timeline service)", () => {
   });
 
   // The whole point of the service: the event arrives WITH its playable URL, so scrubbing to a
-  // recording plays it � no select_option, no waiting on ring-mqtt, no "Loading recording�".
+  // recording plays it — no select_option, no waiting on ring-mqtt, no "Loading recording…".
   it("plays a recording immediately, without touching the ring-mqtt selector", async () => {
     const user = userEvent.setup();
     renderPlayer();
@@ -243,8 +244,113 @@ describe("CameraPlayer (ring-timeline service)", () => {
     await user.click(screen.getAllByRole("button", { name: /at / })[0]);
 
     expect(await screen.findByLabelText("Camera footage")).toBeInTheDocument();
-    expect(screen.queryByText("Loading recording�")).toBeNull();
+    // (The ellipsis here had been mangled to a replacement character, which made this assertion
+    // unable to match the real string and therefore unable to fail. Restored.)
+    expect(screen.queryByText("Loading recording…")).toBeNull();
     expect(callServiceMock).not.toHaveBeenCalled();
     expect(eventStreamCalls()).toBe(0);
+  });
+});
+
+/**
+ * The 24/7 continuous track (`/footage`). `/timeline` only ever returns discrete events, so before
+ * this the quiet stretches between them were unwatchable — the timeline said "No saved recording
+ * for this moment" at 4 AM on a camera that had been recording all night.
+ */
+describe("CameraPlayer (24/7 continuous footage)", () => {
+  const DEVICE = { id: 42, name: "Gate", slug: "gate" };
+  const RECORDING = {
+    id: "7667005335319651402",
+    startMs: NOW - 3600_000,
+    endMs: NOW - 3600_000 + 37_000,
+    durationSec: 37,
+    kind: "motion",
+    person: true,
+    url: "https://ring.test/clip.mp4",
+    urlExpiresAtMs: NOW + 900_000,
+    thumbnailUrl: null,
+  };
+  /** Ring stitches server-side: one segment covering the whole requested window. */
+  const stitched = (over: Record<string, unknown> = {}) => ({
+    startMs: NOW - 24 * 3600_000,
+    endMs: NOW,
+    url: "https://ring.test/footage.mp4",
+    urlExpiresAtMs: NOW + 900_000,
+    encrypted: false,
+    chunked: true,
+    dingId: null,
+    ...over,
+  });
+
+  function serve(segments: unknown[]) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        const path = String(input);
+        return {
+          ok: true,
+          status: 200,
+          json: async () =>
+            path.includes("/cameras")
+              ? [DEVICE]
+              : path.includes("/footage")
+                ? { segments, continuous: segments.length > 0, truncated: false }
+                : { events: [RECORDING], truncated: false },
+        };
+      }),
+    );
+  }
+
+  /** Tap the track left of centre → a quiet moment ~3.2h ago, well clear of the single event. */
+  async function tapQuietMoment(user: ReturnType<typeof userEvent.setup>) {
+    await screen.findByText(/1 moments/);
+    const track = screen.getByRole("slider");
+    await user.pointer([{ target: track, coords: { clientX: 100, clientY: 10 }, keys: "[MouseLeft]" }]);
+  }
+
+  it("plays the continuous track at a moment no event covers", async () => {
+    const user = userEvent.setup();
+    serve([stitched()]);
+    renderPlayer();
+    await tapQuietMoment(user);
+
+    expect(await screen.findByLabelText("Camera footage")).toBeInTheDocument();
+    expect(screen.queryByText("No saved recording for this moment")).toBeNull();
+    // Nothing to resolve: the segment came down with its own signed URL.
+    expect(callServiceMock).not.toHaveBeenCalled();
+  });
+
+  it("marks the timeline as 24/7 only when a continuous track exists", async () => {
+    serve([stitched()]);
+    const { unmount } = renderPlayer();
+    expect(await screen.findByText(/1 moments · 24\/7/)).toBeInTheDocument();
+    unmount();
+
+    // A battery camera / the doorbell: events only, so no lane and no 24/7 marker.
+    serve([]);
+    renderPlayer();
+    expect(await screen.findByText("1 moments")).toBeInTheDocument();
+    expect(screen.queryByText(/24\/7/)).toBeNull();
+  });
+
+  it("says so when the only footage there is end-to-end encrypted", async () => {
+    const user = userEvent.setup();
+    // Real coverage this player has no key for — not a failure to retry, and NOT the same thing
+    // as nothing having been recorded.
+    serve([stitched({ encrypted: true })]);
+    renderPlayer();
+    await tapQuietMoment(user);
+
+    expect(await screen.findByText("This footage is end-to-end encrypted")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("still reports an honest gap when the camera has no footage for that moment", async () => {
+    const user = userEvent.setup();
+    serve([stitched({ startMs: NOW - 30 * 60_000, endMs: NOW })]);
+    renderPlayer();
+    await tapQuietMoment(user);
+
+    expect(await screen.findByText("No saved recording for this moment")).toBeInTheDocument();
   });
 });
