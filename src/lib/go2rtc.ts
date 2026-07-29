@@ -35,10 +35,20 @@ export function reportGo2rtcMedia(ok: boolean): void {
   mediaHealthy = ok;
 }
 
-/** Kick off (and cache) the stream-list fetch; safe to call repeatedly. */
-export function primeGo2rtcStreams(): void {
+/** Whether the stream list has been fetched at least once this session. */
+export function go2rtcStreamsKnown(): boolean {
+  return streamsCache !== null;
+}
+
+/**
+ * Kick off (and cache) the stream-list fetch; safe to call repeatedly. Resolves
+ * once the cache is populated, so a caller can wait for an accurate answer from
+ * `go2rtcMaybeAvailable` instead of acting on its optimistic default.
+ */
+export function primeGo2rtcStreams(): Promise<void> {
   const fresh = Date.now() - streamsFetchedAt < STREAMS_TTL_MS;
-  if (streamsInFlight || (streamsCache && fresh)) return;
+  if (streamsInFlight) return streamsInFlight.then(() => undefined);
+  if (streamsCache && fresh) return Promise.resolve();
   streamsInFlight = fetch("/go2rtc/api/streams", { cache: "no-store" })
     .then((r) => (r.ok ? r.json() : {}))
     .then((json: Record<string, unknown>) => new Set(Object.keys(json ?? {})))
@@ -49,6 +59,7 @@ export function primeGo2rtcStreams(): void {
       streamsInFlight = null;
       return set;
     });
+  return streamsInFlight.then(() => undefined);
 }
 
 /**

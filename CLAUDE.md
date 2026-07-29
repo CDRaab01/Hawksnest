@@ -57,7 +57,12 @@ This file adds the things that are easy to get wrong and the suite context.
   timeline — real event times + pre-signed mp4 URLs — because HA has neither. Its URLs expire in
   ~15 min, so the timeline is refetched, never held. The ring-mqtt selector path is the fallback
   when that service is down, and it is: last ~5 Ring events via the event-selector entity, not
-  continuous VOD (Frigate support exists for that, unused). **ring-mqtt 5.x has no
+  continuous VOD. **Ring is no longer the only recorded backend** — a camera's NVR is derived per
+  render (`lib/recordedBackend.ts`: `"ring" | "frigate" | "none"`) and Frigate serves a continuous
+  VOD for cameras it records. Frigate is not deployed yet and `lib/frigate.ts` fails closed, so
+  today every camera resolves exactly as before. **Android is not ported yet** — `CameraPlayer.kt`
+  still gates on its own `isRing`, so the platforms are knowingly out of lockstep until that lands
+  (`core/logic/RecordedBackend.kt` is the 1:1 target). **ring-mqtt 5.x has no
   `camera.<base>_event` entity**: selecting an option makes it fetch Ring's signed cloud recording and publish it as the
   selector's `recordingUrl` attribute, which is what the players load (`src/store/ringClip.ts` /
   `CameraPlayerViewModel.resolveRingClip`). Assuming the 4.x `_event` camera is what pinned every

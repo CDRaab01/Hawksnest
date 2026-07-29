@@ -14,6 +14,8 @@ import {
   footageSpans,
   type RingFootage,
 } from "../../lib/ringFootage";
+import { frigateHasCamera, primeFrigateCameras } from "../../lib/frigate";
+import { hasRealRecordings, recordedBackendOf } from "../../lib/recordedBackend";
 import { useEntity } from "../../store/entityStore";
 import type { CameraEvent } from "../../lib/cameraEvents";
 import { vodPositionSeconds } from "../../lib/cameraEvents";
@@ -75,7 +77,32 @@ export function CameraPlayer({
   onSelectCamera: (camera: LogicalCamera) => void;
 }) {
   const cameraName = cameraNameOf(camera);
-  const isRing = camera.eventSelectId !== null;
+
+  // Frigate membership is only known after a config fetch, so prime it once and
+  // re-derive on the result. Fails closed (see `frigate.ts`): until it lands, and
+  // forever if there's no Frigate, every camera reads exactly as it did before.
+  const [frigateNonce, setFrigateNonce] = useState(0);
+  useEffect(() => {
+    let active = true;
+    void primeFrigateCameras().then(() => active && setFrigateNonce((n) => n + 1));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const backend = useMemo(
+    () =>
+      recordedBackendOf({
+        hasRingSelector: camera.eventSelectId !== null,
+        hasFrigateCamera: frigateHasCamera(cameraName),
+      }),
+    // frigateNonce is the re-derive trigger: `frigateHasCamera` reads a module cache.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [camera.eventSelectId, cameraName, frigateNonce],
+  );
+  // Ring keeps its own name because the paths below are Ring-specific mechanics
+  // (selector resolution, ring-timeline signatures), not "has recordings".
+  const isRing = backend === "ring";
   const ringSelect = useEntity(camera.eventSelectId ?? "");
 
   const [window] = useState(() => {
@@ -310,11 +337,22 @@ export function CameraPlayer({
   );
   const playable = recorded?.kind === "footage" || recorded?.kind === "clip" ? recorded : null;
 
+  // The continuous VOD URL for a non-Ring backend. `recordingUrlAt` ALWAYS returns
+  // a URL — it just formats the window into a path, it doesn't know whether Frigate
+  // kept anything for that span — so a scrub into a gap would otherwise mount a
+  // playlist that 404s and sit there dead. `vodFailed` records the src that failed
+  // so the placeholder can take over; it's keyed by src, not a flag, so changing
+  // camera or window re-arms it automatically.
+  const [vodFailed, setVodFailed] = useState<string | null>(null);
+  const vodSrc = isLive || isRing ? null : recordingUrlAt(cameraName, window.start, window.end);
+
   const recordingSrc = isLive
     ? null
     : isRing
       ? (playable?.url ?? ringReady?.url ?? null)
-      : recordingUrlAt(cameraName, window.start, window.end);
+      : vodSrc === vodFailed
+        ? null
+        : vodSrc;
   // In-media seek position: the continuous VOD seeks from the window start; a
   // ring clip (or a stitched footage segment) seeks from ITS start, so scrubbing
   // inside it previews live.
@@ -347,13 +385,20 @@ export function CameraPlayer({
     recorded?.kind === "footage" ? `footage:${recorded.segment.startMs}` : (selected?.id ?? null);
   const refetchedFor = useRef<string | null>(null);
   const onPlaybackError = useCallback(() => {
+    // Non-Ring (Frigate) has no signed URL to refresh and no per-clip state to
+    // fail — the whole-window VOD either plays or it doesn't. Record which src
+    // died so the placeholder replaces the dead player, with a Retry.
+    if (!isRing) {
+      if (vodSrc) setVodFailed(vodSrc);
+      return;
+    }
     if (timeline && sourceKey && refetchedFor.current !== sourceKey) {
       refetchedFor.current = sourceKey;
       setTimelineNonce((n) => n + 1);
       return;
     }
     setRingClip((s) => (s.status === "ready" ? { status: "failed", clipId: s.clipId } : s));
-  }, [timeline, sourceKey]);
+  }, [isRing, vodSrc, timeline, sourceKey]);
 
   // Give the timeline the loaded clip's real span so chip width agrees with containment.
   const displayEvents = useMemo(
@@ -373,7 +418,13 @@ export function CameraPlayer({
   // covered only by an end-to-end-encrypted segment is its own case — footage WAS recorded, this
   // player just has no key for it, which is neither a failure to retry nor "nothing recorded".
   const placeholderState: "resolving" | "failed" | "encrypted" | "none" = !isRing
-    ? "none"
+    ? // Frigate: a whole-window VOD that won't play is a failure worth retrying,
+      // not "nothing was recorded" — the window is 24h and Frigate is recording
+      // continuously, so a total miss is far more likely a transient fetch than a
+      // genuinely empty day. Demo/no-NVR never gets here (its src always plays).
+      backend === "frigate" && vodFailed
+      ? "failed"
+      : "none"
     : timeline
       ? recorded?.kind === "encrypted"
         ? "encrypted"
@@ -416,16 +467,24 @@ export function CameraPlayer({
       {isLive ? (
         <LivePlayer
           entity={camera.liveEntity}
-          go2rtcSrc={isRing ? cameraName : undefined}
+          // Unconditional: go2rtc serves whatever streams it's configured for, and
+          // that is no longer "Ring cameras only" — the Reolink main stream is one.
+          // `go2rtcMaybeAvailable` already declines unknown streams off the fetched
+          // stream list, so the gate belongs there, not in a per-backend guess here.
+          go2rtcSrc={cameraName}
         />
       ) : recordingSrc ? (
         <HlsPlayer
           src={recordingSrc}
           paused={paused}
-          loop={!isRing}
+          // Only the demo/no-NVR source loops — it hands back the same bundled clip
+          // for every seek. A real recording is finite and must end where it ends.
+          loop={!hasRealRecordings(backend)}
           seekSeconds={seekSeconds}
+          // Duration-learning is a Ring mechanic: it refines an open-ended
+          // (`endMs: null`) selector event's span. Frigate events carry real ends.
           onDuration={isRing ? onDuration : undefined}
-          onError={isRing ? onPlaybackError : undefined}
+          onError={hasRealRecordings(backend) ? onPlaybackError : undefined}
         />
       ) : (
         // Scrubbed to a past moment with no footage on screen: a clip is
@@ -437,9 +496,11 @@ export function CameraPlayer({
           state={placeholderState}
           onRetry={() => {
             // On the service path, retrying means fetching fresh signed URLs; on the
-            // selector path it means re-running the per-clip resolution.
+            // selector path it means re-running the per-clip resolution; on Frigate
+            // it means re-arming the same VOD src so the player remounts it.
             refetchedFor.current = null;
-            if (timeline) setTimelineNonce((n) => n + 1);
+            if (!isRing) setVodFailed(null);
+            else if (timeline) setTimelineNonce((n) => n + 1);
             else setRetryNonce((n) => n + 1);
           }}
         />
