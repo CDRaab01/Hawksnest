@@ -74,6 +74,30 @@ just today's behaviour. Derived per render rather than stored on `LogicalCamera`
 `cameraModel.ts` stays synchronous. Android's `CameraPlayer.kt` derives the same three-way backend
 (2026-07-30, closing the known lockstep gap where it still read the raw `eventSelectId` boolean).
 
+**Camera movement (PTZ/zoom/focus, both platforms, 2026-07-30):** Hawksnest drives the lens
+through Home Assistant's **official Reolink integration** — `button.<slug>_ptz_{up,down,left,
+right,stop}`, `number.<slug>_{zoom,focus}`, `switch.<slug>_auto_focus`, optional
+`select.<slug>_ptz_preset` — never by talking to the camera directly. The integration owns the
+camera's API session and serialises commands; the app only presses buttons and sets numbers
+(`servers enforce, clients present`), and needs no new network path since it all rides the
+existing WS `call_service`.
+
+**The entity ids are discovered, not derived** (`lib/cameraPtz.ts` ↔ `core/logic/CameraPtz.kt`).
+`button.${cameraBase}_ptz_up` is wrong here and fails *silently*: the stairway's Frigate entity
+is `camera.first_floor_stairway` while its Reolink device is `stairway`. So candidate slugs are
+read out of the entity ids that exist and matched to the camera — exact wins, else one slug must
+be the other's trailing whole segments; ambiguous matches and half-present sets (a pad that can
+move but not stop) resolve to **null**, and an `aliases` map pins anything a heuristic shouldn't
+decide. Capability is per-entity, so an E1 Zoom gets pad+zoom+focus and an E1 Pro gets the pad
+alone without the app knowing the model.
+
+The pad presses on touch-down and sends `ptz_stop` on release — correct whether a press moves
+continuously or one step (unverified; it physically re-aims a recording camera, so it is a
+smoke-test item). **The camera must never be left moving** is the invariant the tests pin:
+stop fires on release, cancel, unmount, and app-background/tab-hide, and a second direction is
+ignored while one is in flight. No speed control — the hardware reports `supportPtzSpeed:
+permit 0`.
+
 **Player chrome (both platforms, 2026-07-30):** a mute toggle (`MuteButton` — every tier mounts
 muted for autoplay policy; the toggle flips the element/AudioTrack live, and on Android gates the
 WebRTC `AudioTrack` that org.webrtc would otherwise auto-play), snapshot-to-file

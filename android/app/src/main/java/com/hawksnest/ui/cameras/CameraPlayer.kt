@@ -217,6 +217,13 @@ fun CameraPlayer(
     // straight off the camera, which is exactly what a user on weak cellular is
     // trying to escape.
     var qualityLow by remember { mutableStateOf(false) }
+
+    // Movement controls, if this camera has any. Resolved from the entity ids that
+    // exist rather than derived from the camera name — see core/logic/CameraPtz.kt
+    // (the stairway's Reolink device is named differently from its Frigate camera).
+    val ptz by remember(cameraName) { viewModel.ptzControls(cameraName) }
+        .collectAsState(initial = null)
+    var showPtz by remember(cam.id) { mutableStateOf(false) }
     val subAvailable: Boolean by produceState(false, cam.id) {
         value = runCatching { viewModel.canGo2rtc("${cameraName}_sub") }.getOrDefault(false)
     }
@@ -386,6 +393,10 @@ fun CameraPlayer(
         Row(verticalAlignment = Alignment.CenterVertically) {
             CameraSwitcher(cameras = cameras, current = cam, onSelect = onSelectCamera)
             Spacer(Modifier.weight(1f))
+            if (isLive && ptz != null) {
+                MoveButton(active = showPtz, onToggle = { showPtz = !showPtz })
+                Spacer(Modifier.size(8.dp))
+            }
             if (isLive && subAvailable) {
                 QualityToggle(low = qualityLow, onChange = { qualityLow = it })
                 Spacer(Modifier.size(8.dp))
@@ -533,6 +544,11 @@ fun CameraPlayer(
             )
             else -> RefreshingSnapshot(url = cam.snapshotUrl, modifier = frame)
         }
+
+        // Live only: moving the lens while watching recorded footage would re-aim
+        // the camera with no visible feedback. Leaving composition is also what
+        // guarantees an in-flight move is stopped (see PtzPad).
+        ptz?.takeIf { isLive && showPtz }?.let { PtzPanel(it, viewModel) }
 
         Timeline24h(
             events = displayEvents,
