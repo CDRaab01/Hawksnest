@@ -77,6 +77,20 @@ the window alone, so it exists whether or not Frigate kept anything — a scrub 
 playlist that 404s, and the player tracks the failed src (`vodFailed`) to swap in the placeholder
 with a Retry rather than sit dead. Replacing that with real gap knowledge means normalizing
 Frigate's `/recordings` into the `ringFootage.ts` segment shape; not done yet.
+
+**Frigate VOD URLs must be signed, and the signature has to reach the segments.**
+frigate-hass-integration validates an `authSig` query parameter on every VOD *segment* request
+(`VodSegmentProxyView`) — unconditionally, and a Bearer token does not satisfy it. Playlists are
+exempt, so an unsigned URL produces the worst possible symptom: `master.m3u8` and `index-*.m3u8`
+both load, every `.m4s` 401s, and the player shows a black frame with no error. Android obtains
+the signature via `auth/sign_path` over the existing websocket
+(`Source.signedRecordingUrlAt` → `HaSource`), which also removes any need for an `Authorization`
+header on media requests — a signed URL authenticates on its own. Because players resolve segment
+URIs *relative* to the manifest and drop the query string, `VideoPlayer.kt` wraps the
+`DataSource.Factory` to re-attach `authSig` to every request. One signature covers the whole
+window (the integration checks it as a path prefix), but it is scoped to that `start/end`, so a
+new scrub window re-signs. **Web has the same gap and is not fixed** — `HlsPlayer` would need the
+equivalent via hls.js `xhrSetup`, and native HLS (Safari/iOS) has no such hook at all.
 The **timeline shows only playable recordings**
 (Ring-style: every block is watchable) — the selector's ~5 on ring, clip-bearing events on
 Frigate/demo; no history-derived markers. Scrubbing is **live**: `Timeline24h` streams the time

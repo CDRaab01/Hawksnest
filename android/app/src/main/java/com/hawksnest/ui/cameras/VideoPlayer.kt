@@ -16,8 +16,12 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.RawResourceDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.hawksnest.R
 import com.hawksnest.core.logic.DEMO_CLIP_URI
@@ -57,8 +61,24 @@ fun VideoPlayer(
     // live stream (that would stop it looping). Only real HLS URLs get live-edge handling.
     val liveStream = live && url != DEMO_CLIP_URI
 
-    val player = remember {
-        ExoPlayer.Builder(context).build().apply { volume = 0f }
+    // Carry the manifest's `authSig` onto every derived request.
+    //
+    // frigate-hass-integration rejects VOD *segment* requests without an `authSig` query param,
+    // and both ExoPlayer and hls.js resolve segment URLs RELATIVE to the manifest — which drops
+    // the query string. So a signed manifest loads, and then every `.m4s` 401s: a black video
+    // with no error. This re-attaches the parameter to any request that lacks it.
+    //
+    // Keyed on the signature so switching cameras/windows rebuilds the player with the right one.
+    val authSig = remember(url) { Uri.parse(url).getQueryParameter(AUTH_SIG_PARAM) }
+    val player = remember(authSig) {
+        val builder = ExoPlayer.Builder(context)
+        if (authSig != null) {
+            val http = DefaultHttpDataSource.Factory()
+            builder.setMediaSourceFactory(
+                DefaultMediaSourceFactory(AuthSigDataSourceFactory(http, authSig)),
+            )
+        }
+        builder.build().apply { volume = 0f }
     }
 
     DisposableEffect(Unit) {
@@ -132,4 +152,46 @@ fun VideoPlayer(
             }
         },
     )
+}
+
+/** Query parameter frigate-hass-integration requires on every VOD segment request. */
+private const val AUTH_SIG_PARAM = "authSig"
+
+/**
+ * Wraps a [DataSource.Factory] so every request carries the manifest's `authSig`.
+ *
+ * Needed because ExoPlayer resolves HLS segment URIs relative to the manifest, which discards the
+ * query string — so a correctly signed manifest still yields unsigned, 401ing segment requests.
+ * One signature covers the whole window (the integration checks it as a path *prefix*), so this
+ * simply re-attaches the same value rather than signing anything itself.
+ *
+ * Requests that already carry the parameter are passed through untouched, so this is safe to apply
+ * to every request the player makes rather than trying to guess which ones are segments.
+ */
+@UnstableApi
+private class AuthSigDataSourceFactory(
+    private val delegate: DataSource.Factory,
+    private val authSig: String,
+) : DataSource.Factory {
+    override fun createDataSource(): DataSource =
+        AuthSigDataSource(delegate.createDataSource(), authSig)
+}
+
+/**
+ * Delegates everything to [inner] except [open], where it re-attaches `authSig` to the URI.
+ *
+ * `by inner` keeps this forward-compatible: media3's `DataSource` grows methods between versions,
+ * and delegation means new ones pass through instead of failing to compile or silently no-oping.
+ */
+@UnstableApi
+private class AuthSigDataSource(
+    private val inner: DataSource,
+    private val authSig: String,
+) : DataSource by inner {
+    override fun open(dataSpec: DataSpec): Long {
+        val uri = dataSpec.uri
+        if (uri.getQueryParameter(AUTH_SIG_PARAM) != null) return inner.open(dataSpec)
+        val signed = uri.buildUpon().appendQueryParameter(AUTH_SIG_PARAM, authSig).build()
+        return inner.open(dataSpec.buildUpon().setUri(signed).build())
+    }
 }

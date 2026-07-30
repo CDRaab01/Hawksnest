@@ -243,10 +243,20 @@ fun CameraPlayer(
     // id to key on.
     val sourceKey = (source as? RecordedSource.Footage)?.let { "footage:${it.segment.startMs}" }
         ?: selected?.id
+    // Frigate VOD must be SIGNED or every segment 401s and the video is silently black — see
+    // Source.signedRecordingUrlAt. Signing is a websocket round trip, so it resolves in an effect
+    // rather than during composition. Keyed on the window because a signature only authorises the
+    // path prefix it was minted for: a new start/end needs a new one.
+    val signedVodUrl by produceState<String?>(initialValue = null, cameraName, startMs, endMs, isLive, isRing) {
+        value = if (isLive || isRing) null
+        else viewModel.signedRecordingUrl(cameraName, startMs, endMs)
+    }
     val recordingUrl = when {
         isLive -> null
         isRing -> playable?.first ?: ringReady?.url
-        else -> viewModel.recordingUrl(cameraName, startMs, endMs)
+        // Null until signing returns; the player simply has nothing to load for that moment,
+        // which is the same state it is in while a Ring clip URL resolves.
+        else -> signedVodUrl
     }
     val seekToMs = when {
         isLive -> null

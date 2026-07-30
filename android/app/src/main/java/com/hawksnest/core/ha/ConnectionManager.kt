@@ -134,6 +134,10 @@ class ConnectionManager @Inject constructor(
     fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String? =
         current?.recordingUrlAt(camera, startMs, endMs)
 
+    /** As [recordingUrlAt], but signed where the backend requires it (see [Source.signedRecordingUrlAt]). */
+    suspend fun signedRecordingUrlAt(camera: String, startMs: Long, endMs: Long): String? =
+        current?.signedRecordingUrlAt(camera, startMs, endMs)
+
     /** True when the active source can negotiate WebRTC (live HA, not demo). */
     fun supportsWebRtc(): Boolean = current?.supportsWebRtc() ?: false
 

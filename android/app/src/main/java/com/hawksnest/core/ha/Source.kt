@@ -111,6 +111,25 @@ interface Source {
     /** Recorded-footage URL for [camera] over `[startMs, endMs]` (HLS VOD). Null when unsupported. */
     fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String? = null
 
+    /**
+     * The same VOD URL, but **signed** where the backend demands it.
+     *
+     * frigate-hass-integration (>= 5.x) rejects VOD *segment* requests that carry no `authSig`
+     * query parameter — `VodSegmentProxyView` validates it unconditionally, and a Bearer token
+     * does NOT satisfy it. The playlists load fine either way, so the symptom is a black video
+     * with no error: the player fetches `master.m3u8` and `index-*.m3u8` happily, then every
+     * `.m4s` returns 401.
+     *
+     * A signature covers a path *prefix*, so one signature for the manifest authorises every
+     * segment beside it — but it is tied to this exact `start/end` window, so a new scrub window
+     * needs a new signature. Signed URLs also need no `Authorization` header at all, which is why
+     * this returns a URL rather than plumbing a token into the media layer.
+     *
+     * Defaults to the unsigned URL so the fixture/demo source is unaffected.
+     */
+    suspend fun signedRecordingUrlAt(camera: String, startMs: Long, endMs: Long): String? =
+        recordingUrlAt(camera, startMs, endMs)
+
     /** A playable URL for one recorded event's clip. Null when unsupported. */
     fun eventClipUrl(eventId: String): String? = null
 

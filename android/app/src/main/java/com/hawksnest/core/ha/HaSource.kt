@@ -39,6 +39,23 @@ import kotlin.coroutines.coroutineContext
 /** How long we give HA to produce an HLS stream URL before stepping down (see [HaSource.streamUrl]). */
 private const val STREAM_URL_TIMEOUT_MS = 15_000L
 
+/** Signing is a single websocket round trip; if it is slow, fall back rather than stall playback. */
+private const val SIGN_PATH_TIMEOUT_MS = 10_000L
+
+/**
+ * Lifetime of a VOD signature, in seconds.
+ *
+ * One hour, not the 24h the scrub window spans. The signature is a bearer credential embedded in a
+ * URL — it grants anyone holding it access to that camera's recordings for that window, with no
+ * further auth — so it should not outlive a plausible viewing session just to save a round trip.
+ *
+ * The cost is real but bounded: a session that scrubs continuously for over an hour will start
+ * getting 401s on segments, which surfaces through [VideoPlayer]'s `onError` (whose contract
+ * already names "expired token") and steps the player down. Re-signing on that error, rather than
+ * lengthening this, is the right fix if it turns out to bite.
+ */
+private const val SIGN_PATH_EXPIRY_SECONDS = 3_600
+
 /**
  * The live Home Assistant source over the WebSocket. Mirrors `src/store/haSource.ts`: connect +
  * auth, `subscribe_entities` (compressed deltas applied via [applyEntitiesEvent]), pull the three
@@ -231,6 +248,37 @@ class HaSource(
 
     override fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String =
         buildRecordingUrl(camera, startMs, endMs, withBase(FRIGATE_BASE, baseUrl))
+
+    /**
+     * Sign the VOD manifest path so its segments are actually fetchable — see
+     * [Source.signedRecordingUrlAt] for why this is required at all.
+     *
+     * Signs the *manifest* path deliberately: the integration checks
+     * `claims["path"].startswith(<segment's directory>)`, so this one signature authorises every
+     * segment in the window and we avoid a round trip per segment.
+     *
+     * Falls back to the unsigned URL on any failure. That is not a silent swallow — an unsigned
+     * URL is what the app sent before this existed, so the worst case is the previous behaviour
+     * (a black recorded view) rather than a crash or an empty player.
+     */
+    override suspend fun signedRecordingUrlAt(camera: String, startMs: Long, endMs: Long): String {
+        val unsigned = recordingUrlAt(camera, startMs, endMs)
+        val c = conn ?: return unsigned
+        // auth/sign_path wants a server-relative path, not the absolute URL we hand the player.
+        val path = runCatching { java.net.URI(unsigned).path }.getOrNull() ?: return unsigned
+        return try {
+            withTimeoutOrNull(SIGN_PATH_TIMEOUT_MS) {
+                val frame = c.request("auth/sign_path") {
+                    put("path", path)
+                    put("expires", SIGN_PATH_EXPIRY_SECONDS)
+                }
+                val signed = (frame["result"] as? JsonObject)?.get("path")?.jsonPrimitive?.contentOrNull
+                signed?.let { withBase(it, baseUrl) }
+            } ?: unsigned
+        } catch (_: Exception) {
+            unsigned
+        }
+    }
 
     override fun eventClipUrl(eventId: String): String =
         buildEventClipUrl(eventId, withBase(FRIGATE_BASE, baseUrl))

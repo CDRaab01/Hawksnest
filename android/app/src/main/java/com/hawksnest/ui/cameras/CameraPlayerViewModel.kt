@@ -153,6 +153,16 @@ class CameraPlayerViewModel @Inject constructor(
     fun recordingUrl(camera: String, startMs: Long, endMs: Long): String? =
         connection.recordingUrlAt(camera, startMs, endMs)
 
+    /**
+     * The recorded VOD URL, signed so its segments are fetchable.
+     *
+     * Suspends because signing is a websocket round trip, which is why the caller resolves it in
+     * an effect rather than during composition. See [Source.signedRecordingUrlAt] for why an
+     * unsigned URL yields a black video rather than an error.
+     */
+    suspend fun signedRecordingUrl(camera: String, startMs: Long, endMs: Long): String? =
+        connection.signedRecordingUrlAt(camera, startMs, endMs)
+
     /** Read a (live) entity from the store — used to pull a ring-mqtt event selector's options. */
     fun entity(id: String): HassEntity? = connection.state.entities.value[id]
 
