@@ -85,6 +85,10 @@ fun CameraPlayer(
     val retentionDays: Double? by produceState<Double?>(null, cameraName, isRing) {
         value = if (isRing) null else runCatching { viewModel.frigateRetentionDays(cameraName) }.getOrNull()
     }
+    // Read once per camera: the Frigate VOD player needs it on every media request.
+    val mediaAuthToken: String? by produceState<String?>(null, cam.id) {
+        value = runCatching { viewModel.haToken() }.getOrNull()
+    }
     val window = remember(nowAnchor, retentionDays, isRing) {
         if (!isRing && retentionDays != null) {
             retentionRange(nowAnchor, retentionDays).let { it.startMs to it.endMs }
@@ -372,6 +376,10 @@ fun CameraPlayer(
                     } else {
                         null
                     },
+                    // Frigate VOD only: its nested manifest needs a Bearer token that a URL
+                    // signature cannot cover. Ring's URLs are pre-signed by Ring and must NOT
+                    // carry an HA token, so this stays null there.
+                    authToken = if (isRing) null else mediaAuthToken,
                 )
             // Scrubbed to a past moment with no footage on screen: a clip is resolving, resolution
             // failed (Retry), or no recording is kept for this time — show the snapshot with an

@@ -92,6 +92,16 @@ grid-aligned so scrubbing *within* one yields the identical URL — no re-prepar
 and the page's signature stays valid. Zoom-out is no longer capped at 24h (`maxSpanMs` is now the
 window itself), or a 3-day retention could be panned but never seen whole.
 
+**`/api/frigate/config` is NOT a route.** frigate-hass-integration proxies snapshot, recording,
+thumbnail, clips, notifications, vod, jsmpeg, mse, webrtc and go2rtc — not config. It 404s
+(verified 2026-07-30), so anything built on it silently reports "no Frigate". Camera membership
+therefore comes from the `camera.*` entity the integration creates, which stamps `client_id` and
+`camera_name` (`lib/frigate.ts`) — synchronous, no fetch, cannot go stale. Retention is **not
+exposed by HA at all**, so `FRIGATE_RETENTION_DAYS` / `FRIGATE_RETENTION_DAYS` (web/Android) is a
+constant that **must be kept in step with `record.continuous.days` in the Frigate seed by hand**.
+Too low and kept footage is unreachable; too high and the timeline offers days that 404, which
+degrades to the "no recording kept" placeholder — so it fails safe in the direction of guessing high.
+
 **Frigate VOD URLs must be signed, and the signature has to reach the segments.**
 frigate-hass-integration validates an `authSig` query parameter on every VOD *segment* request
 (`VodSegmentProxyView`) — unconditionally, and a Bearer token does not satisfy it. Playlists are

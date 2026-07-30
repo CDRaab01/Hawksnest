@@ -142,6 +142,17 @@ class ConnectionManager @Inject constructor(
     suspend fun frigateRetentionDays(camera: String): Double? =
         current?.frigateRetentionDays(camera)
 
+    /**
+     * The HA token, for media requests that must carry `Authorization` themselves.
+     *
+     * ExoPlayer fetches HLS manifests and segments outside the source layer, so it cannot borrow
+     * the auth the rest of the app uses. Frigate VOD needs BOTH: `authSig` on segments (a Bearer
+     * token does not satisfy that check) and a Bearer token on the *nested* `index-*.m3u8`
+     * manifest, because HA's signed-path auth validates the EXACT path signed — a signature minted
+     * for `master.m3u8` does not authorise its sibling. Null when running on the fixture source.
+     */
+    suspend fun haToken(): String? = credentialStore.haToken.firstOrNull()?.takeIf { it.isNotBlank() }
+
     /** True when the active source can negotiate WebRTC (live HA, not demo). */
     fun supportsWebRtc(): Boolean = current?.supportsWebRtc() ?: false
 

@@ -37,6 +37,7 @@ export function HlsPlayer({
   onDuration,
   onError,
   className,
+  authToken,
 }: {
   src: string;
   poster?: string;
@@ -50,6 +51,14 @@ export function HlsPlayer({
   onDuration?: (seconds: number) => void;
   onError?: () => void;
   className?: string;
+  /**
+   * HA token sent as `Authorization: Bearer` on every derived HLS request.
+   *
+   * Needed for Frigate VOD's nested `index-*.m3u8`, which a URL signature cannot cover (HA signs
+   * an exact path, not a prefix). Omit for sources that need no auth — go2rtc live and
+   * ring-timeline's pre-signed URLs.
+   */
+  authToken?: string | null;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   // Ref'd so a new callback identity per render can't re-init the source effect.
@@ -120,22 +129,29 @@ export function HlsPlayer({
             onError?.();
             return;
           }
-          // Carry the manifest's `authSig` onto every derived request.
+          // Frigate VOD needs BOTH credentials on derived requests, for different reasons:
           //
-          // frigate-hass-integration rejects VOD *segment* requests without it, and hls.js
-          // resolves segment URLs RELATIVE to the manifest — which drops the query string. So a
-          // correctly signed manifest still yields unsigned, 401ing segments: a black video with
-          // no error. Requests that already carry the param are left alone, so this is safe to
-          // apply to every request rather than guessing which are segments.
+          //  * `authSig` on SEGMENTS — the integration validates it unconditionally, and a
+          //    Bearer token does NOT satisfy that check.
+          //  * a Bearer token on the NESTED `index-*.m3u8` — HA's signed-path auth validates the
+          //    EXACT path signed, so the signature minted for `master.m3u8` does not authorise
+          //    its sibling. Measured: index with authSig alone 401s, with a Bearer it is 200.
+          //
+          // Both are needed because hls.js resolves derived URLs RELATIVE to the manifest, which
+          // drops the query string. Get either half wrong and you get a black video with no
+          // error: the master loads and everything after it 401s.
           const authSig = new URL(src, globalThis.location.origin).searchParams.get("authSig");
           const hls = new Hls(
-            authSig
+            authSig || authToken
               ? {
                   xhrSetup: (xhr: XMLHttpRequest, url: string) => {
-                    if (url.includes("authSig=")) return;
-                    const u = new URL(url, globalThis.location.origin);
-                    u.searchParams.set("authSig", authSig);
-                    xhr.open("GET", u.toString(), true);
+                    if (authSig && !url.includes("authSig=")) {
+                      const u = new URL(url, globalThis.location.origin);
+                      u.searchParams.set("authSig", authSig);
+                      xhr.open("GET", u.toString(), true);
+                    }
+                    // Set AFTER any re-open: xhr.open() resets request headers.
+                    if (authToken) xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
                   },
                 }
               : undefined,
@@ -164,7 +180,7 @@ export function HlsPlayer({
       // (and load() is unimplemented in jsdom, so calling it just adds noise).
       video.removeAttribute("src");
     };
-  }, [src, onError]);
+  }, [src, onError, authToken]);
 
   return (
     <video

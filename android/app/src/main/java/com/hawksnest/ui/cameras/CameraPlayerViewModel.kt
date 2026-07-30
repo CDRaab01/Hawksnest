@@ -168,6 +168,9 @@ class CameraPlayerViewModel @Inject constructor(
     suspend fun frigateRetentionDays(camera: String): Double? =
         connection.frigateRetentionDays(camera)
 
+    /** HA token for media requests that must authenticate themselves — see [ConnectionManager.haToken]. */
+    suspend fun haToken(): String? = connection.haToken()
+
     /** Read a (live) entity from the store — used to pull a ring-mqtt event selector's options. */
     fun entity(id: String): HassEntity? = connection.state.entities.value[id]
 

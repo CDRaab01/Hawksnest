@@ -43,6 +43,16 @@ private const val STREAM_URL_TIMEOUT_MS = 15_000L
 private const val SIGN_PATH_TIMEOUT_MS = 10_000L
 
 /**
+ * Days of continuous recording the Frigate timeline should offer.
+ *
+ * MUST be kept in step with `record.continuous.days` in the Frigate seed
+ * (hawksnest-automation/kustomize/base/frigate/configmap.yaml). It cannot be discovered:
+ * frigate-hass-integration does not proxy Frigate's config endpoint, and HA exposes the retention
+ * nowhere else. See [HaSource.frigateRetentionDays].
+ */
+private const val FRIGATE_RETENTION_DAYS = 3.0
+
+/**
  * Lifetime of a VOD signature, in seconds.
  *
  * One hour, not the 24h the scrub window spans. The signature is a bearer credential embedded in a
@@ -249,46 +259,25 @@ class HaSource(
     override fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String =
         buildRecordingUrl(camera, startMs, endMs, withBase(FRIGATE_BASE, baseUrl))
 
-    /** Cached `record.continuous.days` per camera; one config read serves every camera. */
-    @Volatile private var retentionCache: Map<String, Double>? = null
-
     /**
-     * Read per-camera retention from `/api/frigate/config`, cached for the session.
+     * How far back the Frigate timeline should reach, in days.
      *
-     * Confirmed against the real cluster 2026-07-29: the route returns 200 through the HA proxy
-     * and carries `cameras.<name>.record.continuous.days`. Returns null on any failure, which the
-     * caller treats as "unknown" and falls back — a wrong high guess would offer a timeline
-     * reaching into recordings Frigate has already pruned.
+     * **This is a configured constant, not a discovered value, and that is not laziness.**
+     * frigate-hass-integration proxies snapshot, recording, thumbnail, clips, notifications, vod,
+     * jsmpeg, mse, webrtc and go2rtc — but **not** `config`. `/api/frigate/config` 404s, verified
+     * against the running cluster 2026-07-30 after an earlier note wrongly recorded it as
+     * confirmed (what had actually been tested was `frigate:5000/api/config` **direct**, which is
+     * a different route not reachable from the app). Frigate's retention is not exposed through
+     * HA in any other form either — the `camera.*` entity attributes carry `client_id` and
+     * `camera_name` but nothing about recording windows.
+     *
+     * So this must track `record.continuous.days` in the Frigate seed
+     * (`hawksnest-automation/kustomize/base/frigate/configmap.yaml`) **by hand**. Raising
+     * retention there without raising it here means the extra days are recorded but unreachable;
+     * lowering it there without lowering it here means the timeline offers days that 404 (which
+     * degrades to the "no recording kept" placeholder rather than breaking, so it fails safe).
      */
-    override suspend fun frigateRetentionDays(camera: String): Double? {
-        retentionCache?.let { return it[camera] }
-        val url = "${withBase(FRIGATE_BASE, baseUrl)}/config"
-        val parsed = withContext(Dispatchers.IO) {
-            try {
-                val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
-                client.newCall(req).execute().use { res ->
-                    if (!res.isSuccessful) return@use null
-                    val body = res.body?.string() ?: return@use null
-                    val root = json.parseToJsonElement(body) as? JsonObject ?: return@use null
-                    val globalDays = (root["record"] as? JsonObject)
-                        ?.get("continuous")?.let { it as? JsonObject }
-                        ?.get("days")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                    val cams = root["cameras"] as? JsonObject ?: return@use emptyMap<String, Double>()
-                    cams.mapNotNull { (name, cfg) ->
-                        val days = ((cfg as? JsonObject)?.get("record") as? JsonObject)
-                            ?.get("continuous")?.let { it as? JsonObject }
-                            ?.get("days")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                            ?: globalDays
-                        if (days != null && days > 0) name to days else null
-                    }.toMap()
-                }
-            } catch (_: Exception) {
-                null
-            }
-        }
-        if (parsed != null) retentionCache = parsed
-        return parsed?.get(camera)
-    }
+    override suspend fun frigateRetentionDays(camera: String): Double = FRIGATE_RETENTION_DAYS
 
     /**
      * Sign the VOD manifest path so its segments are actually fetchable — see

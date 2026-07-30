@@ -48,6 +48,14 @@ fun VideoPlayer(
     onDurationMs: ((Long) -> Unit)? = null,
     /** Fired on a fatal playback error (dead playlist, expired token) so the host can step down. */
     onError: (() -> Unit)? = null,
+    /**
+     * HA token sent as `Authorization: Bearer` on every media request.
+     *
+     * Required for Frigate VOD's nested `index-*.m3u8` manifest, which a URL signature cannot
+     * cover (HA signs an exact path, not a prefix). Null for sources that need no auth — the
+     * bundled demo clip, go2rtc live, and ring-timeline's pre-signed URLs.
+     */
+    authToken: String? = null,
 ) {
     val context = LocalContext.current
     val currentOnDurationMs by rememberUpdatedState(onDurationMs)
@@ -61,22 +69,31 @@ fun VideoPlayer(
     // live stream (that would stop it looping). Only real HLS URLs get live-edge handling.
     val liveStream = live && url != DEMO_CLIP_URI
 
-    // Carry the manifest's `authSig` onto every derived request.
+    // Frigate VOD needs BOTH credentials on its requests, for different reasons:
     //
-    // frigate-hass-integration rejects VOD *segment* requests without an `authSig` query param,
-    // and both ExoPlayer and hls.js resolve segment URLs RELATIVE to the manifest — which drops
-    // the query string. So a signed manifest loads, and then every `.m4s` 401s: a black video
-    // with no error. This re-attaches the parameter to any request that lacks it.
+    //  * `authSig` on SEGMENTS. The integration validates it unconditionally and a Bearer token
+    //    does NOT satisfy that check.
+    //  * a Bearer token on the NESTED `index-*.m3u8` manifest. HA's signed-path auth validates the
+    //    EXACT path signed, so the signature minted for `master.m3u8` does not authorise its
+    //    sibling — measured: index with authSig alone is 401, with a Bearer it is 200.
     //
-    // Keyed on the signature so switching cameras/windows rebuilds the player with the right one.
+    // Both also matter because players resolve segment/manifest URIs RELATIVE to the master, which
+    // drops the query string. Getting either half wrong yields a black video with no error, since
+    // the master loads fine and everything after it 401s.
+    //
+    // Keyed on both so switching camera, page or session rebuilds the player with the right creds.
     val authSig = remember(url) { Uri.parse(url).getQueryParameter(AUTH_SIG_PARAM) }
-    val player = remember(authSig) {
+    val player = remember(authSig, authToken) {
         val builder = ExoPlayer.Builder(context)
-        if (authSig != null) {
-            val http = DefaultHttpDataSource.Factory()
-            builder.setMediaSourceFactory(
-                DefaultMediaSourceFactory(AuthSigDataSourceFactory(http, authSig)),
-            )
+        if (authSig != null || authToken != null) {
+            val http = DefaultHttpDataSource.Factory().apply {
+                if (authToken != null) {
+                    setDefaultRequestProperties(mapOf("Authorization" to "Bearer $authToken"))
+                }
+            }
+            val factory: DataSource.Factory =
+                if (authSig != null) AuthSigDataSourceFactory(http, authSig) else http
+            builder.setMediaSourceFactory(DefaultMediaSourceFactory(factory))
         }
         builder.build().apply { volume = 0f }
     }
