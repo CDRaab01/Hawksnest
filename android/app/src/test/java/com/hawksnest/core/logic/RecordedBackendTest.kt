@@ -60,6 +60,21 @@ class RecordedBackendTest {
     }
 
     @Test
+    fun `retention comes from the sensor with the constant as fallback`() {
+        fun sensor(state: String) = HassEntity(
+            entityId = FRIGATE_RETENTION_SENSOR,
+            state = state,
+            attributes = buildJsonObject {},
+        )
+        assertEquals(7.0, frigateRetentionDays(sensor("7"), fallback = 3.0))
+        assertEquals(3.0, frigateRetentionDays(sensor("3.0"), fallback = 99.0))
+        assertEquals(3.0, frigateRetentionDays(null, fallback = 3.0))
+        assertEquals(3.0, frigateRetentionDays(sensor("unavailable"), fallback = 3.0))
+        // Zero/negative would collapse the timeline — treat as unreadable, not as a choice.
+        assertEquals(3.0, frigateRetentionDays(sensor("0"), fallback = 3.0))
+    }
+
+    @Test
     fun `non-string stamps do not match`() {
         val entity = HassEntity(
             entityId = "camera.big_room",

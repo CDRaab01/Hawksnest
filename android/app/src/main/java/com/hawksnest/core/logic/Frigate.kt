@@ -46,3 +46,14 @@ fun frigateCameraName(entity: HassEntity?): String? =
 /** A JSON **string** attribute, or null — a number/bool attribute is not a match. */
 private fun HassEntity.jsonStringAttr(key: String): String? =
     (attributes[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+/** The HA REST sensor surfacing Frigate's `record.continuous.days` (web twin in `frigate.ts`). */
+const val FRIGATE_RETENTION_SENSOR = "sensor.frigate_retention_days"
+
+/**
+ * Days of retention to size the Frigate timeline with: the retention sensor's value
+ * when it reads as a positive number, else [fallback] (sensor missing, `unavailable`,
+ * `unknown` — e.g. an HA that predates the sensor).
+ */
+fun frigateRetentionDays(entity: HassEntity?, fallback: Double): Double =
+    entity?.state?.toDoubleOrNull()?.takeIf { it > 0 } ?: fallback

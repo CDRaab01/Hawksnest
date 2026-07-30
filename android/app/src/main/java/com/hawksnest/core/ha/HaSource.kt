@@ -10,6 +10,8 @@ import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.dedupeRingMqtt
 import com.hawksnest.core.net.ReachabilityProbe
 import com.hawksnest.core.logic.FRIGATE_BASE
+import com.hawksnest.core.logic.FRIGATE_RETENTION_SENSOR
+import com.hawksnest.core.logic.frigateRetentionDays as logicFrigateRetentionDays
 import com.hawksnest.core.logic.LogEvent
 import com.hawksnest.core.logic.normalizeLogbook
 import com.hawksnest.core.logic.normalizeFrigateEvents
@@ -46,12 +48,10 @@ private const val STREAM_URL_TIMEOUT_MS = 15_000L
 private const val SIGN_PATH_TIMEOUT_MS = 10_000L
 
 /**
- * Days of continuous recording the Frigate timeline should offer.
- *
- * MUST be kept in step with `record.continuous.days` in the Frigate seed
- * (hawksnest-automation/kustomize/base/frigate/configmap.yaml). It cannot be discovered:
- * frigate-hass-integration does not proxy Frigate's config endpoint, and HA exposes the retention
- * nowhere else. See [HaSource.frigateRetentionDays].
+ * Fallback days of continuous recording for the Frigate timeline, used only when the
+ * retention sensor is absent/unavailable — the real value comes from
+ * `sensor.frigate_retention_days`, an HA REST sensor over Frigate's own config
+ * (see [HaSource.frigateRetentionDays] and the web twin in `frigate.ts`).
  */
 private const val FRIGATE_RETENTION_DAYS = 3.0
 
@@ -305,22 +305,19 @@ class HaSource(
     /**
      * How far back the Frigate timeline should reach, in days.
      *
-     * **This is a configured constant, not a discovered value, and that is not laziness.**
-     * frigate-hass-integration proxies snapshot, recording, thumbnail, clips, notifications, vod,
-     * jsmpeg, mse, webrtc and go2rtc — but **not** `config`. `/api/frigate/config` 404s, verified
-     * against the running cluster 2026-07-30 after an earlier note wrongly recorded it as
-     * confirmed (what had actually been tested was `frigate:5000/api/config` **direct**, which is
-     * a different route not reachable from the app). Frigate's retention is not exposed through
-     * HA in any other form either — the `camera.*` entity attributes carry `client_id` and
-     * `camera_name` but nothing about recording windows.
-     *
-     * So this must track `record.continuous.days` in the Frigate seed
-     * (`hawksnest-automation/kustomize/base/frigate/configmap.yaml`) **by hand**. Raising
-     * retention there without raising it here means the extra days are recorded but unreachable;
-     * lowering it there without lowering it here means the timeline offers days that 404 (which
-     * degrades to the "no recording kept" placeholder rather than breaking, so it fails safe).
+     * The app cannot ask Frigate directly — frigate-hass-integration proxies media routes but
+     * **not** `config` (`/api/frigate/config` 404s, verified 2026-07-30) — so HA asks on its
+     * behalf: a REST sensor (`sensor.frigate_retention_days`, defined in the hawksnest-automation
+     * HA seed) polls Frigate's in-cluster config API and surfaces `record.continuous.days` as
+     * plain entity state, which this reads off the store like any other entity. The old
+     * hand-synced constant remains as the fallback for an HA that predates the sensor; a stale
+     * fallback fails safe (days that 404 degrade to the "no recording kept" placeholder).
      */
-    override suspend fun frigateRetentionDays(camera: String): Double = FRIGATE_RETENTION_DAYS
+    override suspend fun frigateRetentionDays(camera: String): Double =
+        logicFrigateRetentionDays(
+            state.entities.value[FRIGATE_RETENTION_SENSOR],
+            FRIGATE_RETENTION_DAYS,
+        )
 
     /**
      * Sign the VOD manifest path so its segments are actually fetchable — see

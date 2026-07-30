@@ -15,7 +15,11 @@ import {
   type FootageSpan,
   type RingFootage,
 } from "../../lib/ringFootage";
-import { FRIGATE_RETENTION_DAYS, isFrigateCamera } from "../../lib/frigate";
+import {
+  FRIGATE_RETENTION_SENSOR,
+  frigateRetentionDays,
+  isFrigateCamera,
+} from "../../lib/frigate";
 import { retentionRange, vodPageFor, vodPositionSecondsInPage } from "../../lib/vodWindow";
 import { hasRealRecordings, recordedBackendOf } from "../../lib/recordedBackend";
 import { useEntity } from "../../store/entityStore";
@@ -133,14 +137,16 @@ export function CameraPlayer({
   // How far back the timeline reaches. Ring stays at 24h — its recorded path is the last handful
   // of cloud events, so a longer span would render a mostly-empty timeline and pull days of Ring
   // history for nothing. Frigate keeps continuous video, so its timeline spans the ACTUAL
-  // retention Frigate reports (`record.continuous.days`) rather than a hardcoded day.
+  // retention Frigate reports (`record.continuous.days`, surfaced by an HA REST sensor —
+  // see lib/frigate.ts) with the old hand-synced constant as fallback.
+  const retentionEntity = useEntity(FRIGATE_RETENTION_SENSOR);
   const window = useMemo(() => {
     if (backend === "frigate") {
-      const r = retentionRange(nowAnchor, FRIGATE_RETENTION_DAYS);
+      const r = retentionRange(nowAnchor, frigateRetentionDays(retentionEntity));
       return { start: r.startMs, end: r.endMs };
     }
     return { start: nowAnchor - DAY_MS, end: nowAnchor };
-  }, [backend, nowAnchor]);
+  }, [backend, nowAnchor, retentionEntity]);
 
   const [playhead, setPlayhead] = useState<number | "live">("live");
   const [paused, setPaused] = useState(false);

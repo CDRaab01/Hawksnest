@@ -28,18 +28,30 @@
 import type { HassEntity } from "./ha";
 
 /**
- * Days of continuous recording the Frigate timeline should offer.
+ * Fallback days of continuous recording for the Frigate timeline, used only when
+ * [FRIGATE_RETENTION_SENSOR] is absent/unavailable. The real value is served by an
+ * HA REST sensor (`hawksnest-automation` HA seed) that reads Frigate's own
+ * `record.continuous.days` — HA can reach Frigate's in-cluster config API, the
+ * browser can't (the integration never proxies it, see above).
  *
- * **MUST be kept in step with `record.continuous.days` in the Frigate seed**
- * (`hawksnest-automation/kustomize/base/frigate/configmap.yaml`) by hand. It cannot be
- * discovered: Frigate's config endpoint is not proxied (above), and HA exposes the retention
- * nowhere else — the `camera.*` attributes carry identity, not recording windows.
- *
- * Failure modes are asymmetric, which is why a stale value here is tolerable: set too LOW and
- * some kept footage is simply unreachable; set too HIGH and the timeline offers days that 404,
- * which degrades to the existing "no recording kept" placeholder rather than breaking.
+ * Failure modes are asymmetric, which is why a stale fallback is tolerable: too LOW
+ * and some kept footage is simply unreachable; too HIGH and the timeline offers days
+ * that 404, which degrades to the "no recording kept" placeholder rather than breaking.
  */
 export const FRIGATE_RETENTION_DAYS = 3;
+
+/** The HA REST sensor surfacing Frigate's `record.continuous.days` (see above). */
+export const FRIGATE_RETENTION_SENSOR = "sensor.frigate_retention_days";
+
+/**
+ * Days of retention to size the Frigate timeline with: the retention sensor's value
+ * when it reads as a positive number, else the [FRIGATE_RETENTION_DAYS] fallback
+ * (sensor missing, `unavailable`, `unknown` — e.g. an HA that predates the sensor).
+ */
+export function frigateRetentionDays(entity: HassEntity | null | undefined): number {
+  const days = Number(entity?.state);
+  return Number.isFinite(days) && days > 0 ? days : FRIGATE_RETENTION_DAYS;
+}
 
 /**
  * Whether this camera is recorded by Frigate, judged from its HA entity.
