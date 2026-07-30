@@ -39,6 +39,7 @@ import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.chooseRecordedSource
 import com.hawksnest.core.logic.clipContaining
 import com.hawksnest.core.logic.clipSpanEndMs
+import com.hawksnest.core.logic.FootageSpan
 import com.hawksnest.core.logic.footageSpans
 import com.hawksnest.core.logic.offsetInClipMs
 import com.hawksnest.core.logic.TimeRange
@@ -130,11 +131,28 @@ fun CameraPlayer(
         timelineNonce += 1
     }
     // The continuous track as drawable spans (coalesced so a stitch seam doesn't read as a gap).
-    val footageLane = remember(footage) { footage?.let { footageSpans(it.segments) } ?: emptyList() }
+    // Ring's spans come off its timeline fetch; Frigate's are fetched below, pre-coalesced.
+    val ringLane = remember(footage) { footage?.let { footageSpans(it.segments) } ?: emptyList() }
+    // The Frigate continuous lane — where recordings actually exist, so the strip shows "you can
+    // scrub anywhere here" instead of rendering blank between event chips. Empty until it
+    // resolves — the lane just appears, nothing blocks on it. Mirrors the web CameraPlayer.
+    // Keyed on the window too: it opens at the 24h fallback and widens to the real retention when
+    // frigateRetentionDays resolves — without the key the lane would stay 24h on a 3-day strip.
+    val frigateLane: List<FootageSpan> by produceState(emptyList(), cam.id, startMs, endMs) {
+        value = if (isRing) {
+            emptyList()
+        } else {
+            runCatching { viewModel.cameraFootage(cameraName, startMs, endMs) }.getOrDefault(emptyList())
+        }
+    }
+    val footageLane = if (isRing) ringLane else frigateLane
 
     // Only real recordings make the timeline (Ring-style: every block is watchable) — Ring's own
     // events, ring's ~5 selector events, or Frigate/demo events that carry a clip.
-    val fallbackEvents: List<CameraEvent> by produceState<List<CameraEvent>>(emptyList(), cam.id) {
+    // Keyed on the window (same reason as the lane above): a Frigate camera's window widens from
+    // the 24h fallback to real retention when frigateRetentionDays resolves, and events fetched
+    // for the narrow window would silently leave days 2-3 chipless.
+    val fallbackEvents: List<CameraEvent> by produceState<List<CameraEvent>>(emptyList(), cam.id, startMs, endMs) {
         value = runCatching {
             if (isRing) {
                 viewModel.ringEvents(cam.eventSelectId!!, cameraName, startMs, endMs)

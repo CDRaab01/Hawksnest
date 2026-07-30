@@ -165,6 +165,64 @@ export function footageSpans(segments: FootageSegment[], toleranceMs = 1000): Fo
  * markers, so nothing is lost by not *playing* them — tapping one still seeks to it, now inside a
  * continuous stream. Event clips remain the source on the cameras with no 24/7 track at all.
  */
+/**
+ * Tolerance when coalescing Frigate recording segments into drawable spans.
+ *
+ * Frigate writes ~10 s cache segments with sub-second seams between them, but a camera reconnect
+ * or a Frigate restart can drop a segment, leaving a one-segment hole that is real but not worth
+ * drawing. 15 s bridges those; anything longer renders as an honest gap in the lane.
+ */
+const FRIGATE_SPAN_TOLERANCE_MS = 15_000;
+
+/**
+ * Unwrap a `frigate/recordings/get` websocket result into drawable [FootageSpan]s — the Frigate
+ * counterpart of `footageSpans`, and the data behind the continuous lane for Frigate cameras.
+ *
+ * Same websocket-only contract as `frigate/events/get` (see `parseFrigateWsEvents`): there is no
+ * REST route for this, and the result usually arrives as a JSON **string** the integration didn't
+ * decode. The payload is one entry per ~10 s recording segment (measured: ~6.5k entries / 1 MB /
+ * tens of ms for a 3-day window), so coalescing here — not in the component — is what keeps the
+ * timeline from mapping thousands of DOM nodes.
+ *
+ * Spans are always `playable: true`: unlike Ring, Frigate has no per-segment URL to expire and no
+ * end-to-end encryption — if the segment is on disk, the VOD can serve it. Junk input yields [],
+ * never a throw: the lane simply doesn't render, which is what the pre-8b timeline showed anyway.
+ */
+export function parseFrigateWsRecordings(
+  result: unknown,
+  toleranceMs: number = FRIGATE_SPAN_TOLERANCE_MS,
+): FootageSpan[] {
+  let raw: unknown = result;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  const segments = raw
+    .map((r) => {
+      const rec = (r ?? {}) as Record<string, unknown>;
+      const start = num(rec.start_time);
+      const end = num(rec.end_time);
+      if (start === null || end === null || end <= start) return null;
+      return { startMs: Math.round(start * 1000), endMs: Math.round(end * 1000) };
+    })
+    .filter((s): s is { startMs: number; endMs: number } => s !== null)
+    .sort((a, b) => a.startMs - b.startMs);
+  const spans: FootageSpan[] = [];
+  for (const seg of segments) {
+    const last = spans[spans.length - 1];
+    if (last && seg.startMs - last.endMs <= toleranceMs) {
+      last.endMs = Math.max(last.endMs, seg.endMs);
+      continue;
+    }
+    spans.push({ startMs: seg.startMs, endMs: seg.endMs, playable: true });
+  }
+  return spans;
+}
+
 export type RecordedSource =
   | { kind: "footage"; url: string; seekSeconds: number; segment: FootageSegment }
   | { kind: "clip"; url: string; seekSeconds: number; event: CameraEvent }

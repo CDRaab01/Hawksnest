@@ -1,7 +1,11 @@
 package com.hawksnest.core.logic
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -267,5 +271,53 @@ class RingFootageTest {
             RecordedSource.Clip("https://ring/clip.mp4", 45_000L, openEnded[0]),
             chooseRecordedSource(at, emptyList(), openEnded, urls, "m1", 90_000L),
         )
+    }
+
+    // ---- parseFrigateWsRecordings (frigate/recordings/get websocket result) ----
+    // Same websocket-only contract as frigate/events/get: there is no REST route for recordings,
+    // and the result usually arrives as a JSON STRING the integration didn't decode.
+    // Mirrors the web parseFrigateWsRecordings tests.
+
+    private fun seg(start: Double, end: Double) =
+        buildJsonObject { put("start_time", start); put("end_time", end) }
+
+    @Test
+    fun `unwraps the JSON-string result and coalesces contiguous segments into one span`() {
+        val raw = """[{"start_time":1000,"end_time":1010},{"start_time":1010.2,"end_time":1020},{"start_time":1020.1,"end_time":1030}]"""
+        val spans = parseFrigateWsRecordings(JsonPrimitive(raw))
+        assertEquals(listOf(FootageSpan(1000_000L, 1030_000L, playable = true)), spans)
+    }
+
+    @Test
+    fun `keeps a real gap beyond tolerance as two spans - the lane must show honest holes`() {
+        val spans = parseFrigateWsRecordings(JsonArray(listOf(seg(1000.0, 1010.0), seg(1100.0, 1110.0))))
+        assertEquals(2, spans.size)
+        assertEquals(1010_000L, spans[0].endMs)
+        assertEquals(1100_000L, spans[1].startMs)
+    }
+
+    @Test
+    fun `bridges a single dropped segment - a hole within tolerance`() {
+        val spans = parseFrigateWsRecordings(JsonArray(listOf(seg(1000.0, 1010.0), seg(1022.0, 1032.0))))
+        assertEquals(1, spans.size)
+    }
+
+    @Test
+    fun `sorts unordered input before coalescing`() {
+        val spans = parseFrigateWsRecordings(
+            JsonArray(listOf(seg(1020.0, 1030.0), seg(1000.0, 1010.0), seg(1010.0, 1020.0))),
+        )
+        assertEquals(listOf(FootageSpan(1000_000L, 1030_000L, playable = true)), spans)
+    }
+
+    @Test
+    fun `drops malformed entries and returns empty for junk rather than throwing`() {
+        assertEquals(emptyList(), parseFrigateWsRecordings(JsonPrimitive("not json")))
+        assertEquals(emptyList(), parseFrigateWsRecordings(null))
+        assertEquals(emptyList(), parseFrigateWsRecordings(buildJsonObject { put("recordings", 1) }))
+        val spans = parseFrigateWsRecordings(
+            JsonArray(listOf(seg(1000.0, 1010.0), seg(2000.0, 2000.0), buildJsonObject { put("start_time", 3000) })),
+        )
+        assertEquals(listOf(FootageSpan(1000_000L, 1010_000L, playable = true)), spans)
     }
 }

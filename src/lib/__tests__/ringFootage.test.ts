@@ -5,6 +5,7 @@ import {
   footageSpans,
   isPlayable,
   offsetInSegmentSeconds,
+  parseFrigateWsRecordings,
   parseRingFootage,
   type FootageSegment,
 } from "../ringFootage";
@@ -167,6 +168,48 @@ describe("footageSpans", () => {
     expect(spans.map((s) => s.playable)).toEqual([true, false, true]);
   });
 });
+
+describe("parseFrigateWsRecordings (frigate/recordings/get websocket result)", () => {
+  // Same websocket-only contract as frigate/events/get: there is no REST route for recordings,
+  // and the result usually arrives as a JSON STRING the integration didn't decode.
+  const seg = (start: number, end: number) => ({ start_time: start, end_time: end });
+
+  it("unwraps the JSON-string result and coalesces contiguous ~10s segments into one span", () => {
+    const spans = parseFrigateWsRecordings(
+      JSON.stringify([seg(1000, 1010), seg(1010.2, 1020), seg(1020.1, 1030)]),
+    );
+    expect(spans).toEqual([{ startMs: 1000_000, endMs: 1030_000, playable: true }]);
+  });
+
+  it("keeps a real gap (beyond tolerance) as two spans — the lane must show honest holes", () => {
+    const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(1100, 1110)]);
+    expect(spans).toHaveLength(2);
+    expect(spans[0].endMs).toBe(1010_000);
+    expect(spans[1].startMs).toBe(1100_000);
+  });
+
+  it("bridges a single dropped segment (a hole within tolerance)", () => {
+    // One missing ~10s cache segment is real but not worth drawing as a gap.
+    const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(1022, 1032)]);
+    expect(spans).toHaveLength(1);
+  });
+
+  it("sorts unordered input before coalescing", () => {
+    const spans = parseFrigateWsRecordings([seg(1020, 1030), seg(1000, 1010), seg(1010, 1020)]);
+    expect(spans).toEqual([{ startMs: 1000_000, endMs: 1030_000, playable: true }]);
+  });
+
+  it("drops malformed entries and returns [] for junk rather than throwing", () => {
+    expect(parseFrigateWsRecordings("not json")).toEqual([]);
+    expect(parseFrigateWsRecordings(null)).toEqual([]);
+    expect(parseFrigateWsRecordings({ recordings: [] })).toEqual([]);
+    // end <= start and missing fields drop only themselves.
+    const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(2000, 2000), { start_time: 3000 }]);
+    expect(spans).toEqual([{ startMs: 1000_000, endMs: 1010_000, playable: true }]);
+  });
+});
+
+
 
 describe("chooseRecordedSource", () => {
   const events = [clip("m1", T0 + 5 * MIN, T0 + 6 * MIN)];

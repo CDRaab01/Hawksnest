@@ -21,6 +21,7 @@ import {
   type CameraEvent,
 } from "../lib/cameraEvents";
 import { dedupeRingMqtt } from "../lib/dedupe";
+import { parseFrigateWsRecordings } from "../lib/ringFootage";
 import {
   buildAreaRegistry,
   buildDeviceIndex,
@@ -309,6 +310,14 @@ export function createHaSource(
     }
   }
 
+  // The Frigate `instance_id` the websocket query commands require — the same `client_id` the
+  // integration stamps on the camera entity (what `isFrigateCamera` matches on). Read from state
+  // rather than hardcoded so a renamed Frigate instance keeps working.
+  function frigateInstanceId(camera: string): string {
+    const clientId = store().entities[`camera.${camera}`]?.attributes?.client_id;
+    return typeof clientId === "string" && clientId ? clientId : "frigate";
+  }
+
   return {
     async start() {
       stopped = false;
@@ -385,11 +394,25 @@ export function createHaSource(
     },
     async fetchCameraEvents(camera, startMs, endMs) {
       if (!conn) return [];
-      // The integration stamps its instance id (`client_id`) on the camera entity — the same
-      // marker `isFrigateCamera` matches on. Fall back to the integration's default.
-      const clientId = store().entities[`camera.${camera}`]?.attributes?.client_id;
-      const instanceId = typeof clientId === "string" && clientId ? clientId : "frigate";
-      return fetchFrigateEvents(conn, instanceId, camera, startMs, endMs, store().baseUrl);
+      return fetchFrigateEvents(conn, frigateInstanceId(camera), camera, startMs, endMs, store().baseUrl);
+    },
+    async fetchCameraFootage(camera, startMs, endMs) {
+      // `frigate/recordings/get` — websocket-only, like events (see fetchFrigateEvents). One
+      // entry per ~10s recording segment; parseFrigateWsRecordings coalesces to drawable spans.
+      const socket = conn;
+      if (!socket) return [];
+      try {
+        const result = await socket.sendMessagePromise<unknown>({
+          type: "frigate/recordings/get",
+          instance_id: frigateInstanceId(camera),
+          camera,
+          after: Math.floor(startMs / 1000),
+          before: Math.floor(endMs / 1000),
+        });
+        return parseFrigateWsRecordings(result);
+      } catch {
+        return [];
+      }
     },
     recordingUrlAt(camera, startMs, endMs) {
       return buildRecordingUrl(camera, startMs, endMs, withBase(FRIGATE_BASE, creds.url));

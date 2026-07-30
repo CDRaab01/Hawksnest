@@ -13,7 +13,9 @@ import com.hawksnest.core.logic.FRIGATE_BASE
 import com.hawksnest.core.logic.LogEvent
 import com.hawksnest.core.logic.normalizeLogbook
 import com.hawksnest.core.logic.normalizeFrigateEvents
+import com.hawksnest.core.logic.FootageSpan
 import com.hawksnest.core.logic.parseFrigateWsEvents
+import com.hawksnest.core.logic.parseFrigateWsRecordings
 import com.hawksnest.core.logic.recordingUrlAt as buildRecordingUrl
 import com.hawksnest.core.logic.eventClipUrl as buildEventClipUrl
 import kotlinx.coroutines.Dispatchers
@@ -207,11 +209,9 @@ class HaSource(
      */
     override suspend fun fetchCameraEvents(camera: String, startMs: Long, endMs: Long): List<CameraEvent> {
         val c = conn ?: return emptyList()
-        val clientId = state.entities.value["camera.$camera"]
-            ?.stringAttr("client_id")?.takeIf { it.isNotBlank() } ?: "frigate"
         return try {
             val frame = c.request("frigate/events/get") {
-                put("instance_id", clientId)
+                put("instance_id", frigateInstanceId(camera))
                 putJsonArray("cameras") { add(camera) }
                 put("after", startMs / 1000)
                 put("before", endMs / 1000)
@@ -222,6 +222,34 @@ class HaSource(
             emptyList()
         }
     }
+
+    /**
+     * The continuous lane via `frigate/recordings/get` — websocket-only, like events (above). One
+     * entry per ~10s recording segment; [parseFrigateWsRecordings] coalesces to drawable spans.
+     */
+    override suspend fun fetchCameraFootage(camera: String, startMs: Long, endMs: Long): List<FootageSpan> {
+        val c = conn ?: return emptyList()
+        return try {
+            val frame = c.request("frigate/recordings/get") {
+                put("instance_id", frigateInstanceId(camera))
+                put("camera", camera)
+                put("after", startMs / 1000)
+                put("before", endMs / 1000)
+            }
+            parseFrigateWsRecordings(frame["result"])
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * The Frigate `instance_id` the websocket query commands require — the same `client_id` the
+     * integration stamps on the camera entity. Read from live state rather than hardcoded, so a
+     * renamed Frigate instance keeps working.
+     */
+    private fun frigateInstanceId(camera: String): String =
+        state.entities.value["camera.$camera"]
+            ?.stringAttr("client_id")?.takeIf { it.isNotBlank() } ?: "frigate"
 
     /**
      * Automation CRUD over HA's REST Config API (`/api/config/automation/config/<id>`). Mirrors the

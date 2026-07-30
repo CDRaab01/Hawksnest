@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LogicalCamera } from "../../lib/cameraModel";
-import { fetchCameraEvents, signedRecordingUrlAt } from "../../store/connection";
+import { fetchCameraEvents, fetchCameraFootage, signedRecordingUrlAt } from "../../store/connection";
 import { resolveRingClipUrl } from "../../store/ringClip";
 import {
   fetchRingDevices,
@@ -12,6 +12,7 @@ import {
 import {
   chooseRecordedSource,
   footageSpans,
+  type FootageSpan,
   type RingFootage,
 } from "../../lib/ringFootage";
 import { FRIGATE_RETENTION_DAYS, isFrigateCamera } from "../../lib/frigate";
@@ -95,6 +96,7 @@ export function CameraPlayer({
   // Ring keeps its own name because the paths below are Ring-specific mechanics
   // (selector resolution, ring-timeline signatures), not "has recordings".
   const isRing = backend === "ring";
+  const isFrigate = backend === "frigate";
   const ringSelect = useEntity(camera.eventSelectId ?? "");
 
   // Pin "now" once so the timeline doesn't slide under the user mid-session.
@@ -151,6 +153,23 @@ export function CameraPlayer({
       active = false;
     };
   }, [isRing, cameraName, window.start, window.end]);
+
+  // The Frigate continuous lane — where recordings actually exist, so the strip shows "you can
+  // scrub anywhere here" instead of rendering blank between event chips. Ring's lane arrives
+  // bundled with its timeline fetch below; this is the Frigate counterpart (already coalesced
+  // by the source). [] until it resolves — the lane just appears, nothing blocks on it.
+  const [frigateFootage, setFrigateFootage] = useState<FootageSpan[]>([]);
+  useEffect(() => {
+    setFrigateFootage([]);
+    if (isRing || !isFrigate) return;
+    let active = true;
+    fetchCameraFootage(cameraName, window.start, window.end)
+      .then((spans) => active && setFrigateFootage(spans))
+      .catch(() => active && setFrigateFootage([]));
+    return () => {
+      active = false;
+    };
+  }, [isRing, isFrigate, cameraName, window.start, window.end]);
 
   // Ring's OWN timeline, via the ring-timeline service — real event times, real spans, and
   // directly playable URLs. Preferred over the selector for ring cameras because the selector
@@ -473,7 +492,9 @@ export function CameraPlayer({
         : "none";
 
   // The continuous track as drawable spans (coalesced so a stitch seam doesn't read as a gap).
-  const footageLane = useMemo(() => (footage ? footageSpans(footage.segments) : []), [footage]);
+  // Ring's spans come off its timeline fetch; Frigate's arrive pre-coalesced from the source.
+  const ringLane = useMemo(() => (footage ? footageSpans(footage.segments) : []), [footage]);
+  const footageLane = isRing ? ringLane : frigateFootage;
 
   return (
     <div className="space-y-md">

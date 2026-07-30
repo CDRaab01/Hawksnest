@@ -115,8 +115,20 @@ ride `frigate/events/get` over the existing HA socket (`haSource.ts fetchFrigate
 it's the same `client_id` the integration stamps on the camera entity, so it is read from state,
 not hardcoded — and the result arrives as a JSON **string** (the integration skips decoding),
 unwrapped by the mirrored `parseFrigateWsEvents` (`lib/cameraEvents.ts` ⇄ `core/logic/CameraEvent.kt`).
-`frigate/recordings/get` returns per-segment recording spans and is the natural data source for a
-future Frigate footage lane (plan item 8b) — confirmed working, not yet consumed.
+`frigate/recordings/get` powers the **Frigate continuous footage lane** (plan item 8b, built
+2026-07-30): the same shaded "recordings exist here" track Ring cameras have, now drawn for
+Frigate cameras from real recording segments. The payload is one entry per ~10 s segment
+(measured: ~6.5k entries / 1 MB / tens of ms for a 3-day window), so the mirrored
+`parseFrigateWsRecordings` (`lib/ringFootage.ts` ⇄ `core/logic/RingFootage.kt`) coalesces to
+drawable `FootageSpan`s at the parse boundary — 15 s tolerance, chosen to bridge a single
+dropped ~10 s cache segment while leaving real gaps honest. Spans are always `playable: true`
+(no per-segment URLs to expire, no Ring-style E2E encryption). It reaches the player through the
+source seam (`Source.fetchCameraFootage`, [] when unsupported — demo/mock render laneless, as
+before) and is **visual only**: playback stays on the paged VOD; the lane shows *where* scrubbing
+will land on footage. One trap the Android wiring hit: the fetch must be keyed on the window, not
+just the camera — the window opens at the 24h fallback and widens to real retention when
+`frigateRetentionDays` resolves, and an unkeyed fetch would leave days 2–3 laneless (the event
+fetch had the same latent bug; both are keyed now).
 
 **A Compose page-turn trap that froze scrubbing (fixed 2026-07-30).** `produceState` does NOT
 reset its value when its keys change — only the producer restarts — so when the playhead crossed

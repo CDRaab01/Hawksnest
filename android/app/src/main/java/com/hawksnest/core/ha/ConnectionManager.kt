@@ -130,6 +130,10 @@ class ConnectionManager @Inject constructor(
     suspend fun fetchCameraEvents(camera: String, startMs: Long, endMs: Long): List<com.hawksnest.core.logic.CameraEvent> =
         current?.fetchCameraEvents(camera, startMs, endMs) ?: emptyList()
 
+    /** Continuous-recording spans for a Frigate camera — the timeline's footage lane ([] if unsupported). */
+    suspend fun fetchCameraFootage(camera: String, startMs: Long, endMs: Long): List<com.hawksnest.core.logic.FootageSpan> =
+        current?.fetchCameraFootage(camera, startMs, endMs) ?: emptyList()
+
     /** Recorded-footage URL for [camera] over `[startMs, endMs]` (null if unsupported). */
     fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String? =
         current?.recordingUrlAt(camera, startMs, endMs)

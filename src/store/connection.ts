@@ -5,6 +5,7 @@ import type { HistoryPoint, ServiceData, Source, WebRtcSignal } from "./source";
 import type { AutomationConfig } from "../lib/automations";
 import type { LogEvent } from "../lib/logbook";
 import type { CameraEvent } from "../lib/cameraEvents";
+import type { FootageSpan } from "../lib/ringFootage";
 
 let current: Source | null = null;
 
@@ -137,6 +138,16 @@ export function fetchCameraEvents(
 ): Promise<CameraEvent[]> {
   if (!current?.fetchCameraEvents) return Promise.resolve([]);
   return current.fetchCameraEvents(camera, startMs, endMs);
+}
+
+/** Continuous-recording spans for a Frigate camera — the timeline's footage lane ([] if unsupported). */
+export function fetchCameraFootage(
+  camera: string,
+  startMs: number,
+  endMs: number,
+): Promise<FootageSpan[]> {
+  if (!current?.fetchCameraFootage) return Promise.resolve([]);
+  return current.fetchCameraFootage(camera, startMs, endMs);
 }
 
 /** Recorded-footage URL for `camera` over `[startMs, endMs]` (null if unsupported). */
