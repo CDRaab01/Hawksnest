@@ -148,6 +148,9 @@ dependencies {
     // camera player). HLS module pulls in the playlist parser; MJPEG stays on the OkHttp decoder.
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.exoplayer.hls)
+    // RTSP straight to a camera — the top live tier for cameras with a reachable RTSP endpoint.
+    // Android-only by necessity: browsers cannot speak RTSP, so web's ceiling stays WebRTC.
+    implementation(libs.androidx.media3.exoplayer.rtsp)
     implementation(libs.androidx.media3.ui)
 
     // WebRTC (go2rtc/ring-mqtt low-latency live) — a maintained packaging of Google's libwebrtc that

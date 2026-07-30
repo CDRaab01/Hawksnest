@@ -49,6 +49,12 @@ This file adds the things that are easy to get wrong and the suite context.
   APK. Reverting to a plain-HTTP host means re-opening cleartext (and losing the win). (Earlier
   this was deliberately `true` because the HA host could be a bare `100.x` IP a scoped
   `<domain-config>` can't match — TLS fronting the proxy removed that constraint.)
+  **The direct-camera RTSP tier does not weaken this and needed no exception** — verified against
+  `media3-exoplayer-rtsp` 1.10.1: the module has zero references to `NetworkSecurityPolicy`, and
+  `RtspClient`/`RtspMessageChannel` connect via `javax.net.SocketFactory`/`java.net.Socket`. The
+  policy is enforced by cooperating HTTP stacks (HttpURLConnection, OkHttp, WebView), not by raw
+  TCP. If a future media3 makes RTSP consult it, **stop and discuss** — a scoped `<domain-config>`
+  cannot match bare IPs, so the only mechanical fix would be re-opening cleartext globally.
 - **Camera model:** the backend is **ring-mqtt** (+ embedded go2rtc). Its split entities
   (`_snapshot` + selectors/ding/motion; `_live`/`_event` cameras only on ring-mqtt 4.x) are
   collapsed into one logical camera in `src/lib/cameraModel.ts` (web) / the Android equivalent.

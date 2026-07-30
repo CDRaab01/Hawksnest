@@ -104,4 +104,31 @@ class SettingsViewModel @Inject constructor(
             connectionManager.reconnect()
         }
     }
+
+    // ---- Direct camera RTSP (the top live tier) ----------------------------------------------
+
+    val rtspUser: StateFlow<String?> = credentialStore.rtspUser
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val hasRtspPass: StateFlow<Boolean> = credentialStore.rtspPass
+        .map { !it.isNullOrBlank() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    val rtspCameraIps: StateFlow<Map<String, String>> = credentialStore.rtspCameraIps
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /**
+     * Save the camera RTSP account and camera→IP map. A blank password keeps the stored one, so the
+     * user can edit the IP list without re-typing it (same behaviour as the HA token field above).
+     * No reconnect: the player reads this per camera open, and it is not part of the HA session.
+     */
+    fun saveRtsp(user: String, pass: String, cameraIps: Map<String, String>) {
+        viewModelScope.launch {
+            val existing = credentialStore.rtspPass.firstOrNull().orEmpty()
+            credentialStore.saveRtsp(user, pass.ifBlank { existing }, cameraIps)
+        }
+    }
+
+    /** Turn the tier off and forget the camera credentials, leaving the HA session untouched. */
+    fun clearRtsp() {
+        viewModelScope.launch { credentialStore.saveRtsp("", "", emptyMap()) }
+    }
 }

@@ -16,8 +16,10 @@ import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.matchDevice
 import com.hawksnest.core.logic.ringRecordingMissing
 import com.hawksnest.core.logic.ringRecordingUrl
+import com.hawksnest.core.logic.reolinkRtspUrl
 import com.hawksnest.core.net.Go2rtcStreams
 import com.hawksnest.core.net.RingTimelineClient
+import com.hawksnest.util.CredentialStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -61,6 +63,7 @@ class CameraPlayerViewModel @Inject constructor(
     private val connection: ConnectionManager,
     private val ringTimelineClient: RingTimelineClient,
     private val go2rtcStreams: Go2rtcStreams,
+    private val credentialStore: CredentialStore,
 ) : ViewModel() {
 
     /**
@@ -73,6 +76,20 @@ class CameraPlayerViewModel @Inject constructor(
     suspend fun canGo2rtc(cameraName: String): Boolean {
         go2rtcStreams.prime(baseUrl())
         return go2rtcStreams.maybeAvailable(cameraName)
+    }
+
+    /**
+     * The direct-to-camera RTSP URL for [cameraName], or null when the tier doesn't apply.
+     *
+     * Null unless the user has configured all three of an account, a password and an IP for this
+     * specific camera — an unconfigured app behaves exactly as it did before this tier existed.
+     * Reads local DataStore only, so it is effectively instant.
+     */
+    suspend fun rtspUrlFor(cameraName: String): String? {
+        val ip = credentialStore.rtspCameraIps.first()[cameraName] ?: return null
+        val user = credentialStore.rtspUser.first()?.takeIf { it.isNotBlank() } ?: return null
+        val pass = credentialStore.rtspPass.first()?.takeIf { it.isNotBlank() } ?: return null
+        return reolinkRtspUrl(ip, user, pass)
     }
 
     /**

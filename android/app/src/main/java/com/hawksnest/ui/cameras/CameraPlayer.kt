@@ -45,6 +45,7 @@ import com.hawksnest.core.logic.TimeRange
 import com.hawksnest.core.logic.retentionRange
 import com.hawksnest.core.logic.vodPageFor
 import com.hawksnest.core.logic.vodPositionMsInPage
+import com.hawksnest.core.net.RtspHealth
 import com.hawksnest.ui.home.CameraUi
 import com.hawksnest.ui.theme.HawksnestTheme
 import kotlinx.coroutines.delay
@@ -173,13 +174,25 @@ fun CameraPlayer(
     }
     var go2rtcFailed by remember(cam.id) { mutableStateOf(false) }
 
+    // ABOVE go2rtc: RTSP straight to the camera, the same thing the vendor's own app does. Null
+    // unless the user configured an account + this camera's IP in Settings, so an unconfigured app
+    // behaves exactly as before. Reads local DataStore only — no network, effectively instant.
+    val rtspUrl: String? by produceState<String?>(null, cam.id) {
+        value = runCatching { viewModel.rtspUrlFor(cameraName) }.getOrNull()
+    }
+    var rtspFailed by remember(cam.id) { mutableStateOf(false) }
+    // Snapshot the breaker at mount (mirrors canWebRtc) so a verdict landing mid-view can't yank
+    // the transport out from under a session that is playing fine.
+    val rtspHealthy = remember(cam.id) { RtspHealth.maybeAvailable(cameraName) }
+    val canRtsp = rtspUrl != null && rtspHealthy && !rtspFailed
+
     // Resolve the HLS stream URL only once the HLS tier could actually render — NOT eagerly on
     // open. `camera/stream` makes HA spin up a stream pipeline, which on a battery camera wakes
     // it / competes for its single live session in parallel with the WebRTC negotiation above it
-    // on the ladder (the request itself is bounded at 15s in HaSource). Both live-WebRTC tiers
-    // (go2rtc-direct, then HA) must be exhausted before we resolve HLS — and `canGo2rtc == null`
-    // is not yet an exhaustion, so an undecided go2rtc must not resolve HLS either.
-    val wantsHls = (canGo2rtc == false || go2rtcFailed) && !(canWebRtc && !webRtcFailed)
+    // on the ladder (the request itself is bounded at 15s in HaSource). Every tier above must be
+    // exhausted before we resolve HLS — and "undecided" is not exhaustion, so neither a pending
+    // go2rtc list nor a pending RTSP lookup may resolve it.
+    val wantsHls = !canRtsp && (canGo2rtc == false || go2rtcFailed) && !(canWebRtc && !webRtcFailed)
     val liveUrl: String? by produceState<String?>(null, cam.id, wantsHls) {
         value = if (wantsHls) viewModel.liveStreamUrl(cam.entityId) else null
     }
@@ -344,10 +357,11 @@ fun CameraPlayer(
             )
         }
 
-        // Transport ladder: recorded VOD (when scrubbed) → live WebRTC (go2rtc) → live WebRTC (HA)
-        // → live HLS/demo video → MJPEG proxy → snapshot. Mirrors the web LivePlayer's step-down.
-        // The two WebRTC tiers are continuous RTP; HLS below them is segmented, which is what
-        // "jumpy" live video looks like — so a camera go2rtc serves should never reach it.
+        // Transport ladder: recorded VOD (when scrubbed) → live RTSP straight to the camera →
+        // live WebRTC (go2rtc) → live WebRTC (HA) → live HLS/demo video → MJPEG proxy → snapshot.
+        // Everything above HLS is continuous; HLS is segmented, which is what "jumpy" live video
+        // actually is — so a camera with a better tier available should never reach it.
+        // Web's ladder is the same minus the RTSP tier, which browsers cannot play at all.
         val frame = Modifier
             .fillMaxWidth()
             .aspectRatio(16f / 9f)
@@ -416,6 +430,12 @@ fun CameraPlayer(
                     refetchedFor = null
                     if (timeline != null) timelineNonce += 1 else retryNonce += 1
                 },
+                modifier = frame,
+            )
+            isLive && canRtsp -> RtspPlayer(
+                url = rtspUrl!!,
+                camera = cameraName,
+                onFail = { rtspFailed = true },
                 modifier = frame,
             )
             isLive && canGo2rtc == true && !go2rtcFailed -> Go2rtcPlayer(

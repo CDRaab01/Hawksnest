@@ -197,7 +197,7 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   rhythm — FEATURED lock/climate/alarm cards, CONTROL rows with inline switches, READONLY rows).
 - `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
 - **Camera live ladder** (`ui/cameras/CameraPlayer.kt`): recorded VOD (when scrubbed) →
-  **go2rtc-direct** → HA WebRTC → HLS → MJPEG → snapshot. The go2rtc-direct
+  **RTSP-direct** → **go2rtc-direct** → HA WebRTC → HLS → MJPEG → snapshot. The go2rtc-direct
   tier (`Go2rtcPlayer.kt`) negotiates recvonly WebRTC straight against the dedicated go2rtc over
   its WS API (`/go2rtc/api/ws?src=<base>`, same signaling `TalkButton` speaks — both share
   `Go2rtc.kt`'s `go2rtcWsUrl`), skipping the ring-mqtt/ffmpeg hop for ~1–2 s first frame. Media
@@ -217,6 +217,37 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   `camera/stream` wakes a battery camera's pipeline, which is what the lazy-HLS rule exists to
   prevent. Both WebRTC tiers are continuous RTP; HLS below them is segmented, which is what
   "jumpy live video" actually is.
+- **RTSP-direct** (`ui/cameras/RtspPlayer.kt`, `core/logic/ReolinkRtsp.kt`) — the top live tier and
+  the **one place the two platforms' ladders legitimately differ**: browsers cannot play RTSP at
+  any level, so web's ceiling is and stays WebRTC. This is not web lagging Android; it is a
+  capability gap, and `ReolinkRtsp.kt` deliberately has no web twin.
+  It plays the camera's own `rtsp://user:pass@ip:554/h264Preview_01_main` — what the vendor app
+  does, and the shortest path there is (no relay, no re-packaging). A dedicated composable rather
+  than a `VideoPlayer` mode: VideoPlayer's construction is built around HLS/VOD concerns (authSig
+  + Bearer data-source wrapping, live-edge offsets, seek-within-media, duration reporting), none of
+  which apply here.
+  **Off by default.** It needs a camera account and a per-camera IP, both entered in Settings
+  (`ui/settings/RtspPanel.kt`) and stored in `CredentialStore` with the password under the same
+  Keystore wrap as the HA token. Unconfigured, the ladder behaves exactly as before. Nothing in
+  the repo carries a real IP or account — it is public.
+  **Fails fast, three ways**, because the tier is optional and a dead frame is worse than a
+  step-down: a 4 s RTSP connect timeout, a 5 s no-first-frame deadline (an unreachable camera can
+  hang setup without ever erroring), and a 7 s post-play stall timeout. That last one matters
+  because the main stream is FIXED-bitrate — a weak link degrades to a stall, not to lower quality,
+  whereas go2rtc's WebRTC below it adapts. Only the first two report to `core/net/RtspHealth`; a
+  stall is the network's fault, not the camera's.
+  `RtspHealth` is keyed **per camera**, unlike `Go2rtcHealth`. go2rtc is one shared service, so one
+  failure predicts all; each camera is its own RTSP server, so a global verdict would let one
+  powered-off camera downgrade the whole fleet for the session.
+  Transport is **TCP-interleaved** (`setForceUseRtpTcp(true)`): the camera is reached over the
+  tailnet as often as the LAN, and RTP-over-UDP needs its own ports to survive that path.
+  Two constraints worth knowing: cameras allow only a handful of concurrent RTSP sessions (Frigate
+  holds the sub stream, go2rtc the main, each viewing phone one more — an over-budget open is
+  rejected and steps down, by design), and off-LAN this needs the camera IPs routed onto the
+  tailnet (per-camera `/32` subnet routes, not the whole LAN).
+  **Cleartext:** verified against media3 1.10.1 that the RTSP module never consults
+  `NetworkSecurityPolicy` (raw `java.net.Socket`), so `cleartextTrafficPermitted="false"` stands
+  unchanged — see CLAUDE.md for what to do if that ever changes.
 - **Devices v2** (`ui/devices/`): single-column list in the three-tier rhythm, PULSE segment
   chips (not stock M3), room summaries ("N devices · M on"), search, and long-press → rename/hide
   persisted in `util/DevicePrefsStore` (DataStore) with a hidden-devices shelf. Display names
