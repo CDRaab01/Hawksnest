@@ -249,6 +249,47 @@ class HaSource(
     override fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String =
         buildRecordingUrl(camera, startMs, endMs, withBase(FRIGATE_BASE, baseUrl))
 
+    /** Cached `record.continuous.days` per camera; one config read serves every camera. */
+    @Volatile private var retentionCache: Map<String, Double>? = null
+
+    /**
+     * Read per-camera retention from `/api/frigate/config`, cached for the session.
+     *
+     * Confirmed against the real cluster 2026-07-29: the route returns 200 through the HA proxy
+     * and carries `cameras.<name>.record.continuous.days`. Returns null on any failure, which the
+     * caller treats as "unknown" and falls back — a wrong high guess would offer a timeline
+     * reaching into recordings Frigate has already pruned.
+     */
+    override suspend fun frigateRetentionDays(camera: String): Double? {
+        retentionCache?.let { return it[camera] }
+        val url = "${withBase(FRIGATE_BASE, baseUrl)}/config"
+        val parsed = withContext(Dispatchers.IO) {
+            try {
+                val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
+                client.newCall(req).execute().use { res ->
+                    if (!res.isSuccessful) return@use null
+                    val body = res.body?.string() ?: return@use null
+                    val root = json.parseToJsonElement(body) as? JsonObject ?: return@use null
+                    val globalDays = (root["record"] as? JsonObject)
+                        ?.get("continuous")?.let { it as? JsonObject }
+                        ?.get("days")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val cams = root["cameras"] as? JsonObject ?: return@use emptyMap<String, Double>()
+                    cams.mapNotNull { (name, cfg) ->
+                        val days = ((cfg as? JsonObject)?.get("record") as? JsonObject)
+                            ?.get("continuous")?.let { it as? JsonObject }
+                            ?.get("days")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                            ?: globalDays
+                        if (days != null && days > 0) name to days else null
+                    }.toMap()
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+        if (parsed != null) retentionCache = parsed
+        return parsed?.get(camera)
+    }
+
     /**
      * Sign the VOD manifest path so its segments are actually fetchable — see
      * [Source.signedRecordingUrlAt] for why this is required at all.

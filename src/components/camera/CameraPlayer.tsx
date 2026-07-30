@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LogicalCamera } from "../../lib/cameraModel";
-import { fetchCameraEvents, recordingUrlAt } from "../../store/connection";
+import { fetchCameraEvents, signedRecordingUrlAt } from "../../store/connection";
 import { resolveRingClipUrl } from "../../store/ringClip";
 import {
   fetchRingDevices,
@@ -14,11 +14,11 @@ import {
   footageSpans,
   type RingFootage,
 } from "../../lib/ringFootage";
-import { frigateHasCamera, primeFrigateCameras } from "../../lib/frigate";
+import { frigateHasCamera, frigateRetentionDays, primeFrigateCameras } from "../../lib/frigate";
+import { retentionRange, vodPageFor, vodPositionSecondsInPage } from "../../lib/vodWindow";
 import { hasRealRecordings, recordedBackendOf } from "../../lib/recordedBackend";
 import { useEntity } from "../../store/entityStore";
 import type { CameraEvent } from "../../lib/cameraEvents";
-import { vodPositionSeconds } from "../../lib/cameraEvents";
 import { clipContaining, offsetInClipSeconds, clipSpanEndMs } from "../../lib/clipSeek";
 import { ringEventsFromSelect } from "../../lib/ringEvents";
 import { snapshotUrl } from "../../lib/cameraUrl";
@@ -105,10 +105,23 @@ export function CameraPlayer({
   const isRing = backend === "ring";
   const ringSelect = useEntity(camera.eventSelectId ?? "");
 
-  const [window] = useState(() => {
-    const end = Date.now();
-    return { start: end - DAY_MS, end };
-  });
+  // Pin "now" once so the timeline doesn't slide under the user mid-session.
+  const [nowAnchor] = useState(() => Date.now());
+  // How far back the timeline reaches. Ring stays at 24h — its recorded path is the last handful
+  // of cloud events, so a longer span would render a mostly-empty timeline and pull days of Ring
+  // history for nothing. Frigate keeps continuous video, so its timeline spans the ACTUAL
+  // retention Frigate reports (`record.continuous.days`) rather than a hardcoded day.
+  const window = useMemo(() => {
+    const days = frigateRetentionDays(cameraName);
+    if (backend === "frigate" && days) {
+      const r = retentionRange(nowAnchor, days);
+      return { start: r.startMs, end: r.endMs };
+    }
+    return { start: nowAnchor - DAY_MS, end: nowAnchor };
+    // frigateNonce is the re-derive trigger, same as `backend` above: `frigateRetentionDays`
+    // reads a module cache that eslint cannot see, so the dep looks unused but is load-bearing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backend, cameraName, nowAnchor, frigateNonce]);
 
   const [playhead, setPlayhead] = useState<number | "live">("live");
   const [paused, setPaused] = useState(false);
@@ -344,7 +357,34 @@ export function CameraPlayer({
   // so the placeholder can take over; it's keyed by src, not a flag, so changing
   // camera or window re-arms it automatically.
   const [vodFailed, setVodFailed] = useState<string | null>(null);
-  const vodSrc = isLive || isRing ? null : recordingUrlAt(cameraName, window.start, window.end);
+  // The VOD is a bounded PAGE around the playhead, not the whole window. A Frigate manifest is
+  // capped at ~1024 segments by nginx-vod-module (~3h at these segment lengths) and 503s past it,
+  // so a window spanning days — or even the old 24h — cannot be one manifest. Pages are
+  // grid-aligned, so scrubbing within a page keeps the same URL and the player does not reload.
+  const vodPage = useMemo(
+    () =>
+      isLive || isRing
+        ? null
+        : vodPageFor(headTime, { startMs: window.start, endMs: window.end }),
+    [isLive, isRing, headTime, window.start, window.end],
+  );
+  // Frigate VOD must be SIGNED or every segment 401s and the video is silently black — see
+  // `Source.signedRecordingUrlAt`. Signing is a websocket round trip, so it resolves in an effect
+  // rather than during render. Keyed on the page, so it re-signs exactly when the page turns.
+  const [vodSrc, setVodSrc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!vodPage) {
+      setVodSrc(null);
+      return;
+    }
+    let active = true;
+    void signedRecordingUrlAt(cameraName, vodPage.startMs, vodPage.endMs)
+      .then((url) => active && setVodSrc(url))
+      .catch(() => active && setVodSrc(null));
+    return () => {
+      active = false;
+    };
+  }, [cameraName, vodPage?.startMs, vodPage?.endMs, vodPage]);
 
   const recordingSrc = isLive
     ? null
@@ -361,7 +401,10 @@ export function CameraPlayer({
     : isRing
       ? (playable?.seekSeconds ??
         (ringReady && selected ? offsetInClipSeconds(selected, headTime) : undefined))
-      : vodPositionSeconds(headTime, window.start);
+      : // Offset within the PAGE, not the window — the VOD's zero is the page start. Using
+        // window.start here would seek to a plausible but wrong moment, which is worse than an
+        // obvious failure because it looks like the recording is simply wrong.
+        vodPositionSecondsInPage(headTime, vodPage?.startMs ?? window.start);
 
   // Learn the loaded ring clip's real duration from the media, refining the
   // timeline block width + containment span for its open-ended event.

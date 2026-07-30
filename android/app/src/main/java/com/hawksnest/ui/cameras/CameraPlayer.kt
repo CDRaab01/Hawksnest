@@ -41,7 +41,10 @@ import com.hawksnest.core.logic.clipContaining
 import com.hawksnest.core.logic.clipSpanEndMs
 import com.hawksnest.core.logic.footageSpans
 import com.hawksnest.core.logic.offsetInClipMs
-import com.hawksnest.core.logic.vodPositionMs
+import com.hawksnest.core.logic.TimeRange
+import com.hawksnest.core.logic.retentionRange
+import com.hawksnest.core.logic.vodPageFor
+import com.hawksnest.core.logic.vodPositionMsInPage
 import com.hawksnest.ui.home.CameraUi
 import com.hawksnest.ui.theme.HawksnestTheme
 import kotlinx.coroutines.delay
@@ -73,8 +76,22 @@ fun CameraPlayer(
 ) {
     val cameraName = cameraNameOf(cam.id)
     val isRing = cam.eventSelectId != null
-    // Fix the timeline window when the player opens (rolling 24h ending now).
-    val window = remember { System.currentTimeMillis().let { it - DAY_MS to it } }
+    // Pin "now" once so the timeline doesn't slide under the user mid-session.
+    val nowAnchor = remember(cam.id) { System.currentTimeMillis() }
+    // How far back the timeline reaches. Ring stays at 24h — its recorded path is the last handful
+    // of cloud events, so a longer span renders a mostly-empty timeline and pulls days of Ring
+    // history for nothing. Frigate keeps continuous video, so its timeline spans the retention
+    // Frigate actually reports (`record.continuous.days`) rather than a hardcoded day.
+    val retentionDays: Double? by produceState<Double?>(null, cameraName, isRing) {
+        value = if (isRing) null else runCatching { viewModel.frigateRetentionDays(cameraName) }.getOrNull()
+    }
+    val window = remember(nowAnchor, retentionDays, isRing) {
+        if (!isRing && retentionDays != null) {
+            retentionRange(nowAnchor, retentionDays).let { it.startMs to it.endMs }
+        } else {
+            (nowAnchor - DAY_MS) to nowAnchor
+        }
+    }
     val (startMs, endMs) = window
 
     // Ring's OWN timeline via the ring-timeline service — real event times, real spans and directly
@@ -243,13 +260,21 @@ fun CameraPlayer(
     // id to key on.
     val sourceKey = (source as? RecordedSource.Footage)?.let { "footage:${it.segment.startMs}" }
         ?: selected?.id
-    // Frigate VOD must be SIGNED or every segment 401s and the video is silently black — see
+    // The VOD is a bounded PAGE around the playhead, not the whole window. A Frigate manifest is
+    // capped at ~1024 segments by nginx-vod-module (~3h at these segment lengths) and 503s past
+    // it, so a window spanning days — or even the old 24h — cannot be one manifest. Pages are
+    // grid-aligned, so scrubbing within a page keeps the same URL and the player does not reload.
+    val vodPage = remember(isLive, isRing, headTime, startMs, endMs) {
+        if (isLive || isRing) null else vodPageFor(headTime, TimeRange(startMs, endMs))
+    }
+    // Frigate VOD must also be SIGNED or every segment 401s and the video is silently black — see
     // Source.signedRecordingUrlAt. Signing is a websocket round trip, so it resolves in an effect
-    // rather than during composition. Keyed on the window because a signature only authorises the
-    // path prefix it was minted for: a new start/end needs a new one.
-    val signedVodUrl by produceState<String?>(initialValue = null, cameraName, startMs, endMs, isLive, isRing) {
-        value = if (isLive || isRing) null
-        else viewModel.signedRecordingUrl(cameraName, startMs, endMs)
+    // rather than during composition. Keyed on the PAGE: a signature only authorises the path
+    // prefix it was minted for, so it re-signs exactly when the page turns.
+    val signedVodUrl by produceState<String?>(null, cameraName, vodPage) {
+        val page = vodPage
+        value = if (page == null) null
+        else viewModel.signedRecordingUrl(cameraName, page.startMs, page.endMs)
     }
     val recordingUrl = when {
         isLive -> null
@@ -262,7 +287,10 @@ fun CameraPlayer(
         isLive -> null
         isRing -> playable?.second
             ?: if (ringReady != null && selected != null) offsetInClipMs(selected, headTime) else null
-        else -> vodPositionMs(headTime, startMs)
+        // Offset within the PAGE, not the window — the VOD's zero is the page start. Using
+        // startMs here would seek to a plausible but wrong moment, which is worse than an obvious
+        // failure because it looks like the recording itself is wrong.
+        else -> vodPositionMsInPage(headTime, vodPage?.startMs ?: startMs)
     }
 
     // Give the timeline the loaded clip's real span so chip width agrees with containment.

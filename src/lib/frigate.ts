@@ -23,23 +23,27 @@
  * behaviour the app had before Frigate existed.
  */
 let camerasCache: Set<string> | null = null;
+/** Per-camera `record.continuous.days`, from the same config read. */
+let retentionCache: Map<string, number> = new Map();
 let camerasFetchedAt = 0;
 let camerasInFlight: Promise<Set<string>> | null = null;
 const CAMERAS_TTL_MS = 60_000;
+
+/** Shape of the slice of `/api/frigate/config` this module reads. */
+interface FrigateConfig {
+  cameras?: Record<string, { record?: { continuous?: { days?: number } } }>;
+  record?: { continuous?: { days?: number } };
+}
 
 /**
  * Fetch (and cache) Frigate's camera list. Safe to call repeatedly; resolves once
  * the cache is populated so a caller can re-render on the result.
  *
- * NOTE: `/api/frigate/config` is the one route in this integration that is
- * **inferred rather than confirmed** — `/vod/…`, `/notifications/<id>/clip.mp4`
- * and `/events` are all exercised by shipped code, this one is not. nginx will
- * forward it (the `/api/frigate/` location is a prefix proxy), but whether
- * frigate-hass-integration serves it has to be checked against a real cluster.
- * If it turns out not to, the fallback is reading the camera list off the HA
- * `camera.*` entity attributes the integration creates; the fail-closed cache
- * above means that discovery lands as "no Frigate" and today's behaviour holds
- * until then, rather than as a broken recorded path.
+ * `/api/frigate/config` was **confirmed against the real cluster 2026-07-29** (it had previously
+ * been inferred): it returns 200 through the HA proxy and carries both the camera list and each
+ * camera's `record.continuous.days`. The fail-closed behaviour below is kept anyway — a failed
+ * read still reports "no Frigate", which degrades to today's behaviour rather than a broken
+ * recorded path.
  */
 export function primeFrigateCameras(): Promise<void> {
   const fresh = Date.now() - camerasFetchedAt < CAMERAS_TTL_MS;
@@ -47,10 +51,26 @@ export function primeFrigateCameras(): Promise<void> {
   if (!camerasInFlight) {
     camerasInFlight = fetch("/api/frigate/config", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : {}))
-      .then((json: { cameras?: Record<string, unknown> }) =>
-        new Set(Object.keys(json?.cameras ?? {})),
-      )
-      .catch(() => new Set<string>())
+      .then((json: FrigateConfig) => {
+        const cams = json?.cameras ?? {};
+        // Retention is read from the SAME response — it is per-camera in Frigate, and a
+        // deployment can legitimately keep different windows per room (a bedroom shorter than
+        // a hallway), so this must not collapse to one global number.
+        const globalDays = json?.record?.continuous?.days;
+        const retention = new Map<string, number>();
+        for (const [name, cam] of Object.entries(cams)) {
+          const days = cam?.record?.continuous?.days ?? globalDays;
+          if (typeof days === "number" && Number.isFinite(days) && days > 0) {
+            retention.set(name, days);
+          }
+        }
+        retentionCache = retention;
+        return new Set(Object.keys(cams));
+      })
+      .catch(() => {
+        retentionCache = new Map();
+        return new Set<string>();
+      })
       .then((set) => {
         camerasCache = set;
         camerasFetchedAt = Date.now();
@@ -59,6 +79,17 @@ export function primeFrigateCameras(): Promise<void> {
       });
   }
   return camerasInFlight.then(() => undefined);
+}
+
+/**
+ * How many days of continuous recording Frigate keeps for `name`, or null if unknown.
+ *
+ * Null means "config not read yet, or this camera is not Frigate's" — callers should fall back
+ * rather than assume a span, because guessing high shows a timeline reaching into recordings
+ * that were pruned, which reads as a broken player rather than an empty one.
+ */
+export function frigateRetentionDays(name: string): number | null {
+  return retentionCache.get(name) ?? null;
 }
 
 /**
@@ -71,9 +102,10 @@ export function frigateHasCamera(name: string): boolean {
   return camerasCache?.has(name) ?? false;
 }
 
-/** Drop the cached camera list. Tests only — the app fetches once per session. */
+/** Drop the cached camera list and retention. Tests only — the app fetches once per session. */
 export function resetFrigateCamerasCache(): void {
   camerasCache = null;
+  retentionCache = new Map();
   camerasFetchedAt = 0;
   camerasInFlight = null;
 }

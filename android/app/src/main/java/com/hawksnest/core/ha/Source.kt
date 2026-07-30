@@ -112,6 +112,17 @@ interface Source {
     fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String? = null
 
     /**
+     * Days of continuous recording Frigate keeps for [camera], or null if unknown.
+     *
+     * Drives how far back the timeline lets the user scrub — Frigate reports it per camera as
+     * `record.continuous.days`, and a deployment can legitimately keep different windows per room.
+     * Null means "not Frigate, or the config has not been read", and callers should fall back
+     * rather than assume: guessing high shows a timeline reaching into pruned recordings, which
+     * reads as a broken player rather than an empty one.
+     */
+    suspend fun frigateRetentionDays(camera: String): Double? = null
+
+    /**
      * The same VOD URL, but **signed** where the backend demands it.
      *
      * frigate-hass-integration (>= 5.x) rejects VOD *segment* requests that carry no `authSig`

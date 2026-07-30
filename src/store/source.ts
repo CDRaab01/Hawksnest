@@ -87,6 +87,24 @@ export interface Source {
    * The fixture source returns the demo clip. Null when unsupported.
    */
   recordingUrlAt?: (camera: string, startMs: number, endMs: number) => string | null;
+  /**
+   * The same VOD URL, **signed** where the backend demands it.
+   *
+   * frigate-hass-integration rejects VOD *segment* requests without an `authSig` query parameter
+   * (`VodSegmentProxyView` validates it unconditionally; a Bearer token does not satisfy it).
+   * Playlists are exempt, so an unsigned URL fails in the worst way: the manifests load, every
+   * `.m4s` 401s, and the video is black with no error raised.
+   *
+   * A signature authorises a path *prefix*, so one covers every segment in the page — but it is
+   * tied to that page's `start/end`, so a new page needs a new signature. Signed URLs also need
+   * no `Authorization` header, which is why this returns a URL rather than threading a token
+   * into the media layer.
+   */
+  signedRecordingUrlAt?: (
+    camera: string,
+    startMs: number,
+    endMs: number,
+  ) => Promise<string | null>;
   /** A playable URL for one recorded event's clip. Null when unsupported. */
   eventClipUrl?: (eventId: string) => string | null;
   /**

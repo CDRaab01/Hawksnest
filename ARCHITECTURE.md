@@ -78,6 +78,20 @@ playlist that 404s, and the player tracks the failed src (`vodFailed`) to swap i
 with a Retry rather than sit dead. Replacing that with real gap knowledge means normalizing
 Frigate's `/recordings` into the `ringFootage.ts` segment shape; not done yet.
 
+**The Frigate VOD is PAGED, not one continuous manifest.** Frigate serves `/vod/` through
+nginx-vod-module, whose durations array has a hard ~1024-element ceiling; past it the request 503s
+outright (`media_set_parse_durations: invalid number of elements`). Measured 2026-07-29: 220 min /
+940 segments returns 200, 230 min does not — roughly a **3-hour ceiling** at these segment lengths,
+and not configurable without rebuilding the module. The earlier "one continuous VOD spanning the
+window" was therefore never workable: the window was a hardcoded 24h, already 8× over. So the
+timeline and the media are decoupled — the **timeline** spans the camera's real retention
+(`record.continuous.days`, read from `/api/frigate/config`; Ring stays at 24h because its recorded
+path is a handful of cloud events), while the **media** is a bounded 2h page that follows the
+playhead (`lib/vodWindow.ts` ⇄ `core/logic/VodWindow.kt`, ported 1:1 and tested on both). Pages are
+grid-aligned so scrubbing *within* one yields the identical URL — no re-prepare, cache stays warm,
+and the page's signature stays valid. Zoom-out is no longer capped at 24h (`maxSpanMs` is now the
+window itself), or a 3-day retention could be panned but never seen whole.
+
 **Frigate VOD URLs must be signed, and the signature has to reach the segments.**
 frigate-hass-integration validates an `authSig` query parameter on every VOD *segment* request
 (`VodSegmentProxyView`) — unconditionally, and a Bearer token does not satisfy it. Playlists are

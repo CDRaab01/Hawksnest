@@ -163,6 +163,11 @@ class CameraPlayerViewModel @Inject constructor(
     suspend fun signedRecordingUrl(camera: String, startMs: Long, endMs: Long): String? =
         connection.signedRecordingUrlAt(camera, startMs, endMs)
 
+    /** Days of continuous recording Frigate keeps for [camera] — drives how far back the timeline
+     *  reaches. Null when unknown; the caller falls back rather than guessing. */
+    suspend fun frigateRetentionDays(camera: String): Double? =
+        connection.frigateRetentionDays(camera)
+
     /** Read a (live) entity from the store — used to pull a ring-mqtt event selector's options. */
     fun entity(id: String): HassEntity? = connection.state.entities.value[id]
 
