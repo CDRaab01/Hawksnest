@@ -1,6 +1,7 @@
 import type { AutomationConfig } from "../lib/automations";
 import type { LogEvent } from "../lib/logbook";
 import type { CameraEvent } from "../lib/cameraEvents";
+import type { FootageSpan } from "../lib/ringFootage";
 
 /** Optional service-call data. `entity_id` targets the entity; the rest is service data. */
 export type ServiceData = { entity_id?: string } & Record<string, unknown>;
@@ -81,6 +82,17 @@ export interface Source {
     startMs: number,
     endMs: number,
   ) => Promise<CameraEvent[]>;
+  /**
+   * Where continuous recordings exist for a Frigate `camera` over `[startMs, endMs]`, as
+   * coalesced drawable spans — the timeline's continuous lane. [] when unknown/unsupported:
+   * the lane simply doesn't render. (The Ring lane arrives via the ring-timeline service
+   * instead, bundled with the timeline fetch — this seam is the Frigate counterpart.)
+   */
+  fetchCameraFootage?: (
+    camera: string,
+    startMs: number,
+    endMs: number,
+  ) => Promise<FootageSpan[]>;
   /**
    * A playable URL for recorded footage of `camera` over `[startMs, endMs]`
    * (HLS VOD) — what the scrubber loads on seek. Pure URL builder, no fetch.

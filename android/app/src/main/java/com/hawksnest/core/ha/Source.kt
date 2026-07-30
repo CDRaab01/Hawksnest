@@ -1,6 +1,7 @@
 package com.hawksnest.core.ha
 
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.FootageSpan
 import com.hawksnest.core.logic.LogEvent
 import kotlinx.serialization.json.JsonObject
 
@@ -107,6 +108,14 @@ interface Source {
      * [camera] is the Frigate camera name. Returned oldest-first.
      */
     suspend fun fetchCameraEvents(camera: String, startMs: Long, endMs: Long): List<CameraEvent> = emptyList()
+
+    /**
+     * Where continuous recordings exist for a Frigate [camera] over `[startMs, endMs]`, as
+     * coalesced drawable spans — the timeline's continuous lane. Empty when unknown/unsupported:
+     * the lane simply doesn't render. (The Ring lane arrives via the ring-timeline service
+     * instead, bundled with the timeline fetch — this seam is the Frigate counterpart.)
+     */
+    suspend fun fetchCameraFootage(camera: String, startMs: Long, endMs: Long): List<FootageSpan> = emptyList()
 
     /** Recorded-footage URL for [camera] over `[startMs, endMs]` (HLS VOD). Null when unsupported. */
     fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String? = null

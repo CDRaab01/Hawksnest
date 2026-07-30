@@ -11,6 +11,7 @@ import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
 import com.hawksnest.core.logic.ringEventsFromOptions
+import com.hawksnest.core.logic.FootageSpan
 import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.matchDevice
@@ -198,6 +199,10 @@ class CameraPlayerViewModel @Inject constructor(
      *  reaches. Null when unknown; the caller falls back rather than guessing. */
     suspend fun frigateRetentionDays(camera: String): Double? =
         connection.frigateRetentionDays(camera)
+
+    /** Continuous-recording spans for a Frigate camera — the timeline's footage lane. */
+    suspend fun cameraFootage(camera: String, startMs: Long, endMs: Long): List<FootageSpan> =
+        connection.fetchCameraFootage(camera, startMs, endMs)
 
     /** HA token for media requests that must authenticate themselves — see [ConnectionManager.haToken]. */
     suspend fun haToken(): String? = connection.haToken()

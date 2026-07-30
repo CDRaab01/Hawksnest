@@ -1,10 +1,13 @@
 package com.hawksnest.core.logic
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
 
 /**
@@ -144,6 +147,63 @@ fun footageSpans(segments: List<FootageSegment>, toleranceMs: Long = 1000L): Lis
             continue
         }
         spans += FootageSpan(seg.startMs, seg.endMs, playable)
+    }
+    return spans
+}
+
+/**
+ * Tolerance when coalescing Frigate recording segments into drawable spans.
+ *
+ * Frigate writes ~10 s cache segments with sub-second seams between them, but a camera reconnect
+ * or a Frigate restart can drop a segment, leaving a one-segment hole that is real but not worth
+ * drawing. 15 s bridges those; anything longer renders as an honest gap in the lane.
+ */
+const val FRIGATE_SPAN_TOLERANCE_MS = 15_000L
+
+/**
+ * Unwrap a `frigate/recordings/get` websocket result into drawable [FootageSpan]s — the Frigate
+ * counterpart of [footageSpans], and the data behind the continuous lane for Frigate cameras.
+ * 1:1 with the web `parseFrigateWsRecordings`.
+ *
+ * Same websocket-only contract as `frigate/events/get` (see `parseFrigateWsEvents`): there is no
+ * REST route for this, and the result usually arrives as a JSON **string** the integration didn't
+ * decode. The payload is one entry per ~10 s recording segment (measured: ~6.5k entries / 1 MB /
+ * tens of ms for a 3-day window), so coalescing here — not in the composable — is what keeps the
+ * timeline from drawing thousands of runs.
+ *
+ * Spans are always `playable = true`: unlike Ring, Frigate has no per-segment URL to expire and no
+ * end-to-end encryption — if the segment is on disk, the VOD can serve it. Junk input yields [],
+ * never a throw: the lane simply doesn't render, which is what the pre-8b timeline showed anyway.
+ */
+fun parseFrigateWsRecordings(
+    result: JsonElement?,
+    toleranceMs: Long = FRIGATE_SPAN_TOLERANCE_MS,
+): List<FootageSpan> {
+    val element = when {
+        result is JsonPrimitive && result.isString ->
+            try {
+                Json.parseToJsonElement(result.content)
+            } catch (_: Exception) {
+                return emptyList()
+            }
+        else -> result
+    }
+    val arr = element as? JsonArray ?: return emptyList()
+    val segments = arr.mapNotNull { entry ->
+        val obj = entry as? JsonObject ?: return@mapNotNull null
+        val start = (obj["start_time"] as? JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null
+        val end = (obj["end_time"] as? JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null
+        if (end <= start) return@mapNotNull null
+        Math.round(start * 1000) to Math.round(end * 1000)
+    }.sortedBy { it.first }
+    val spans = mutableListOf<FootageSpan>()
+    for ((startMs, endMs) in segments) {
+        val last = spans.lastOrNull()
+        if (last != null && startMs - last.endMs <= toleranceMs) {
+            spans[spans.lastIndex] = last.copy(endMs = maxOf(last.endMs, endMs))
+            continue
+        }
+        spans += FootageSpan(startMs, endMs, playable = true)
     }
     return spans
 }
