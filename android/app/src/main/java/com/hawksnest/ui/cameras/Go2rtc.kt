@@ -17,20 +17,5 @@ fun go2rtcWsUrl(baseUrl: String, src: String): String {
     return "$wsOrigin/go2rtc/api/ws?src=${URLEncoder.encode(src, "UTF-8")}"
 }
 
-/**
- * Session circuit-breaker for the go2rtc direct-live **media** path. Signaling (WS via nginx) can
- * succeed while media (WebRTC to `GO2RTC_HOST_IP:8555`) can't be reached — before the §7c host
- * forwarder is up, or off the tailnet. The first camera whose media fails flips this to false and
- * every camera after skips the go2rtc tier for the rest of the process (no repeated multi-second
- * stalls); it drops straight to the HA WebRTC path instead. A success flips it true.
- */
-object Go2rtcHealth {
-    @Volatile private var mediaHealthy: Boolean? = null
-
-    fun report(ok: Boolean) {
-        mediaHealthy = ok
-    }
-
-    /** Best-guess for whether the direct-go2rtc tier is worth attempting (media not known-broken). */
-    fun maybeAvailable(): Boolean = mediaHealthy != false
-}
+// `Go2rtcHealth` moved to `core/net/Go2rtcStreams.kt`, alongside the stream-list cache that also
+// consults it — the same pairing the web `lib/go2rtc.ts` uses, and `core` cannot depend on `ui`.

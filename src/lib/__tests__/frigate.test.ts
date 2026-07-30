@@ -1,81 +1,66 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { frigateHasCamera, primeFrigateCameras, resetFrigateCamerasCache } from "../frigate";
+import { describe, it, expect } from "vitest";
+import { FRIGATE_RETENTION_DAYS, frigateCameraName, isFrigateCamera } from "../frigate";
+import type { HassEntity } from "../ha";
 
-/** Stub `/api/frigate/config` with a response, or make the fetch reject. */
-function stubConfig(body: unknown, ok = true) {
-  const fetchMock = vi.fn().mockResolvedValue({
-    ok,
-    json: async () => body,
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+/**
+ * These replace the old config-fetch tests, which stubbed `/api/frigate/config`.
+ *
+ * That route does not exist — frigate-hass-integration never proxied it, so the real request 404s
+ * and every camera resolved as "no Frigate", silently disabling recorded playback. The old tests
+ * passed precisely because they stubbed a route that was never real, which is why they never
+ * caught it. Membership now comes from the `camera.*` entity the integration creates, which
+ * stamps `client_id` and `camera_name` onto it.
+ */
+function entity(attributes: Record<string, unknown>): HassEntity {
+  return {
+    entity_id: "camera.big_room",
+    state: "recording",
+    attributes,
+  } as unknown as HassEntity;
 }
 
-beforeEach(() => {
-  resetFrigateCamerasCache();
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-  resetFrigateCamerasCache();
-});
-
-describe("frigateHasCamera", () => {
-  it("is false before the config has been fetched", () => {
-    stubConfig({ cameras: { bedroom: {} } });
-    // Deliberately not primed — an un-fetched cache must not claim a camera.
-    expect(frigateHasCamera("bedroom")).toBe(false);
+describe("isFrigateCamera", () => {
+  it("recognises a camera the Frigate integration created", () => {
+    expect(isFrigateCamera(entity({ client_id: "frigate", camera_name: "big_room" }))).toBe(true);
   });
 
-  it("reports cameras named by the config once primed", async () => {
-    stubConfig({ cameras: { bedroom: {}, front_door: {} } });
-    await primeFrigateCameras();
-    expect(frigateHasCamera("bedroom")).toBe(true);
-    expect(frigateHasCamera("front_door")).toBe(true);
+  // The whole point of failing closed: a camera wrongly believed to be on Frigate stops looping
+  // the demo clip and starts surfacing errors for recordings that never existed.
+  it("fails closed for a non-Frigate camera", () => {
+    expect(isFrigateCamera(entity({ friendly_name: "Front Door" }))).toBe(false);
   });
 
-  it("does not claim a camera Frigate omits", async () => {
-    stubConfig({ cameras: { bedroom: {} } });
-    await primeFrigateCameras();
-    expect(frigateHasCamera("garage")).toBe(false);
+  it("fails closed for null/undefined rather than throwing", () => {
+    expect(isFrigateCamera(null)).toBe(false);
+    expect(isFrigateCamera(undefined)).toBe(false);
   });
 
-  // The whole point of failing closed: with no Frigate deployed, every camera must
-  // read exactly as it did before Frigate existed, not flip to a broken NVR path.
-  it("fails closed when the config request errors", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network")));
-    await primeFrigateCameras();
-    expect(frigateHasCamera("bedroom")).toBe(false);
+  it("requires BOTH markers, so another integration using one name cannot match", () => {
+    expect(isFrigateCamera(entity({ client_id: "frigate" }))).toBe(false);
+    expect(isFrigateCamera(entity({ camera_name: "big_room" }))).toBe(false);
   });
 
-  it("fails closed on a non-ok response", async () => {
-    stubConfig({ cameras: { bedroom: {} } }, false);
-    await primeFrigateCameras();
-    expect(frigateHasCamera("bedroom")).toBe(false);
-  });
-
-  // A dev server (or a misrouted prefix) answers with the SPA's index.html at 200.
-  // That parses as neither an object with `cameras` nor valid JSON — either way it
-  // must not be read as "Frigate serves every camera".
-  it("fails closed when the response has no cameras map", async () => {
-    stubConfig({ some: "other json" });
-    await primeFrigateCameras();
-    expect(frigateHasCamera("bedroom")).toBe(false);
+  it("ignores non-string markers", () => {
+    expect(isFrigateCamera(entity({ client_id: 1, camera_name: true }))).toBe(false);
   });
 });
 
-describe("primeFrigateCameras", () => {
-  it("fetches once and serves later calls from cache", async () => {
-    const fetchMock = stubConfig({ cameras: { bedroom: {} } });
-    await primeFrigateCameras();
-    await primeFrigateCameras();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+describe("frigateCameraName", () => {
+  it("returns what Frigate calls the camera, which is authoritative over the entity id", () => {
+    // Every VOD/event URL must use this, not the HA slug, or the request 404s.
+    expect(frigateCameraName(entity({ camera_name: "big_room" }))).toBe("big_room");
   });
 
-  it("shares one in-flight request between concurrent callers", async () => {
-    const fetchMock = stubConfig({ cameras: { bedroom: {} } });
-    await Promise.all([primeFrigateCameras(), primeFrigateCameras(), primeFrigateCameras()]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(frigateHasCamera("bedroom")).toBe(true);
+  it("is null when absent or empty", () => {
+    expect(frigateCameraName(entity({}))).toBeNull();
+    expect(frigateCameraName(entity({ camera_name: "" }))).toBeNull();
+    expect(frigateCameraName(null)).toBeNull();
+  });
+});
+
+describe("FRIGATE_RETENTION_DAYS", () => {
+  it("is a positive number of days", () => {
+    // Not discoverable at runtime — must track record.continuous.days in the Frigate seed by hand.
+    expect(FRIGATE_RETENTION_DAYS).toBeGreaterThan(0);
   });
 });

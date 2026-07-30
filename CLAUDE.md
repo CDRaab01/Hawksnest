@@ -59,10 +59,15 @@ This file adds the things that are easy to get wrong and the suite context.
   when that service is down, and it is: last ~5 Ring events via the event-selector entity, not
   continuous VOD. **Ring is no longer the only recorded backend** — a camera's NVR is derived per
   render (`lib/recordedBackend.ts`: `"ring" | "frigate" | "none"`) and Frigate serves a continuous
-  VOD for cameras it records. Frigate is not deployed yet and `lib/frigate.ts` fails closed, so
-  today every camera resolves exactly as before. **Android is not ported yet** — `CameraPlayer.kt`
-  still gates on its own `isRing`, so the platforms are knowingly out of lockstep until that lands
-  (`core/logic/RecordedBackend.kt` is the 1:1 target). **ring-mqtt 5.x has no
+  VOD for cameras it records. Frigate is live (three Reolink cameras as of 2026-07-30) and
+  `lib/frigate.ts` fails closed, so a camera it doesn't record resolves exactly as before.
+  **Android's RECORDED path is not ported yet** — `CameraPlayer.kt` still derives its own
+  `isRing` from the event selector, so the platforms are knowingly out of lockstep until that
+  lands (`core/logic/RecordedBackend.kt` is the 1:1 target). Its **live** path IS in lockstep as
+  of 2026-07-30: the go2rtc tier is gated on go2rtc's own stream list (`core/net/Go2rtcStreams`,
+  the port of `lib/go2rtc.ts`), not on `isRing`. The old gate was a proxy for "go2rtc serves
+  this" that silently dropped every Reolink camera to segmented HLS — visibly jumpy live video.
+  Don't infer live transport from a camera's *kind*; ask go2rtc what it serves. **ring-mqtt 5.x has no
   `camera.<base>_event` entity**: selecting an option makes it fetch Ring's signed cloud recording and publish it as the
   selector's `recordingUrl` attribute, which is what the players load (`src/store/ringClip.ts` /
   `CameraPlayerViewModel.resolveRingClip`). Assuming the 4.x `_event` camera is what pinned every

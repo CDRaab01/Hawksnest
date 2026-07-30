@@ -14,7 +14,7 @@ import {
   footageSpans,
   type RingFootage,
 } from "../../lib/ringFootage";
-import { frigateHasCamera, frigateRetentionDays, primeFrigateCameras } from "../../lib/frigate";
+import { FRIGATE_RETENTION_DAYS, isFrigateCamera } from "../../lib/frigate";
 import { retentionRange, vodPageFor, vodPositionSecondsInPage } from "../../lib/vodWindow";
 import { hasRealRecordings, recordedBackendOf } from "../../lib/recordedBackend";
 import { useEntity } from "../../store/entityStore";
@@ -22,6 +22,7 @@ import type { CameraEvent } from "../../lib/cameraEvents";
 import { clipContaining, offsetInClipSeconds, clipSpanEndMs } from "../../lib/clipSeek";
 import { ringEventsFromSelect } from "../../lib/ringEvents";
 import { snapshotUrl } from "../../lib/cameraUrl";
+import { loadCredentials } from "../../store/credentials";
 import { LivePlayer } from "../LivePlayer";
 import { HlsPlayer } from "../HlsPlayer";
 import { CameraSwitcher } from "./CameraSwitcher";
@@ -78,27 +79,18 @@ export function CameraPlayer({
 }) {
   const cameraName = cameraNameOf(camera);
 
-  // Frigate membership is only known after a config fetch, so prime it once and
-  // re-derive on the result. Fails closed (see `frigate.ts`): until it lands, and
-  // forever if there's no Frigate, every camera reads exactly as it did before.
-  const [frigateNonce, setFrigateNonce] = useState(0);
-  useEffect(() => {
-    let active = true;
-    void primeFrigateCameras().then(() => active && setFrigateNonce((n) => n + 1));
-    return () => {
-      active = false;
-    };
-  }, []);
+  // Frigate membership is read straight off the camera's HA entity — the integration stamps
+  // `client_id`/`camera_name` onto it. No fetch, no cache, no priming effect: the config route
+  // this used to poll does not exist (see `frigate.ts`), which is why it silently reported "no
+  // Frigate" for every camera.
 
   const backend = useMemo(
     () =>
       recordedBackendOf({
         hasRingSelector: camera.eventSelectId !== null,
-        hasFrigateCamera: frigateHasCamera(cameraName),
+        hasFrigateCamera: isFrigateCamera(camera.liveEntity),
       }),
-    // frigateNonce is the re-derive trigger: `frigateHasCamera` reads a module cache.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [camera.eventSelectId, cameraName, frigateNonce],
+    [camera.eventSelectId, camera.liveEntity],
   );
   // Ring keeps its own name because the paths below are Ring-specific mechanics
   // (selector resolution, ring-timeline signatures), not "has recordings".
@@ -107,21 +99,19 @@ export function CameraPlayer({
 
   // Pin "now" once so the timeline doesn't slide under the user mid-session.
   const [nowAnchor] = useState(() => Date.now());
+  // Frigate VOD's nested manifest needs a Bearer token that a URL signature cannot cover.
+  const [mediaAuthToken] = useState(() => loadCredentials()?.token ?? null);
   // How far back the timeline reaches. Ring stays at 24h — its recorded path is the last handful
   // of cloud events, so a longer span would render a mostly-empty timeline and pull days of Ring
   // history for nothing. Frigate keeps continuous video, so its timeline spans the ACTUAL
   // retention Frigate reports (`record.continuous.days`) rather than a hardcoded day.
   const window = useMemo(() => {
-    const days = frigateRetentionDays(cameraName);
-    if (backend === "frigate" && days) {
-      const r = retentionRange(nowAnchor, days);
+    if (backend === "frigate") {
+      const r = retentionRange(nowAnchor, FRIGATE_RETENTION_DAYS);
       return { start: r.startMs, end: r.endMs };
     }
     return { start: nowAnchor - DAY_MS, end: nowAnchor };
-    // frigateNonce is the re-derive trigger, same as `backend` above: `frigateRetentionDays`
-    // reads a module cache that eslint cannot see, so the dep looks unused but is load-bearing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backend, cameraName, nowAnchor, frigateNonce]);
+  }, [backend, nowAnchor]);
 
   const [playhead, setPlayhead] = useState<number | "live">("live");
   const [paused, setPaused] = useState(false);
@@ -528,6 +518,9 @@ export function CameraPlayer({
           // (`endMs: null`) selector event's span. Frigate events carry real ends.
           onDuration={isRing ? onDuration : undefined}
           onError={hasRealRecordings(backend) ? onPlaybackError : undefined}
+          // Frigate VOD only: its nested manifest needs a Bearer token a URL signature cannot
+          // cover. Ring's URLs are pre-signed by Ring and must NOT carry an HA token.
+          authToken={isRing ? null : mediaAuthToken}
         />
       ) : (
         // Scrubbed to a past moment with no footage on screen: a clip is

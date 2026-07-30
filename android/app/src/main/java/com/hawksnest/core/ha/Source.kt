@@ -114,11 +114,13 @@ interface Source {
     /**
      * Days of continuous recording Frigate keeps for [camera], or null if unknown.
      *
-     * Drives how far back the timeline lets the user scrub — Frigate reports it per camera as
-     * `record.continuous.days`, and a deployment can legitimately keep different windows per room.
-     * Null means "not Frigate, or the config has not been read", and callers should fall back
-     * rather than assume: guessing high shows a timeline reaching into pruned recordings, which
-     * reads as a broken player rather than an empty one.
+     * Drives how far back the timeline lets the user scrub.
+     *
+     * NOT discoverable at runtime: frigate-hass-integration does not proxy Frigate's config
+     * endpoint (`/api/frigate/config` 404s — verified against the cluster 2026-07-30), and HA
+     * exposes the retention nowhere else. The live source therefore returns a constant that must
+     * be kept in step with the Frigate seed by hand. Null here means "this source has no Frigate"
+     * (the fixture/demo source), and callers fall back to their default window.
      */
     suspend fun frigateRetentionDays(camera: String): Double? = null
 

@@ -5,7 +5,6 @@ import { MemoryRouter } from "react-router-dom";
 import { CameraPlayer } from "../CameraPlayer";
 import { startConnection } from "../../../store/connection";
 import { useEntityStore } from "../../../store/entityStore";
-import { resetFrigateCamerasCache } from "../../../lib/frigate";
 import type { HassEntity } from "../../../lib/ha";
 import type { LogicalCamera } from "../../../lib/cameraModel";
 
@@ -22,7 +21,13 @@ const BEDROOM: LogicalCamera = (() => {
   const entity: HassEntity = {
     entity_id: "camera.bedroom",
     state: "idle",
-    attributes: { entity_picture: "/api/camera_proxy/camera.bedroom?token=x" },
+    // Frigate membership is read off these markers now, not a config fetch — the
+    // integration stamps them onto every camera it creates.
+    attributes: {
+      entity_picture: "/api/camera_proxy/camera.bedroom?token=x",
+      client_id: "frigate",
+      camera_name: "bedroom",
+    },
   };
   return {
     id: "camera.bedroom",
@@ -38,8 +43,9 @@ const BEDROOM: LogicalCamera = (() => {
 })();
 
 /**
- * Frigate's config names `bedroom`; go2rtc serves a `bedroom` stream. Anything else
- * (the demo clip, HA's own endpoints) falls through to the real fetch.
+ * go2rtc serves a `bedroom` stream. Anything else (the demo clip, HA's own endpoints) falls
+ * through to the real fetch. Frigate membership is no longer stubbed here — it comes from the
+ * camera entity's attributes above, because `/api/frigate/config` is not a route that exists.
  */
 function stubFrigateAndGo2rtc({
   go2rtcStreams = { bedroom: {} } as Record<string, unknown>,
@@ -49,9 +55,6 @@ function stubFrigateAndGo2rtc({
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes("/api/frigate/config")) {
-        return Promise.resolve({ ok: true, json: async () => ({ cameras: { bedroom: {} } }) });
-      }
       if (url.includes("/go2rtc/api/streams")) {
         return Promise.resolve({ ok: true, json: async () => go2rtcStreams });
       }
@@ -61,14 +64,12 @@ function stubFrigateAndGo2rtc({
 }
 
 beforeEach(() => {
-  resetFrigateCamerasCache();
   useEntityStore.setState({ entities: {}, areas: {}, status: "connecting" });
   startConnection();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  resetFrigateCamerasCache();
 });
 
 function renderBedroom() {
