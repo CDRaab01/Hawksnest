@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { FRIGATE_RETENTION_DAYS, frigateCameraName, isFrigateCamera } from "../frigate";
+import {
+  FRIGATE_RETENTION_DAYS,
+  frigateCameraName,
+  frigateRetentionDays,
+  isFrigateCamera,
+} from "../frigate";
 import type { HassEntity } from "../ha";
 
 /**
@@ -60,7 +65,31 @@ describe("frigateCameraName", () => {
 
 describe("FRIGATE_RETENTION_DAYS", () => {
   it("is a positive number of days", () => {
-    // Not discoverable at runtime — must track record.continuous.days in the Frigate seed by hand.
+    // The fallback for an HA that predates the retention sensor.
     expect(FRIGATE_RETENTION_DAYS).toBeGreaterThan(0);
+  });
+});
+
+describe("frigateRetentionDays", () => {
+  function sensor(state: string): HassEntity {
+    return {
+      entity_id: "sensor.frigate_retention_days",
+      state,
+      attributes: {},
+    } as unknown as HassEntity;
+  }
+
+  it("reads the retention sensor's value", () => {
+    expect(frigateRetentionDays(sensor("7"))).toBe(7);
+    expect(frigateRetentionDays(sensor("3.0"))).toBe(3);
+  });
+
+  it("falls back when the sensor is missing or unreadable", () => {
+    expect(frigateRetentionDays(null)).toBe(FRIGATE_RETENTION_DAYS);
+    expect(frigateRetentionDays(undefined)).toBe(FRIGATE_RETENTION_DAYS);
+    expect(frigateRetentionDays(sensor("unavailable"))).toBe(FRIGATE_RETENTION_DAYS);
+    expect(frigateRetentionDays(sensor("unknown"))).toBe(FRIGATE_RETENTION_DAYS);
+    // Zero/negative would collapse the timeline — treat as unreadable, not as a choice.
+    expect(frigateRetentionDays(sensor("0"))).toBe(FRIGATE_RETENTION_DAYS);
   });
 });

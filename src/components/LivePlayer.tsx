@@ -36,10 +36,14 @@ type Mode = "go2rtc" | "webrtc" | "video" | "mjpeg" | "poll" | "dead";
 export function LivePlayer({
   entity,
   go2rtcSrc,
+  muted = true,
 }: {
   entity: HassEntity;
   /** go2rtc stream name (the HA camera base) for the direct low-latency tier. */
   go2rtcSrc?: string;
+  /** Camera audio. Defaults muted (autoplay policy); the player chrome's
+   *  MuteButton is the unmute gesture. Image tiers (MJPEG/poll) have no audio. */
+  muted?: boolean;
 }) {
   const baseUrl = useHaBaseUrl();
   const mjpeg = mjpegUrl(entity, baseUrl);
@@ -104,7 +108,6 @@ export function LivePlayer({
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, srcResolved, entity.entity_id]);
 
   // Once the stream URL resolves to nothing while we're on the video tier, step down.
@@ -143,6 +146,7 @@ export function LivePlayer({
       <Go2rtcPlayer
         src={go2rtcSrc}
         poster={snapshotUrl(entity, baseUrl) ?? undefined}
+        muted={muted}
         onFail={() => stepDownFrom("go2rtc")}
       />
     );
@@ -153,6 +157,7 @@ export function LivePlayer({
       <WebRtcPlayer
         entityId={entity.entity_id}
         poster={snapshotUrl(entity, baseUrl) ?? undefined}
+        muted={muted}
         onFail={() => stepDownFrom("webrtc")}
       />
     );
@@ -174,6 +179,7 @@ export function LivePlayer({
         src={src}
         poster={snapshotUrl(entity, baseUrl) ?? undefined}
         loop
+        muted={muted}
         onError={() => stepDownFrom("video")}
       />
     );

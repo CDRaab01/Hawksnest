@@ -99,7 +99,9 @@ describe("CameraPlayer (Frigate camera)", () => {
     // tier that can actually render, not stall on a stream that isn't there.
     stubFrigateAndGo2rtc({ go2rtcStreams: {} });
     renderBedroom();
-    expect(await screen.findByLabelText(/camera/i)).toBeInTheDocument();
+    // "Live camera view" is the rendered fallback tier's media element —
+    // scoped past the player-chrome buttons that also mention "camera".
+    expect(await screen.findByLabelText(/live camera view/i)).toBeInTheDocument();
   });
 
   it("plays recorded footage without looping it", async () => {

@@ -17,16 +17,24 @@ import { go2rtcWsUrl, reportGo2rtcMedia } from "../lib/go2rtc";
 export function Go2rtcPlayer({
   src,
   poster,
+  muted = true,
   onFail,
 }: {
   src: string;
   poster?: string;
+  /** Audio track gate. Mounts muted for autoplay policy; flipped live via the
+   *  DOM property (React only applies the `muted` attribute at mount). */
+  muted?: boolean;
   onFail: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const onFailRef = useRef(onFail);
   onFailRef.current = onFail;
   const [connecting, setConnecting] = useState(true);
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = muted;
+  }, [muted]);
 
   useEffect(() => {
     if (typeof RTCPeerConnection === "undefined" || typeof WebSocket === "undefined") {

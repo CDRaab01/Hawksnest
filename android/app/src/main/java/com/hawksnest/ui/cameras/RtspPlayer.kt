@@ -42,6 +42,8 @@ fun RtspPlayer(
     /** Camera name, for the per-camera circuit-breaker. */
     camera: String,
     onFail: () -> Unit,
+    /** Audio gate — defaults muted; the chrome's MuteButton is the way to sound. */
+    muted: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -64,8 +66,9 @@ fun RtspPlayer(
                     .setTimeoutMs(CONNECT_TIMEOUT_MS),
             )
             .build()
-            .apply { volume = 0f }
+            .apply { volume = if (muted) 0f else 1f }
     }
+    LaunchedEffect(muted, player) { player.volume = if (muted) 0f else 1f }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {

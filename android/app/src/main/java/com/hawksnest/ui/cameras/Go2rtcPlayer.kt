@@ -34,6 +34,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import org.webrtc.AudioTrack
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
@@ -68,6 +69,10 @@ fun Go2rtcPlayer(
     cameraId: String,
     baseUrl: String,
     onFail: () -> Unit,
+    /** Audio gate: the received AudioTrack is disabled while true. Defaults muted —
+     *  org.webrtc plays remote audio automatically, which is the web twin's opposite
+     *  default; the player chrome's MuteButton is the deliberate way to sound. */
+    muted: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -94,14 +99,20 @@ fun Go2rtcPlayer(
         onDispose { renderer.release() }
     }
 
+    val session = remember { mutableStateOf<Go2rtcSession?>(null) }
     DisposableEffect(src) {
         connecting.value = true
-        val session = Go2rtcSession(scope, baseUrl, src, WebRtcCore.factory, renderer) {
+        val s = Go2rtcSession(scope, baseUrl, src, WebRtcCore.factory, renderer, muted) {
             currentOnFail.value()
         }
-        session.start()
-        onDispose { session.close() }
+        session.value = s
+        s.start()
+        onDispose {
+            session.value = null
+            s.close()
+        }
     }
+    LaunchedEffect(muted, session.value) { session.value?.setMuted(muted) }
 
     // Stash the live frame periodically so the grid tile shows what you were just watching (same as
     // WebRtcPlayer; captureFrame waits for a real frame, so nothing is stored while "Connecting…").
@@ -144,6 +155,7 @@ private class Go2rtcSession(
     src: String,
     private val factory: PeerConnectionFactory,
     private val renderer: SurfaceViewRenderer,
+    initialMuted: Boolean,
     private val onFail: () -> Unit,
 ) {
     private val wsUrl = go2rtcWsUrl(baseUrl, src)
@@ -153,6 +165,18 @@ private class Go2rtcSession(
     private var watchdog: Job? = null
     private val lock = Any()
     private var closed = false
+
+    // The received audio track, gated by the chrome's MuteButton. Volatile: the
+    // track lands on org.webrtc's worker thread, setMuted comes from composition.
+    @Volatile private var audioTrack: AudioTrack? = null
+
+    @Volatile private var muted = initialMuted
+
+    /** Enable/disable the remote audio track (org.webrtc plays it automatically otherwise). */
+    fun setMuted(m: Boolean) {
+        muted = m
+        runCatching { audioTrack?.setEnabled(!m) }
+    }
 
     fun start() {
         val config = PeerConnection.RTCConfiguration(emptyList()).apply {
@@ -218,11 +242,25 @@ private class Go2rtcSession(
         }
 
         override fun onTrack(transceiver: RtpTransceiver) {
-            (transceiver.receiver?.track() as? VideoTrack)?.addSink(renderer)
+            when (val track = transceiver.receiver?.track()) {
+                is VideoTrack -> track.addSink(renderer)
+                is AudioTrack -> {
+                    audioTrack = track
+                    runCatching { track.setEnabled(!muted) }
+                }
+                else -> Unit
+            }
         }
 
         override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
-            (receiver.track() as? VideoTrack)?.addSink(renderer)
+            when (val track = receiver.track()) {
+                is VideoTrack -> track.addSink(renderer)
+                is AudioTrack -> {
+                    audioTrack = track
+                    runCatching { track.setEnabled(!muted) }
+                }
+                else -> Unit
+            }
         }
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {

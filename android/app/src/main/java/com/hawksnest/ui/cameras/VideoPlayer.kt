@@ -48,6 +48,9 @@ fun VideoPlayer(
     onDurationMs: ((Long) -> Unit)? = null,
     /** Fired on a fatal playback error (dead playlist, expired token) so the host can step down. */
     onError: (() -> Unit)? = null,
+    /** Audio gate — defaults muted; the chrome's MuteButton is the way to sound.
+     *  Recorded Frigate VOD carries a real audio track (`-c:a aac`). */
+    muted: Boolean = true,
     /**
      * HA token sent as `Authorization: Bearer` on every media request.
      *
@@ -95,8 +98,9 @@ fun VideoPlayer(
                 if (authSig != null) AuthSigDataSourceFactory(http, authSig) else http
             builder.setMediaSourceFactory(DefaultMediaSourceFactory(factory))
         }
-        builder.build().apply { volume = 0f }
+        builder.build().apply { volume = if (muted) 0f else 1f }
     }
+    LaunchedEffect(muted, player) { player.volume = if (muted) 0f else 1f }
 
     // Keyed on the PLAYER, not Unit. `player` changes identity WITHOUT this composable unmounting:
     // remember(authSig, authToken) builds a new ExoPlayer whenever the Frigate VOD page turns

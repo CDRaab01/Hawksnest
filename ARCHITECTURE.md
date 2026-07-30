@@ -64,10 +64,24 @@ It used to be `isRing = camera.eventSelectId !== null`, one flag standing in for
 questions — where recorded events come from, whether playback is a per-clip resolution or a seekable
 VOD, and whether the go2rtc live tier applies — which only held while the sole NVR was Ring. Ring
 wins when a camera looks like both, because the Ring path owns the retry/signature-expiry mechanics.
-Frigate membership comes from `lib/frigate.ts` (`primeFrigateCameras`/`frigateHasCamera`, a cached
-`/api/frigate/config` read); it **fails closed**, the opposite of `go2rtc.ts`, because a wrong "yes"
-silently turns the demo loop into a broken NVR path, whereas a wrong "no" is just today's behaviour.
-Derived per render rather than stored on `LogicalCamera` so `cameraModel.ts` stays synchronous.
+Frigate membership comes from `lib/frigate.ts` (`isFrigateCamera`, Kotlin twin
+`core/logic/Frigate.kt`): the frigate-hass-integration stamps `client_id` + `camera_name` onto the
+`camera.*` entity it creates, and membership is read off those attributes — synchronous, no fetch.
+(The `/api/frigate/config` read this used to do targeted a route the integration never proxies, so
+every camera silently resolved "no Frigate".) It **fails closed**, the opposite of `go2rtc.ts`,
+because a wrong "yes" silently turns the demo loop into a broken NVR path, whereas a wrong "no" is
+just today's behaviour. Derived per render rather than stored on `LogicalCamera` so
+`cameraModel.ts` stays synchronous. Android's `CameraPlayer.kt` derives the same three-way backend
+(2026-07-30, closing the known lockstep gap where it still read the raw `eventSelectId` boolean).
+
+**Player chrome (both platforms, 2026-07-30):** a mute toggle (`MuteButton` — every tier mounts
+muted for autoplay policy; the toggle flips the element/AudioTrack live, and on Android gates the
+WebRTC `AudioTrack` that org.webrtc would otherwise auto-play), snapshot-to-file
+(`SnapshotButton` — blob download on web, MediaStore `Pictures/Hawksnest` on Android Q+), and a
+Low/High live-quality toggle (`QualityToggle`) that swaps the go2rtc tier onto the camera's
+`<name>_sub` stream. The toggle renders only when go2rtc's stream list carries the `_sub` name, so
+Ring/demo cameras never see it; on Android, Low also bypasses the RTSP-direct tier (which plays the
+fixed-bitrate main stream — the thing a weak link is trying to escape).
 `"none"` (demo / no NVR) is the only backend whose media loops, and the only one that ignores
 playback errors — the source hands it the same bundled clip for every seek.
 
@@ -156,8 +170,9 @@ header on media requests — a signed URL authenticates on its own. Because play
 URIs *relative* to the manifest and drop the query string, `VideoPlayer.kt` wraps the
 `DataSource.Factory` to re-attach `authSig` to every request. One signature covers the whole
 window (the integration checks it as a path prefix), but it is scoped to that `start/end`, so a
-new scrub window re-signs. **Web has the same gap and is not fixed** — `HlsPlayer` would need the
-equivalent via hls.js `xhrSetup`, and native HLS (Safari/iOS) has no such hook at all.
+new scrub window re-signs. **Web closes the same gap in `HlsPlayer`** — hls.js `xhrSetup`
+re-attaches `authSig` (plus a Bearer for the nested `index-*.m3u8`); the caveat that remains is
+native HLS (Safari/iOS), which has no such hook and still 401s on segments.
 The **timeline shows only playable recordings**
 (Ring-style: every block is watchable) — the selector's ~5 on ring, clip-bearing events on
 Frigate/demo; no history-derived markers. Scrubbing is **live**: `Timeline24h` streams the time

@@ -63,6 +63,12 @@ export function HlsPlayer({
   const ref = useRef<HTMLVideoElement>(null);
   // Ref'd so a new callback identity per render can't re-init the source effect.
   const onDurationRef = useRef(onDuration);
+
+  // React applies the `muted` attribute only at mount; live toggles must go
+  // through the DOM property (same workaround as the WebRTC players).
+  useEffect(() => {
+    if (ref.current) ref.current.muted = muted;
+  }, [muted]);
   onDurationRef.current = onDuration;
 
   useEffect(() => {
