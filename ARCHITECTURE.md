@@ -74,6 +74,34 @@ just today's behaviour. Derived per render rather than stored on `LogicalCamera`
 `cameraModel.ts` stays synchronous. Android's `CameraPlayer.kt` derives the same three-way backend
 (2026-07-30, closing the known lockstep gap where it still read the raw `eventSelectId` boolean).
 
+**Camera object alerts + AI descriptions (2026-07-30).** Frigate detections now reach the phone:
+the HA automation `hawksnest_push_camera_object` (sibling repo) subscribes to Frigate's
+`frigate/events` MQTT topic and publishes "There is a person at your Kitchen" to ntfy, **only
+while the alarm is armed** — indoor cameras plus an occupied house produce ~10 person events in
+minutes, so ungated alerts were never viable. Two HA `input_boolean` helpers
+(`hawksnest_alert_person` / `_pets`) gate it *server-side*, so a muted class never generates a
+push at all; both platforms' Settings write them (`CameraAlertToggles.tsx`,
+`SettingsViewModel.personAlerts`). That's household policy, distinct from Android's device-local
+"Push alerts" subscription switch.
+
+Client-side, `PushRoute.kindOf` routes the `walking`/`dog`/`cat` tags to new `PushKind.Person` /
+`Pet`, each with **its own notification channel** (`camera_person` HIGH + `CATEGORY_ALARM`,
+`camera_pet` DEFAULT) so pets can be muted without touching person alerts. Channel ids are new
+rather than re-tuned: Android ignores importance changes to an already-created channel. Camera
+alerts key their notification id on the **camera**, not the message — Frigate tracks each object
+separately and one person crossing a room produced three concurrent tracked objects on the live
+kitchen camera, which would otherwise post three notifications.
+
+`CameraEvent.description` carries Frigate's GenAI text (`lib/cameraEvents.ts` ↔
+`core/logic/CameraEvent.kt`). It needed no new transport — the integration proxies `/api/events`
+verbatim, so it was already arriving and simply wasn't mapped. `EventDescription` renders it under
+the timeline, driven by the event under the playhead (tapping a chip already seeks, so the lookup
+costs no new interaction). It distinguishes three states, because "no text" means different
+things: a description; a **pet** event (Frigate runs GenAI for `person` only, so these never get
+one); and a **fresh person** event whose description hasn't been generated yet (it lands after the
+event ends). The notification deliberately carries only the short line — the description is
+multi-paragraph and doesn't exist when the alert fires.
+
 **Camera movement (PTZ/zoom/focus, both platforms, 2026-07-30):** Hawksnest drives the lens
 through Home Assistant's **official Reolink integration** — `button.<slug>_ptz_{up,down,left,
 right,stop}`, `number.<slug>_{zoom,focus}`, `switch.<slug>_auto_focus`, optional

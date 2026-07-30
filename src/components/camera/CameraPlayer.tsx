@@ -37,6 +37,7 @@ import { TalkButton } from "./TalkButton";
 import { MuteButton } from "./MuteButton";
 import { SnapshotButton } from "./SnapshotButton";
 import { QualityToggle } from "./QualityToggle";
+import { EventDescription } from "./EventDescription";
 import { PtzPanel } from "./PtzPanel";
 import { resolvePtz } from "../../lib/cameraPtz";
 import { useEntityStore } from "../../store/entityStore";
@@ -298,6 +299,16 @@ export function CameraPlayer({
         : (clipContaining(events, headTime, loadedClip?.id ?? null, loadedClip?.durationMs ?? null) ??
           undefined),
     [isLive, isRing, events, headTime, loadedClip],
+  );
+
+  // The event whose AI description the strip shows. Separate from `selected`
+  // above, which is deliberately Ring-only (it drives per-clip stream
+  // resolution); descriptions are a Frigate feature, so this one is
+  // backend-agnostic and needs no loaded-clip refinement — Frigate events carry
+  // real end times.
+  const describedEvent = useMemo(
+    () => clipContaining(events, headTime, null, null) ?? null,
+    [events, headTime],
   );
 
   const { prev, next } = useMemo(() => {
@@ -651,6 +662,11 @@ export function CameraPlayer({
         onScrub={scrub}
         onLive={goLive}
       />
+
+      {/* Between the timeline and the transport on purpose: tapping a chip
+          already seeks, so the description follows the playhead with no new
+          interaction to learn. */}
+      <EventDescription event={describedEvent} />
 
       <TransportBar
         isLive={isLive}

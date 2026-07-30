@@ -38,6 +38,7 @@ function clip(id: string, startMs: number, endMs: number | null): CameraEvent {
     hasSnapshot: false,
     thumbnailUrl: null,
     snapshotUrl: null,
+    description: null,
   };
 }
 

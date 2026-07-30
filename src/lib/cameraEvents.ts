@@ -34,6 +34,18 @@ export interface CameraEvent {
   /** Thumbnail/snapshot URLs, or null when Frigate didn't capture one. */
   thumbnailUrl: string | null;
   snapshotUrl: string | null;
+  /**
+   * Frigate's GenAI description of what the object did, or null.
+   *
+   * Null is the common case and does **not** mean "loading":
+   * - Frigate runs GenAI for **`person` only** (per-camera `objects.genai`), so a
+   *   dog or cat event will never have one.
+   * - It's generated **after the event ends** (the VLM runs on the host), so a
+   *   fresh person event has none until a later refetch.
+   *
+   * The UI must tell those two apart — see `EventDescription`.
+   */
+  description: string | null;
 }
 
 /** The loose shape Frigate's `/api/events` returns (fields vary per entry). */
@@ -46,6 +58,9 @@ export interface RawFrigateEvent {
   end_time?: number | null;
   has_clip?: boolean;
   has_snapshot?: boolean;
+  /** Frigate nests the GenAI description here. Arrives already, untouched: the HA
+   *  integration proxies `/api/events` verbatim, so nothing new had to be fetched. */
+  data?: { description?: string | null };
 }
 
 /** Frigate sends times as epoch *seconds* (float). Normalize to ms. */
@@ -136,6 +151,8 @@ export function normalizeFrigateEvents(
         hasSnapshot,
         thumbnailUrl: hasSnapshot ? eventSnapshotUrl(e.id, base) : null,
         snapshotUrl: hasSnapshot ? eventSnapshotUrl(e.id, base) : null,
+        // Normalize empty/whitespace to null so the UI has exactly one "absent" case.
+        description: e.data?.description?.trim() || null,
       };
     })
     .filter((e): e is CameraEvent => e !== null)

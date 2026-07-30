@@ -264,6 +264,12 @@ fun CameraPlayer(
     } else {
         clipContaining(events, headTime, loadedClip?.first, loadedClip?.second)
     }
+    // The event whose AI description the strip shows. Separate from `selected`
+    // above, which is deliberately Ring-only (it drives per-clip stream
+    // resolution); descriptions are a Frigate feature, so this one is
+    // backend-agnostic and needs no loaded-clip refinement — Frigate events carry
+    // real end times.
+    val describedEvent = clipContaining(events, headTime, null, null)
 
     fun seek(ms: Long) {
         scrubbing = false
@@ -563,6 +569,11 @@ fun CameraPlayer(
             },
             onLive = ::goLive,
         )
+
+        // Between the timeline and the transport on purpose: tapping a chip
+        // already seeks, so the description follows the playhead with no new
+        // interaction to learn.
+        EventDescription(describedEvent)
 
         TransportBar(
             isLive = isLive,

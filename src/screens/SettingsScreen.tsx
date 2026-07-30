@@ -4,6 +4,7 @@ import { ChevronRight, Workflow } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { PulseButton } from "../components/PulseButton";
 import { SectionHeader } from "../components/SectionHeader";
+import { CameraAlertToggles } from "../components/CameraAlertToggles";
 import { useConnection } from "../store/entityStore";
 import {
   loadCredentials,
@@ -126,6 +127,8 @@ export function SettingsScreen() {
           <AppearanceControl />
         </PanelCard>
       </section>
+
+      <CameraAlertToggles />
 
       <section className="space-y-md">
         <SectionHeader label="Connection" channel="effort" />

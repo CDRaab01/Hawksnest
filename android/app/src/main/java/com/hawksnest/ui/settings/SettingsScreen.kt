@@ -57,6 +57,8 @@ fun SettingsScreen(
     val hasToken by viewModel.hasToken.collectAsState()
     val reachability by viewModel.reachability.collectAsState()
     val pushEnabled by viewModel.pushEnabled.collectAsState()
+    val personAlerts by viewModel.personAlerts.collectAsState()
+    val petAlerts by viewModel.petAlerts.collectAsState()
     val rtspUser by viewModel.rtspUser.collectAsState()
     val hasRtspPass by viewModel.hasRtspPass.collectAsState()
     val rtspCameraIps by viewModel.rtspCameraIps.collectAsState()
@@ -213,6 +215,36 @@ fun SettingsScreen(
                     modifier = Modifier.testTag("settingsPushSwitch"),
                 )
             }
+            // Camera object alerts. These are HOUSEHOLD policy (HA input_booleans)
+            // rather than this phone's subscription — the copy has to say so or
+            // they read as a second, redundant "push alerts" switch. Hidden
+            // entirely when the helper is absent (older HA, or not connected yet)
+            // rather than shown as a control that silently does nothing.
+            if (personAlerts != null || petAlerts != null) {
+                Text(
+                    "Camera alerts fire only while the alarm is armed, and apply to " +
+                        "everyone's devices — not just this phone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = HawksnestTheme.spacing.md),
+                )
+                personAlerts?.let { on ->
+                    HelperSwitch(
+                        title = "Person alerts",
+                        checked = on,
+                        testTag = "settingsPersonAlertsSwitch",
+                        onCheckedChange = viewModel::setPersonAlerts,
+                    )
+                }
+                petAlerts?.let { on ->
+                    HelperSwitch(
+                        title = "Pet alerts",
+                        checked = on,
+                        testTag = "settingsPetAlertsSwitch",
+                        onCheckedChange = viewModel::setPetAlerts,
+                    )
+                }
+            }
             // Only when push is on and Android is still allowed to doze the listener.
             if (pushEnabled && !batteryExempt) {
                 Text(
@@ -245,6 +277,32 @@ fun SettingsScreen(
 }
 
 /** Whether Android is already letting the push listener run unthrottled. */
+/** One household-policy toggle row (an HA `input_boolean`). */
+@Composable
+private fun HelperSwitch(
+    title: String,
+    checked: Boolean,
+    testTag: String,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.testTag(testTag),
+        )
+    }
+}
+
 private fun isIgnoringBattery(context: Context): Boolean {
     val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
     return pm.isIgnoringBatteryOptimizations(context.packageName)

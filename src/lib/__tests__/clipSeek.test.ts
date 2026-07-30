@@ -17,6 +17,7 @@ const clip = (id: string, startMs: number, endMs: number | null = null): CameraE
   hasSnapshot: false,
   thumbnailUrl: null,
   snapshotUrl: null,
+  description: null,
 });
 
 const T0 = 1_700_000_000_000;
