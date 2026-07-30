@@ -12,10 +12,14 @@ import { webrtcOffer, webrtcCandidate } from "../store/connection";
 export function WebRtcPlayer({
   entityId,
   poster,
+  muted = true,
   onFail,
 }: {
   entityId: string;
   poster?: string;
+  /** Audio track gate. Mounts muted for autoplay policy; flipped live via the
+   *  DOM property (React only applies the `muted` attribute at mount). */
+  muted?: boolean;
   onFail: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -25,6 +29,10 @@ export function WebRtcPlayer({
   // True until the first decoded frame plays — drives the "Connecting…" overlay
   // so a battery camera's multi-second wake reads as progress, not a hang.
   const [connecting, setConnecting] = useState(true);
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = muted;
+  }, [muted]);
 
   useEffect(() => {
     if (typeof RTCPeerConnection === "undefined") {

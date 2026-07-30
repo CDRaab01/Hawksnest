@@ -24,11 +24,15 @@ import { clipContaining, offsetInClipSeconds, clipSpanEndMs } from "../../lib/cl
 import { ringEventsFromSelect } from "../../lib/ringEvents";
 import { snapshotUrl } from "../../lib/cameraUrl";
 import { loadCredentials } from "../../store/credentials";
+import { go2rtcMaybeAvailable, go2rtcStreamsKnown, primeGo2rtcStreams } from "../../lib/go2rtc";
 import { LivePlayer } from "../LivePlayer";
 import { HlsPlayer } from "../HlsPlayer";
 import { CameraSwitcher } from "./CameraSwitcher";
 import { SirenButton } from "./SirenButton";
 import { TalkButton } from "./TalkButton";
+import { MuteButton } from "./MuteButton";
+import { SnapshotButton } from "./SnapshotButton";
+import { QualityToggle } from "./QualityToggle";
 import { Timeline24h } from "./Timeline24h";
 import { TransportBar } from "./TransportBar";
 
@@ -101,6 +105,29 @@ export function CameraPlayer({
 
   // Pin "now" once so the timeline doesn't slide under the user mid-session.
   const [nowAnchor] = useState(() => Date.now());
+
+  // Camera audio starts muted (autoplay policy) — MuteButton is the way back.
+  // Applies to live AND recorded playback; Frigate records the audio track too.
+  const [muted, setMuted] = useState(true);
+
+  // Live quality: High = the go2rtc main stream, Low = the camera's sub stream
+  // (`<name>_sub` in go2rtc). The toggle renders only when go2rtc actually lists
+  // the sub stream — same stream-list gate the go2rtc live tier itself uses, so
+  // Ring cameras (no `_sub`) and demo cameras never see it.
+  const [quality, setQuality] = useState<"high" | "low">("high");
+  const [go2rtcKnown, setGo2rtcKnown] = useState(() => go2rtcStreamsKnown());
+  useEffect(() => {
+    let active = true;
+    void primeGo2rtcStreams().then(() => active && setGo2rtcKnown(true));
+    return () => {
+      active = false;
+    };
+  }, []);
+  const subSrc = `${cameraName}_sub`;
+  const hasSubStream = go2rtcKnown && go2rtcMaybeAvailable(subSrc);
+  // A camera without a sub stream always plays High — don't let a stale Low
+  // selection from the previous camera silently pick a nonexistent stream.
+  const liveGo2rtcSrc = quality === "low" && hasSubStream ? subSrc : cameraName;
   // Frigate VOD's nested manifest needs a Bearer token that a URL signature cannot cover.
   const [mediaAuthToken] = useState(() => loadCredentials()?.token ?? null);
   // How far back the timeline reaches. Ring stays at 24h — its recorded path is the last handful
@@ -501,6 +528,12 @@ export function CameraPlayer({
       <div className="flex items-center justify-between gap-md">
         <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
         <div className="flex items-center gap-sm">
+          {isLive && hasSubStream && <QualityToggle quality={quality} onChange={setQuality} />}
+          <MuteButton muted={muted} onToggle={() => setMuted((m) => !m)} />
+          <SnapshotButton
+            snapshotUrl={snapshotUrl(camera.snapshotEntity)}
+            cameraName={cameraName}
+          />
           {isRing && isLive && <TalkButton src={cameraName} />}
           {camera.sirenSwitchId && <SirenButton entityId={camera.sirenSwitchId} />}
           <span
@@ -527,11 +560,14 @@ export function CameraPlayer({
           // that is no longer "Ring cameras only" — the Reolink main stream is one.
           // `go2rtcMaybeAvailable` already declines unknown streams off the fetched
           // stream list, so the gate belongs there, not in a per-backend guess here.
-          go2rtcSrc={cameraName}
+          // Quality=Low swaps in the `_sub` stream (only offered when go2rtc lists it).
+          go2rtcSrc={liveGo2rtcSrc}
+          muted={muted}
         />
       ) : recordingSrc ? (
         <HlsPlayer
           src={recordingSrc}
+          muted={muted}
           paused={paused}
           // Only the demo/no-NVR source loops — it hands back the same bundled clip
           // for every seek. A real recording is finite and must end where it ends.

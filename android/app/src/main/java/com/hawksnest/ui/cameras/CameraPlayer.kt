@@ -33,9 +33,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.RecordedBackend
 import com.hawksnest.core.logic.RecordedSource
 import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
+import com.hawksnest.core.logic.isFrigateCamera
+import com.hawksnest.core.logic.recordedBackendOf
 import com.hawksnest.core.logic.chooseRecordedSource
 import com.hawksnest.core.logic.clipContaining
 import com.hawksnest.core.logic.clipSpanEndMs
@@ -77,7 +80,19 @@ fun CameraPlayer(
     modifier: Modifier = Modifier,
 ) {
     val cameraName = cameraNameOf(cam.id)
-    val isRing = cam.eventSelectId != null
+    // Which backend holds this camera's recordings — the port of the web's
+    // `recordedBackendOf` split (core/logic/RecordedBackend.kt), replacing the raw
+    // `eventSelectId != null` boolean that was doing three jobs. Frigate membership
+    // is stamped on the HA entity by the frigate-hass-integration (fails closed).
+    // Decided once per camera, like canWebRtc below: mid-view attribute churn must
+    // not flip the recorded path under a mounted player.
+    val backend = remember(cam.id) {
+        recordedBackendOf(
+            hasRingSelector = cam.eventSelectId != null,
+            hasFrigateCamera = isFrigateCamera(viewModel.entity(cam.entityId)),
+        )
+    }
+    val isRing = backend == RecordedBackend.RING
     // Pin "now" once so the timeline doesn't slide under the user mid-session.
     val nowAnchor = remember(cam.id) { System.currentTimeMillis() }
     // How far back the timeline reaches. Ring stays at 24h — its recorded path is the last handful
@@ -191,6 +206,22 @@ fun CameraPlayer(
         value = runCatching { viewModel.canGo2rtc(cameraName) }.getOrDefault(false)
     }
     var go2rtcFailed by remember(cam.id) { mutableStateOf(false) }
+
+    // Camera audio starts muted (matching the web player); the MuteButton is the way
+    // back. Unkeyed on purpose — switching cameras keeps the choice, like the web.
+    var muted by remember { mutableStateOf(true) }
+    // Low/High live quality. Low = the go2rtc `<name>_sub` stream (~1/20 the
+    // bandwidth of the fixed-bitrate main), offered only when go2rtc lists it —
+    // Ring cameras have no `_sub` and never see the toggle. While Low is selected
+    // the RTSP-direct tier is bypassed too: that tier plays the MAIN stream
+    // straight off the camera, which is exactly what a user on weak cellular is
+    // trying to escape.
+    var qualityLow by remember { mutableStateOf(false) }
+    val subAvailable: Boolean by produceState(false, cam.id) {
+        value = runCatching { viewModel.canGo2rtc("${cameraName}_sub") }.getOrDefault(false)
+    }
+    val useSub = qualityLow && subAvailable
+    val go2rtcSrc = if (useSub) "${cameraName}_sub" else cameraName
 
     // ABOVE go2rtc: RTSP straight to the camera, the same thing the vendor's own app does. Null
     // unless the user configured an account + this camera's IP in Settings, so an unconfigured app
@@ -355,6 +386,14 @@ fun CameraPlayer(
         Row(verticalAlignment = Alignment.CenterVertically) {
             CameraSwitcher(cameras = cameras, current = cam, onSelect = onSelectCamera)
             Spacer(Modifier.weight(1f))
+            if (isLive && subAvailable) {
+                QualityToggle(low = qualityLow, onChange = { qualityLow = it })
+                Spacer(Modifier.size(8.dp))
+            }
+            MuteButton(muted = muted, onToggle = { muted = !muted })
+            Spacer(Modifier.size(8.dp))
+            SnapshotButton(snapshotUrl = cam.snapshotUrl, cameraName = cameraName)
+            if (cam.snapshotUrl != null) Spacer(Modifier.size(8.dp))
             if (isRing && isLive) {
                 TalkButton(cameraName, viewModel)
                 Spacer(Modifier.size(8.dp))
@@ -394,6 +433,7 @@ fun CameraPlayer(
                     recordingUrl,
                     frame,
                     paused = paused,
+                    muted = muted,
                     seekToMs = seekToMs,
                     // Learn the loaded ring clip's real duration from the media; an ExoPlayer
                     // failure after the URL resolved is a (retryable) failure too.
@@ -455,17 +495,20 @@ fun CameraPlayer(
                 },
                 modifier = frame,
             )
-            isLive && canRtsp -> RtspPlayer(
+            // Low quality bypasses RTSP-direct (it plays the main stream) — see `useSub`.
+            isLive && canRtsp && !useSub -> RtspPlayer(
                 url = rtspUrl!!,
                 camera = cameraName,
                 onFail = { rtspFailed = true },
+                muted = muted,
                 modifier = frame,
             )
-            isLive && canGo2rtc == true && !go2rtcFailed -> Go2rtcPlayer(
-                src = cameraName,
+            isLive && (canGo2rtc == true || useSub) && !go2rtcFailed -> Go2rtcPlayer(
+                src = go2rtcSrc,
                 cameraId = cam.id,
                 baseUrl = viewModel.baseUrl(),
                 onFail = { go2rtcFailed = true },
+                muted = muted,
                 modifier = frame,
             )
             // `canGo2rtc != null` holds this arm while the stream list is in flight. Starting an HA
@@ -476,12 +519,13 @@ fun CameraPlayer(
                 cameraId = cam.id,
                 viewModel = viewModel,
                 onFail = { webRtcFailed = true },
+                muted = muted,
                 modifier = frame,
             )
             // live = true pins the HLS feed near the live edge (no fast-forward catch-up). loop
             // stays true so the demo clip — DEMO_CLIP_URI, which VideoPlayer excludes from live
             // handling — keeps looping as a fake-live feed.
-            liveUrl != null -> VideoPlayer(liveUrl!!, frame, loop = true, live = true)
+            liveUrl != null -> VideoPlayer(liveUrl!!, frame, loop = true, live = true, muted = muted)
             cam.streamUrl != null -> MjpegView(
                 streamUrl = cam.streamUrl!!,
                 snapshotUrl = cam.snapshotUrl,

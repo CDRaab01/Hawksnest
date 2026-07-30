@@ -67,10 +67,10 @@ This file adds the things that are easy to get wrong and the suite context.
   render (`lib/recordedBackend.ts`: `"ring" | "frigate" | "none"`) and Frigate serves a continuous
   VOD for cameras it records. Frigate is live (three Reolink cameras as of 2026-07-30) and
   `lib/frigate.ts` fails closed, so a camera it doesn't record resolves exactly as before.
-  **Android's RECORDED path is not ported yet** — `CameraPlayer.kt` still derives its own
-  `isRing` from the event selector, so the platforms are knowingly out of lockstep until that
-  lands (`core/logic/RecordedBackend.kt` is the 1:1 target). Its **live** path IS in lockstep as
-  of 2026-07-30: the go2rtc tier is gated on go2rtc's own stream list (`core/net/Go2rtcStreams`,
+  **Android's RECORDED derivation is in lockstep as of 2026-07-30** — `CameraPlayer.kt` derives
+  the same three-way backend via `core/logic/RecordedBackend.kt` + `Frigate.kt` (the 1:1 ports),
+  no longer a raw `eventSelectId` boolean. Its **live** path has been in lockstep since
+  2026-07-30: the go2rtc tier is gated on go2rtc's own stream list (`core/net/Go2rtcStreams`,
   the port of `lib/go2rtc.ts`), not on `isRing`. The old gate was a proxy for "go2rtc serves
   this" that silently dropped every Reolink camera to segmented HLS — visibly jumpy live video.
   Don't infer live transport from a camera's *kind*; ask go2rtc what it serves. **ring-mqtt 5.x has no
