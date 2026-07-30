@@ -397,40 +397,22 @@ fun CameraPlayer(
     } ?: events
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // TWO rows, not one. Identity + status on top, actions below.
+        // ONE FlowRow that wraps only when it has to.
         //
-        // A single Row cannot hold this many controls on a phone: Row gives every
+        // A plain Row cannot hold this many controls on a phone: Row gives every
         // child its minimum width and then keeps going, so the overflow doesn't
         // clip or scroll — the last chips get squeezed until their labels wrap one
-        // character per line ("S n a p s h o t" stacked vertically). Splitting the
-        // status pill out and letting the actions FLOW onto extra lines means the
-        // set can grow (Move/Low-High/Muted/Snapshot/Talk/Siren, per-camera) without
-        // ever crushing a label again.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            CameraSwitcher(cameras = cameras, current = cam, onSelect = onSelectCamera)
-            Spacer(Modifier.weight(1f))
-            Box(
-                Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isLive) HawksnestTheme.pulse.recovery
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-            )
-            Text(
-                if (isLive) "Live" else "Recorded",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                modifier = Modifier.padding(start = 6.dp),
-            )
-        }
-
+        // character per line ("S n a p s h o t" stacked vertically). But forcing a
+        // second row unconditionally is also wrong: it costs a row of height on
+        // every camera, which pushed the transport bar off-screen. FlowRow gives
+        // one line when the set fits and extra lines only when it doesn't — and
+        // the set genuinely varies (Move only for PTZ, Low/High only with a sub
+        // stream, Talk only for Ring, Siren only where one exists).
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            CameraSwitcher(cameras = cameras, current = cam, onSelect = onSelectCamera)
             if (isLive && ptz != null) {
                 MoveButton(active = showPtz, onToggle = { showPtz = !showPtz })
             }
@@ -443,6 +425,24 @@ fun CameraPlayer(
                 TalkButton(cameraName, viewModel)
             }
             cam.sirenSwitchId?.let { sirenId -> SirenButton(sirenId, viewModel) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isLive) HawksnestTheme.pulse.recovery
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                )
+                Text(
+                    if (isLive) "Live" else "Recorded",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
         }
 
         // Transport ladder: recorded VOD (when scrubbed) → live RTSP straight to the camera →

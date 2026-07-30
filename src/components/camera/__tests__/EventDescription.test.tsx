@@ -37,10 +37,19 @@ describe("EventDescription", () => {
     expect(body.className).not.toContain("line-clamp-2");
   });
 
-  // The two "no text" cases mean different things and must not read the same.
-  it("explains that pets are never described, rather than implying it's loading", () => {
-    render(<EventDescription event={event({ label: "cat", description: null })} />);
-    expect(screen.getByText(/people only/i)).toBeInTheDocument();
+  // Frigate only describes people, so for a pet there is nothing to say — and a
+  // permanent "not applicable" row costs real height in a bounded lightbox.
+  it("renders nothing for a pet event with no description", () => {
+    const { container } = render(
+      <EventDescription event={event({ label: "cat", description: null })} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // ...but if a pet somehow HAS one, show it rather than hiding real content.
+  it("still shows a description on a non-person event when one exists", () => {
+    render(<EventDescription event={event({ label: "dog", description: "A dog crosses." })} />);
+    expect(screen.getByText("A dog crosses.")).toBeInTheDocument();
   });
 
   it("says a person event's description is still pending", () => {
@@ -49,7 +58,7 @@ describe("EventDescription", () => {
   });
 
   it("labels the event with its object type", () => {
-    render(<EventDescription event={event({ label: "dog" })} />);
+    render(<EventDescription event={event({ label: "dog", description: "A dog crosses." })} />);
     expect(screen.getByText("dog")).toBeInTheDocument();
   });
 

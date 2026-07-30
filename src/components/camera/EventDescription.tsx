@@ -13,11 +13,14 @@ import type { CameraEvent } from "../../lib/cameraEvents";
  * and the transport bar's prev/next already steps between events, so the strip
  * simply follows the playhead.
  *
- * Three states, and telling them apart is the whole job — "no text" means
- * something different each time:
- *  - a description exists          → show it, clamped, tap to expand
- *  - the event is a dog or cat     → Frigate only describes people; say so
- *  - a person event with no text   → it hasn't been generated yet; say that
+ * Two states worth a row:
+ *  - a description exists         → show it, clamped, tap to expand
+ *  - a PERSON event without one   → it hasn't been generated yet; say that
+ *
+ * A dog/cat (or any non-person) event with no description renders **nothing**.
+ * Frigate only describes people, so "descriptions are generated for people only"
+ * is a fact about the system, not about this event — and spending a permanent row
+ * on it costs real height in a viewport-bounded lightbox for no information.
  */
 export function EventDescription({ event }: { event: CameraEvent | null }) {
     const [expanded, setExpanded] = useState(false);
@@ -27,21 +30,15 @@ export function EventDescription({ event }: { event: CameraEvent | null }) {
   if (!event) return null;
 
   const isPerson = event.label === "person";
+  // Nothing useful to say about this one.
+  if (!event.description && !isPerson) return null;
   const time = new Date(event.startMs).toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
   });
 
-  let body: string;
-  let muted = true;
-  if (event.description) {
-    body = event.description;
-    muted = false;
-  } else if (!isPerson) {
-    body = "Descriptions are generated for people only.";
-  } else {
-    body = "Description not ready yet.";
-  }
+  const body = event.description ?? "Description not ready yet.";
+  const muted = !event.description;
 
   return (
     <div className="rounded-lg bg-panel px-md py-sm">

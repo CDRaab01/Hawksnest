@@ -39,8 +39,11 @@ import java.util.Locale
  * it needs no new interaction to reach — tapping a timeline chip already seeks,
  * and the transport bar's prev/next already steps between events.
  *
- * Three states, and telling them apart is the whole job — "no text" means
- * something different each time. Twin of the web `EventDescription.tsx`.
+ * Two states worth a row: a description exists, or a PERSON event is still
+ * waiting for one. A dog/cat event with no description renders nothing — Frigate
+ * only describes people, so that is a fact about the system rather than about
+ * this event, and a permanent "not applicable" row costs real height.
+ * Twin of the web `EventDescription.tsx`.
  */
 @Composable
 fun EventDescription(event: CameraEvent?, modifier: Modifier = Modifier) {
@@ -51,12 +54,10 @@ fun EventDescription(event: CameraEvent?, modifier: Modifier = Modifier) {
     var expanded by remember(event.id) { mutableStateOf(false) }
     val description = event.description
     val isPerson = event.label == "person"
+    // Nothing useful to say about this one.
+    if (description == null && !isPerson) return
 
-    val body = when {
-        description != null -> description
-        !isPerson -> "Descriptions are generated for people only."
-        else -> "Description not ready yet."
-    }
+    val body = description ?: "Description not ready yet."
     val time = remember(event.startMs) {
         SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(event.startMs))
     }

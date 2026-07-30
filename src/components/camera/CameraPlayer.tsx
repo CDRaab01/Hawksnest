@@ -556,31 +556,17 @@ export function CameraPlayer({
 
   return (
     <div className="space-y-md">
-      {/* Identity + status on one line, actions on their own WRAPPING line.
-          A single non-wrapping row cannot hold this many controls at phone
-          width: each child shrinks to its minimum and the labels end up
-          wrapping one character per line rather than clipping or scrolling.
-          `flex-wrap` + `shrink-0` lets the set grow (Move/Low-High/Muted/
-          Snapshot/Talk/Siren, varying per camera) without ever crushing one. */}
-      <div className="flex items-center justify-between gap-md">
-        <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
-        <span
-          className={[
-            "flex shrink-0 items-center gap-xs whitespace-nowrap caption-label",
-            isLive ? "text-recovery" : "text-ink-dim",
-          ].join(" ")}
-        >
-          <span
-            className={[
-              "h-2 w-2 rounded-full",
-              isLive ? "bg-recovery" : "bg-ink-faint",
-            ].join(" ")}
-          />
-          {isLive ? "Live" : "Recorded"}
-        </span>
-      </div>
-
+      {/* ONE row that wraps only when it has to.
+          A non-wrapping row can't hold this many controls at phone width: each
+          child shrinks to its minimum and labels end up wrapping one character
+          per line rather than clipping. But forcing two rows unconditionally is
+          also wrong — it costs a row of height on every camera and pushed the
+          transport bar off-screen. `flex-wrap` + `shrink-0` gives one line when
+          the set fits and extra lines only when it doesn't, which matters
+          because the set varies per camera (Move only for PTZ, Low/High only
+          with a sub stream, Talk only for Ring, Siren where one exists). */}
       <div className="flex flex-wrap items-center gap-sm">
+          <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
           {isLive && ptz && (
             <button
               type="button"
@@ -604,6 +590,22 @@ export function CameraPlayer({
           />
           {isRing && isLive && <TalkButton src={cameraName} />}
           {camera.sirenSwitchId && <SirenButton entityId={camera.sirenSwitchId} />}
+          {/* ml-auto pushes the status to the right while everything shares a
+              line, and simply trails the group once the row wraps. */}
+          <span
+            className={[
+              "ml-auto flex shrink-0 items-center gap-xs whitespace-nowrap caption-label",
+              isLive ? "text-recovery" : "text-ink-dim",
+            ].join(" ")}
+          >
+            <span
+              className={[
+                "h-2 w-2 rounded-full",
+                isLive ? "bg-recovery" : "bg-ink-faint",
+              ].join(" ")}
+            />
+            {isLive ? "Live" : "Recorded"}
+          </span>
       </div>
 
       {isLive ? (
