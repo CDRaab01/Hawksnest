@@ -197,7 +197,7 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   rhythm — FEATURED lock/climate/alarm cards, CONTROL rows with inline switches, READONLY rows).
 - `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
 - **Camera live ladder** (`ui/cameras/CameraPlayer.kt`): recorded VOD (when scrubbed) →
-  **go2rtc-direct** (Ring cams only) → HA WebRTC → HLS → MJPEG → snapshot. The go2rtc-direct
+  **go2rtc-direct** → HA WebRTC → HLS → MJPEG → snapshot. The go2rtc-direct
   tier (`Go2rtcPlayer.kt`) negotiates recvonly WebRTC straight against the dedicated go2rtc over
   its WS API (`/go2rtc/api/ws?src=<base>`, same signaling `TalkButton` speaks — both share
   `Go2rtc.kt`'s `go2rtcWsUrl`), skipping the ring-mqtt/ffmpeg hop for ~1–2 s first frame. Media
@@ -205,6 +205,18 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   the 8 s watchdog fails over to HA WebRTC and `Go2rtcHealth` (process-wide circuit-breaker)
   makes every later camera skip the tier. Shares `WebRtcCore` (process EGL/factory — never
   disposed per-session) and `LiveFrameStore` tile capture with `WebRtcPlayer`.
+  The tier is offered for **every** camera, gated on go2rtc's own stream list
+  (`core/net/Go2rtcStreams`, the 1:1 port of web's `lib/go2rtc.ts` cache — same 60 s TTL, same
+  fail-to-EMPTY-set rule, and it hosts `Go2rtcHealth` since `core` cannot depend on `ui`).
+  It previously gated on `isRing`, which was only ever a proxy for "go2rtc serves this": true
+  while go2rtc served Ring exclusively, wrong once the Reolink main streams were added, and the
+  reason those cameras fell to **segmented HLS and looked jumpy**. The stream list is what makes
+  dropping `isRing` safe — without it every camera go2rtc doesn't serve would pay the full 8 s
+  watchdog on open. Its decision is tri-state: while the (cached, sub-second) list is in flight
+  the ladder holds both WebRTC arms and renders the snapshot, and **must not** resolve HLS —
+  `camera/stream` wakes a battery camera's pipeline, which is what the lazy-HLS rule exists to
+  prevent. Both WebRTC tiers are continuous RTP; HLS below them is segmented, which is what
+  "jumpy live video" actually is.
 - **Devices v2** (`ui/devices/`): single-column list in the three-tier rhythm, PULSE segment
   chips (not stock M3), room summaries ("N devices · M on"), search, and long-press → rename/hide
   persisted in `util/DevicePrefsStore` (DataStore) with a hidden-devices shelf. Display names

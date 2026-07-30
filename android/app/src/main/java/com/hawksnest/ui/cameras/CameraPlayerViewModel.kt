@@ -16,6 +16,7 @@ import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.matchDevice
 import com.hawksnest.core.logic.ringRecordingMissing
 import com.hawksnest.core.logic.ringRecordingUrl
+import com.hawksnest.core.net.Go2rtcStreams
 import com.hawksnest.core.net.RingTimelineClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
@@ -59,7 +60,20 @@ private const val CAMERA_FEATURE_STREAM = 2
 class CameraPlayerViewModel @Inject constructor(
     private val connection: ConnectionManager,
     private val ringTimelineClient: RingTimelineClient,
+    private val go2rtcStreams: Go2rtcStreams,
 ) : ViewModel() {
+
+    /**
+     * Whether to attempt the go2rtc live tier for [cameraName], asked once per camera open.
+     *
+     * Suspends only for the first call in a minute (the stream list is cached); the player treats
+     * the pending state as "undecided" and holds the tiers below rather than resolving HLS, so a
+     * slow answer never wakes a battery camera's stream pipeline.
+     */
+    suspend fun canGo2rtc(cameraName: String): Boolean {
+        go2rtcStreams.prime(baseUrl())
+        return go2rtcStreams.maybeAvailable(cameraName)
+    }
 
     /**
      * Ring's OWN recorded timeline for a camera — real event times, real spans, and directly

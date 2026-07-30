@@ -157,18 +157,29 @@ fun CameraPlayer(
     // churn their attributes) can't flip the transport off WebRTC and drop us to the stale snapshot.
     val canWebRtc = remember(cam.id) { viewModel.canWebRtc(cam.entityId) }
     var webRtcFailed by remember(cam.id) { mutableStateOf(false) }
-    // Ring cameras get an even faster tier ABOVE HA WebRTC: WebRTC straight to the dedicated
-    // go2rtc (native `ring:` source, ~1-2s). Snapshot the circuit-breaker at mount (mirrors
-    // canWebRtc); it's skipped once media is known-unreachable (before the §7c :8555 forwarder).
-    val canGo2rtc = remember(cam.id) { isRing && Go2rtcHealth.maybeAvailable() }
+    // A tier ABOVE HA WebRTC: WebRTC straight to the dedicated go2rtc (~1-2s, continuous RTP
+    // rather than segmented HLS). Decided ONCE per camera, like canWebRtc.
+    //
+    // This used to gate on `isRing`, which was only ever a proxy for "go2rtc serves this" — true
+    // while go2rtc served Ring cameras exclusively, and wrong the moment the Reolink main streams
+    // were added. Reolink cameras fell to HLS and looked visibly jumpy. It now asks go2rtc what it
+    // actually serves (core/net/Go2rtcStreams, the port of web's lib/go2rtc.ts), which is both
+    // correct for Reolink and still skips the tier for cameras go2rtc has never heard of — the
+    // 8-second watchdog stall the isRing gate had been incidentally preventing.
+    //
+    // null = undecided (the list is being fetched); see `wantsHls`.
+    val canGo2rtc: Boolean? by produceState<Boolean?>(null, cam.id) {
+        value = runCatching { viewModel.canGo2rtc(cameraName) }.getOrDefault(false)
+    }
     var go2rtcFailed by remember(cam.id) { mutableStateOf(false) }
 
     // Resolve the HLS stream URL only once the HLS tier could actually render — NOT eagerly on
     // open. `camera/stream` makes HA spin up a stream pipeline, which on a battery camera wakes
     // it / competes for its single live session in parallel with the WebRTC negotiation above it
     // on the ladder (the request itself is bounded at 15s in HaSource). Both live-WebRTC tiers
-    // (go2rtc-direct, then HA) must be exhausted before we resolve HLS.
-    val wantsHls = !(canGo2rtc && !go2rtcFailed) && !(canWebRtc && !webRtcFailed)
+    // (go2rtc-direct, then HA) must be exhausted before we resolve HLS — and `canGo2rtc == null`
+    // is not yet an exhaustion, so an undecided go2rtc must not resolve HLS either.
+    val wantsHls = (canGo2rtc == false || go2rtcFailed) && !(canWebRtc && !webRtcFailed)
     val liveUrl: String? by produceState<String?>(null, cam.id, wantsHls) {
         value = if (wantsHls) viewModel.liveStreamUrl(cam.entityId) else null
     }
@@ -333,8 +344,10 @@ fun CameraPlayer(
             )
         }
 
-        // Transport ladder: recorded VOD (when scrubbed) → live WebRTC (go2rtc) → live HLS/demo
-        // video → MJPEG proxy → snapshot. Mirrors the web LivePlayer's step-down.
+        // Transport ladder: recorded VOD (when scrubbed) → live WebRTC (go2rtc) → live WebRTC (HA)
+        // → live HLS/demo video → MJPEG proxy → snapshot. Mirrors the web LivePlayer's step-down.
+        // The two WebRTC tiers are continuous RTP; HLS below them is segmented, which is what
+        // "jumpy" live video looks like — so a camera go2rtc serves should never reach it.
         val frame = Modifier
             .fillMaxWidth()
             .aspectRatio(16f / 9f)
@@ -405,14 +418,17 @@ fun CameraPlayer(
                 },
                 modifier = frame,
             )
-            isLive && canGo2rtc && !go2rtcFailed -> Go2rtcPlayer(
+            isLive && canGo2rtc == true && !go2rtcFailed -> Go2rtcPlayer(
                 src = cameraName,
                 cameraId = cam.id,
                 baseUrl = viewModel.baseUrl(),
                 onFail = { go2rtcFailed = true },
                 modifier = frame,
             )
-            isLive && canWebRtc && !webRtcFailed -> WebRtcPlayer(
+            // `canGo2rtc != null` holds this arm while the stream list is in flight. Starting an HA
+            // WebRTC negotiation only to tear it down when go2rtc turns out to be available wastes
+            // the PeerConnection; the snapshot arm below renders for the (cached, sub-second) wait.
+            isLive && canGo2rtc != null && canWebRtc && !webRtcFailed -> WebRtcPlayer(
                 entityId = cam.entityId,
                 cameraId = cam.id,
                 viewModel = viewModel,
