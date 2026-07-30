@@ -57,6 +57,9 @@ fun SettingsScreen(
     val hasToken by viewModel.hasToken.collectAsState()
     val reachability by viewModel.reachability.collectAsState()
     val pushEnabled by viewModel.pushEnabled.collectAsState()
+    val rtspUser by viewModel.rtspUser.collectAsState()
+    val hasRtspPass by viewModel.hasRtspPass.collectAsState()
+    val rtspCameraIps by viewModel.rtspCameraIps.collectAsState()
 
     val context = LocalContext.current
     // Android 13+ gates notifications behind POST_NOTIFICATIONS; request it the
@@ -161,6 +164,15 @@ fun SettingsScreen(
             savedUrl = savedUrl,
             reachability = reachability,
             onTest = { viewModel.testReachability(url) },
+        )
+
+        SectionHeader("Camera direct stream")
+        RtspPanel(
+            savedUser = rtspUser,
+            hasPass = hasRtspPass,
+            savedCameraIps = rtspCameraIps,
+            onSave = { u, p, ips -> viewModel.saveRtsp(u, p, ips) },
+            onClear = { viewModel.clearRtsp() },
         )
 
         SectionHeader("Notifications")
