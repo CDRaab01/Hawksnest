@@ -217,6 +217,7 @@ function synthCameraEvents(
       hasSnapshot: true,
       thumbnailUrl: DEMO_POSTER_URL,
       snapshotUrl: DEMO_POSTER_URL,
+      description: null,
     });
   }
   return out;

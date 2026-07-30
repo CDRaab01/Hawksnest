@@ -53,6 +53,35 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Household policy for camera object alerts, held in HA as `input_boolean`s.
+     *
+     * Deliberately NOT device-local like [pushEnabled]: these stop the push being
+     * *generated*, so they apply to every device and never wake a radio for an
+     * alert nobody wants ("servers enforce, clients present"). [pushEnabled] is
+     * this phone's subscription; these are the household's policy.
+     *
+     * Null = the helper doesn't exist on this HA (or we're not connected yet), and
+     * the UI hides the switch rather than showing a control that silently does
+     * nothing. Mirrors the automation's own gate.
+     */
+    val personAlerts: StateFlow<Boolean?> = booleanHelper(HELPER_PERSON)
+    val petAlerts: StateFlow<Boolean?> = booleanHelper(HELPER_PETS)
+
+    private fun booleanHelper(entityId: String): StateFlow<Boolean?> =
+        connectionManager.state.entities
+            .map { it[entityId]?.state?.let { s -> s == "on" } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Flip a helper. Crash-safe via the control gate, like every other toggle. */
+    fun setPersonAlerts(on: Boolean) = setHelper(HELPER_PERSON, on, "Person alerts")
+
+    fun setPetAlerts(on: Boolean) = setHelper(HELPER_PETS, on, "Pet alerts")
+
+    private fun setHelper(entityId: String, on: Boolean, label: String) {
+        connectionManager.control(entityId, if (on) "turn_on" else "turn_off", label = label)
+    }
+
     val savedUrl: StateFlow<String?> = credentialStore.haUrl
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val hasToken: StateFlow<Boolean> = credentialStore.haToken
@@ -130,5 +159,12 @@ class SettingsViewModel @Inject constructor(
     /** Turn the tier off and forget the camera credentials, leaving the HA session untouched. */
     fun clearRtsp() {
         viewModelScope.launch { credentialStore.saveRtsp("", "", emptyMap()) }
+    }
+
+    companion object {
+        /** Defined in the HA seed (`hawksnest-automation`), read by
+         *  `hawksnest_push_camera_object`. */
+        const val HELPER_PERSON = "input_boolean.hawksnest_alert_person"
+        const val HELPER_PETS = "input_boolean.hawksnest_alert_pets"
     }
 }

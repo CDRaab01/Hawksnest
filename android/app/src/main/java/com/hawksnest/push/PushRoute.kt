@@ -5,12 +5,21 @@ import java.net.URLDecoder
 /**
  * Classifies an ntfy message into a Hawksnest push kind and works out what a tap
  * should open. Pure (no Android deps) so the routing is unit-tested. Keys off the
- * tags the HA automations set (`bell`, `shield`, `rotating_light`) with a title
- * fallback, so it degrades gracefully if a message arrives without tags.
+ * tags the HA automations set (`bell`, `shield`, `rotating_light`, `walking`/`dog`/
+ * `cat`) with a title fallback, so it degrades gracefully if a message arrives
+ * without tags.
  */
 enum class PushKind {
     Doorbell,
     Alarm,
+
+    /** Frigate saw a person on a camera. Only ever sent while the alarm is armed
+     *  (the HA automation gates on it), so this really is a security event. */
+    Person,
+
+    /** Frigate saw a dog or cat — the same pipeline, but noise rather than alarm,
+     *  so it gets its own channel the user can mute independently. */
+    Pet,
     Generic,
 }
 
@@ -26,6 +35,12 @@ object PushRoute {
             "bell" in tags || "doorbell" in title -> PushKind.Doorbell
             "rotating_light" in tags || "shield" in tags || title.startsWith("alarm") ->
                 PushKind.Alarm
+            // `walking`/`dog`/`cat` are what `hawksnest_push_camera_object` sets —
+            // valid ntfy emoji shortcodes, so the same tags also render sensibly in
+            // the plain ntfy app. Ordered after Alarm so a hypothetical message
+            // carrying both keeps its alarm classification.
+            "walking" in tags -> PushKind.Person
+            "dog" in tags || "cat" in tags -> PushKind.Pet
             else -> PushKind.Generic
         }
     }

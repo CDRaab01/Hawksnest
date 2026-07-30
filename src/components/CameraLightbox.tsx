@@ -37,10 +37,19 @@ export function CameraLightbox({ camera, onClose }: Props) {
       aria-modal="true"
       aria-label={`${active.name} camera view`}
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-lg backdrop-blur"
+      // Scrollable, not just centered. This was `flex items-center justify-center`
+      // with no overflow handling and no height bound, so a player taller than the
+      // viewport spilled off BOTH edges with no way to reach the transport bar —
+      // and the chrome grows per camera (Move/quality/talk/siren) plus the event
+      // description strip, so "tall enough" is reachable in normal use.
+      // `overflow-y-auto` on the backdrop with `min-h-full` centering inside is the
+      // pattern that centers short content without clipping tall content (plain
+      // `items-center` + `overflow-auto` clips the top in flex containers).
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/85 p-lg backdrop-blur"
     >
       {/* The player claims the open camera's transition name, so the wall tile
           visually expands into it (and collapses back on close). */}
+      <div className="flex min-h-full items-center justify-center">
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-4xl"
@@ -68,6 +77,7 @@ export function CameraLightbox({ camera, onClose }: Props) {
           cameras={cameras.length > 0 ? cameras : [active]}
           onSelectCamera={(c) => setActiveId(c.id)}
         />
+      </div>
       </div>
     </div>
   );

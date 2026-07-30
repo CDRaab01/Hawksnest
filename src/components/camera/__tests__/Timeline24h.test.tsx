@@ -19,6 +19,7 @@ const clip = (id: string, startMs: number): CameraEvent => ({
   hasSnapshot: false,
   thumbnailUrl: null,
   snapshotUrl: null,
+  description: null,
 });
 
 // rAF isn't implemented in jsdom — queue callbacks and flush them like frames,

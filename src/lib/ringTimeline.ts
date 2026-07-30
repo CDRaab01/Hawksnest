@@ -90,6 +90,8 @@ export function toCameraEvent(rec: RingRecording, cameraName: string): CameraEve
     hasSnapshot: rec.thumbnailUrl !== null,
     thumbnailUrl: rec.thumbnailUrl,
     snapshotUrl: rec.thumbnailUrl,
+    // Descriptions are a Frigate GenAI feature; Ring events never have one.
+    description: null,
   };
 }
 

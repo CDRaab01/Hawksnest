@@ -23,7 +23,7 @@ export function MuteButton({
       aria-label={muted ? "Unmute camera audio" : "Mute camera audio"}
       aria-pressed={!muted}
       className={[
-        "flex items-center gap-xs rounded-sm px-sm py-xs caption-label transition-colors duration-fast",
+        "flex shrink-0 items-center gap-xs whitespace-nowrap rounded-sm px-sm py-xs caption-label transition-colors duration-fast",
         muted ? "bg-panel text-ink-dim hover:text-ink" : "bg-panel-high text-ink",
       ].join(" ")}
     >

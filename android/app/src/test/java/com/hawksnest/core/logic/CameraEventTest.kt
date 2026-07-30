@@ -33,6 +33,55 @@ class CameraEventTest {
         put("has_snapshot", hasSnapshot)
     }
 
+    /** As [raw], plus Frigate's nested `data.description`. `description = null`
+     *  still emits the `data` object, to cover the explicit-JSON-null case. */
+    private fun rawWithData(id: String = "e1", description: String?): JsonObject = buildJsonObject {
+        put("id", id)
+        put("camera", "kitchen")
+        put("label", "person")
+        put("start_time", 1_700_000_000.0)
+        put("has_clip", false)
+        put("has_snapshot", false)
+        put(
+            "data",
+            buildJsonObject { if (description != null) put("description", description) },
+        )
+    }
+
+    @Test
+    fun `maps Frigate's nested data description`() {
+        val ev = normalizeFrigateEvents(listOf(rawWithData(description = "A person walks to the counter.")))[0]
+        assertEquals("A person walks to the counter.", ev.description)
+    }
+
+    // Null is the NORMAL case, not an error: genai runs for person only, and only
+    // after the event ends. One "absent" representation keeps the UI simple.
+    @Test
+    fun `description is null when absent, empty, whitespace, or data missing`() {
+        assertNull(normalizeFrigateEvents(listOf(raw(id = "no-data")))[0].description)
+        assertNull(normalizeFrigateEvents(listOf(rawWithData(description = null)))[0].description)
+        assertNull(normalizeFrigateEvents(listOf(rawWithData(description = "")))[0].description)
+        assertNull(normalizeFrigateEvents(listOf(rawWithData(description = "   \n ")))[0].description)
+    }
+
+    @Test
+    fun `description is trimmed`() {
+        assertEquals(
+            "hello",
+            normalizeFrigateEvents(listOf(rawWithData(description = "  hello  ")))[0].description,
+        )
+    }
+
+    // The WS result arrives as a JSON *string*; the description must survive that hop.
+    @Test
+    fun `description survives the JSON-string-wrapped websocket result`() {
+        val wire = JsonPrimitive(
+            JsonArray(listOf(rawWithData(description = "Carrying a box."))).toString(),
+        )
+        val ev = normalizeFrigateEvents(parseFrigateWsEvents(wire))[0]
+        assertEquals("Carrying a box.", ev.description)
+    }
+
     @Test
     fun `normalizes Frigate events seconds to ms, oldest-first, defensive defaults`() {
         val out = normalizeFrigateEvents(

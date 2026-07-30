@@ -3,6 +3,7 @@ package com.hawksnest.ui.cameras
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -264,6 +265,12 @@ fun CameraPlayer(
     } else {
         clipContaining(events, headTime, loadedClip?.first, loadedClip?.second)
     }
+    // The event whose AI description the strip shows. Separate from `selected`
+    // above, which is deliberately Ring-only (it drives per-clip stream
+    // resolution); descriptions are a Frigate feature, so this one is
+    // backend-agnostic and needs no loaded-clip refinement — Frigate events carry
+    // real end times.
+    val describedEvent = clipContaining(events, headTime, null, null)
 
     fun seek(ms: Long) {
         scrubbing = false
@@ -390,44 +397,52 @@ fun CameraPlayer(
     } ?: events
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // ONE FlowRow that wraps only when it has to.
+        //
+        // A plain Row cannot hold this many controls on a phone: Row gives every
+        // child its minimum width and then keeps going, so the overflow doesn't
+        // clip or scroll — the last chips get squeezed until their labels wrap one
+        // character per line ("S n a p s h o t" stacked vertically). But forcing a
+        // second row unconditionally is also wrong: it costs a row of height on
+        // every camera, which pushed the transport bar off-screen. FlowRow gives
+        // one line when the set fits and extra lines only when it doesn't — and
+        // the set genuinely varies (Move only for PTZ, Low/High only with a sub
+        // stream, Talk only for Ring, Siren only where one exists).
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             CameraSwitcher(cameras = cameras, current = cam, onSelect = onSelectCamera)
-            Spacer(Modifier.weight(1f))
             if (isLive && ptz != null) {
                 MoveButton(active = showPtz, onToggle = { showPtz = !showPtz })
-                Spacer(Modifier.size(8.dp))
             }
             if (isLive && subAvailable) {
                 QualityToggle(low = qualityLow, onChange = { qualityLow = it })
-                Spacer(Modifier.size(8.dp))
             }
             MuteButton(muted = muted, onToggle = { muted = !muted })
-            Spacer(Modifier.size(8.dp))
             SnapshotButton(snapshotUrl = cam.snapshotUrl, cameraName = cameraName)
-            if (cam.snapshotUrl != null) Spacer(Modifier.size(8.dp))
             if (isRing && isLive) {
                 TalkButton(cameraName, viewModel)
-                Spacer(Modifier.size(8.dp))
             }
-            cam.sirenSwitchId?.let { sirenId ->
-                SirenButton(sirenId, viewModel)
-                Spacer(Modifier.size(8.dp))
+            cam.sirenSwitchId?.let { sirenId -> SirenButton(sirenId, viewModel) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isLive) HawksnestTheme.pulse.recovery
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                )
+                Text(
+                    if (isLive) "Live" else "Recorded",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
             }
-            Box(
-                Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isLive) HawksnestTheme.pulse.recovery
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-            )
-            Text(
-                if (isLive) "Live" else "Recorded",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 6.dp),
-            )
         }
 
         // Transport ladder: recorded VOD (when scrubbed) → live RTSP straight to the camera →
@@ -563,6 +578,11 @@ fun CameraPlayer(
             },
             onLive = ::goLive,
         )
+
+        // Between the timeline and the transport on purpose: tapping a chip
+        // already seeks, so the description follows the playhead with no new
+        // interaction to learn.
+        EventDescription(describedEvent)
 
         TransportBar(
             isLive = isLive,

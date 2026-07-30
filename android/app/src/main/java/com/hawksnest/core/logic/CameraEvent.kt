@@ -36,6 +36,15 @@ data class CameraEvent(
     val hasSnapshot: Boolean,
     val thumbnailUrl: String?,
     val snapshotUrl: String?,
+    /**
+     * Frigate's GenAI description of what the object did, or null.
+     *
+     * Null is the common case and does **not** mean "loading": Frigate runs GenAI
+     * for `person` only, so dog/cat events never have one, and it is generated
+     * *after* the event ends, so a fresh person event has none until a refetch.
+     * The UI must tell those two apart.
+     */
+    val description: String? = null,
 )
 
 private fun JsonObject.prim(key: String): JsonPrimitive? = this[key] as? JsonPrimitive
@@ -108,5 +117,8 @@ fun normalizeFrigateEvents(raw: List<JsonObject>, base: String = FRIGATE_BASE): 
             hasSnapshot = hasSnapshot,
             thumbnailUrl = if (hasSnapshot) eventSnapshotUrl(id, base) else null,
             snapshotUrl = if (hasSnapshot) eventSnapshotUrl(id, base) else null,
+            // Normalize empty/whitespace to null so the UI has exactly one "absent" case.
+            description = (e["data"] as? JsonObject)
+                ?.prim("description")?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
         )
     }.sortedBy { it.startMs }

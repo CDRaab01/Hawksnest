@@ -35,6 +35,50 @@ class PushRouteTest {
         assertEquals(PushKind.Generic, PushRoute.kindOf(msg(title = "Water leak")))
     }
 
+    // `walking`/`dog`/`cat` are the tags hawksnest_push_camera_object sets.
+    @Test
+    fun `walking tag classifies as person`() {
+        assertEquals(
+            PushKind.Person,
+            PushRoute.kindOf(msg(title = "Person at Kitchen", tags = listOf("walking"))),
+        )
+    }
+
+    @Test
+    fun `dog and cat tags classify as pet`() {
+        for (tag in listOf("dog", "cat")) {
+            assertEquals(
+                PushKind.Pet,
+                PushRoute.kindOf(msg(title = "Dog at Big Room", tags = listOf(tag))),
+            )
+        }
+    }
+
+    // Alarm is matched first on purpose — a message carrying both must stay an alarm.
+    @Test
+    fun `alarm wins over a camera tag on the same message`() {
+        assertEquals(
+            PushKind.Alarm,
+            PushRoute.kindOf(msg(title = "Alarm triggered", tags = listOf("walking", "shield"))),
+        )
+    }
+
+    // A person alert's title starts with "Person"/"Dog"/"Cat", never "alarm", and
+    // contains no "doorbell" — so an untagged one must not be misrouted.
+    @Test
+    fun `camera titles do not collide with the doorbell or alarm fallbacks`() {
+        assertEquals(PushKind.Generic, PushRoute.kindOf(msg(title = "Person at Kitchen")))
+        assertEquals(PushKind.Generic, PushRoute.kindOf(msg(title = "Cat at Big Room")))
+    }
+
+    // The camera automation appends &event=<id>; the camera must still resolve, or
+    // tapping a person alert would land on Home instead of the camera.
+    @Test
+    fun `cameraOf still works when the click url also carries an event id`() {
+        val m = msg(click = "https://h:8443/?camera=camera.kitchen&event=1785450299.202571-j2epy2")
+        assertEquals("camera.kitchen", PushRoute.cameraOf(m))
+    }
+
     @Test
     fun `cameraOf pulls the logical camera id from the click url`() {
         val m = msg(click = "https://dragonfly.tail2ce561.ts.net:8443/?camera=camera.front_door")

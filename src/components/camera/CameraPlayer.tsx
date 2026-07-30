@@ -37,6 +37,7 @@ import { TalkButton } from "./TalkButton";
 import { MuteButton } from "./MuteButton";
 import { SnapshotButton } from "./SnapshotButton";
 import { QualityToggle } from "./QualityToggle";
+import { EventDescription } from "./EventDescription";
 import { PtzPanel } from "./PtzPanel";
 import { resolvePtz } from "../../lib/cameraPtz";
 import { useEntityStore } from "../../store/entityStore";
@@ -300,6 +301,16 @@ export function CameraPlayer({
     [isLive, isRing, events, headTime, loadedClip],
   );
 
+  // The event whose AI description the strip shows. Separate from `selected`
+  // above, which is deliberately Ring-only (it drives per-clip stream
+  // resolution); descriptions are a Frigate feature, so this one is
+  // backend-agnostic and needs no loaded-clip refinement — Frigate events carry
+  // real end times.
+  const describedEvent = useMemo(
+    () => clipContaining(events, headTime, null, null) ?? null,
+    [events, headTime],
+  );
+
   const { prev, next } = useMemo(() => {
     const before = events.filter((e) => e.startMs < headTime);
     const after = events.filter((e) => e.startMs > headTime);
@@ -545,9 +556,17 @@ export function CameraPlayer({
 
   return (
     <div className="space-y-md">
-      <div className="flex items-center justify-between gap-md">
-        <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
-        <div className="flex items-center gap-sm">
+      {/* ONE row that wraps only when it has to.
+          A non-wrapping row can't hold this many controls at phone width: each
+          child shrinks to its minimum and labels end up wrapping one character
+          per line rather than clipping. But forcing two rows unconditionally is
+          also wrong — it costs a row of height on every camera and pushed the
+          transport bar off-screen. `flex-wrap` + `shrink-0` gives one line when
+          the set fits and extra lines only when it doesn't, which matters
+          because the set varies per camera (Move only for PTZ, Low/High only
+          with a sub stream, Talk only for Ring, Siren where one exists). */}
+      <div className="flex flex-wrap items-center gap-sm">
+          <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
           {isLive && ptz && (
             <button
               type="button"
@@ -571,9 +590,11 @@ export function CameraPlayer({
           />
           {isRing && isLive && <TalkButton src={cameraName} />}
           {camera.sirenSwitchId && <SirenButton entityId={camera.sirenSwitchId} />}
+          {/* ml-auto pushes the status to the right while everything shares a
+              line, and simply trails the group once the row wraps. */}
           <span
             className={[
-              "flex items-center gap-xs rounded-sm px-sm py-xs caption-label",
+              "ml-auto flex shrink-0 items-center gap-xs whitespace-nowrap caption-label",
               isLive ? "text-recovery" : "text-ink-dim",
             ].join(" ")}
           >
@@ -585,7 +606,6 @@ export function CameraPlayer({
             />
             {isLive ? "Live" : "Recorded"}
           </span>
-        </div>
       </div>
 
       {isLive ? (
@@ -651,6 +671,11 @@ export function CameraPlayer({
         onScrub={scrub}
         onLive={goLive}
       />
+
+      {/* Between the timeline and the transport on purpose: tapping a chip
+          already seeks, so the description follows the playhead with no new
+          interaction to learn. */}
+      <EventDescription event={describedEvent} />
 
       <TransportBar
         isLive={isLive}

@@ -60,6 +60,45 @@ describe("cameraEvents", () => {
     });
   });
 
+  describe("GenAI description", () => {
+    const base = { id: "e1", camera: "kitchen", label: "person", start_time: 1_700_000_000 };
+
+    it("maps Frigate's nested data.description", () => {
+      const [ev] = normalizeFrigateEvents([
+        { ...base, data: { description: "A person walks to the counter." } },
+      ]);
+      expect(ev.description).toBe("A person walks to the counter.");
+    });
+
+    // Null is the NORMAL case, not an error: genai runs for person only, and only
+    // after the event ends. One "absent" representation keeps the UI simple.
+    it("is null when absent, empty, whitespace, or explicitly null", () => {
+      expect(normalizeFrigateEvents([{ ...base }])[0].description).toBeNull();
+      expect(normalizeFrigateEvents([{ ...base, data: {} }])[0].description).toBeNull();
+      expect(
+        normalizeFrigateEvents([{ ...base, data: { description: "" } }])[0].description,
+      ).toBeNull();
+      expect(
+        normalizeFrigateEvents([{ ...base, data: { description: "   \n " } }])[0].description,
+      ).toBeNull();
+      expect(
+        normalizeFrigateEvents([{ ...base, data: { description: null } }])[0].description,
+      ).toBeNull();
+    });
+
+    it("trims surrounding whitespace", () => {
+      const [ev] = normalizeFrigateEvents([{ ...base, data: { description: "  hello  " } }]);
+      expect(ev.description).toBe("hello");
+    });
+
+    // The WS result arrives as a JSON *string*; the description must survive that hop.
+    it("survives the JSON-string-wrapped websocket result", () => {
+      const wire = JSON.stringify([{ ...base, data: { description: "Carrying a box." } }]);
+      const [ev] = normalizeFrigateEvents(parseFrigateWsEvents(wire));
+      expect(ev.description).toBe("Carrying a box.");
+    });
+  });
+
   it("treats a missing end_time as an ongoing event (endMs null)", () => {
     const [ev] = normalizeFrigateEvents([
       { id: "x", camera: "c", label: "motion", start_time: 1_700_000_000 },

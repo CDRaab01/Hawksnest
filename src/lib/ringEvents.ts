@@ -58,6 +58,8 @@ export function ringEventsFromSelect(
         hasSnapshot: false,
         thumbnailUrl: null,
         snapshotUrl: null,
+        // Descriptions are a Frigate GenAI feature; Ring events never have one.
+        description: null,
       };
     })
     .sort((a, b) => a.startMs - b.startMs);
