@@ -97,6 +97,26 @@ export function eventSnapshotUrl(eventId: string, base: string = FRIGATE_BASE): 
  * want. Entries without an id or a usable start time are dropped. A missing
  * `end_time` means the event is still in progress (`endMs = null`).
  */
+/**
+ * Unwrap a `frigate/events/get` websocket result into the raw event list.
+ *
+ * The integration sends the result **without decoding it** — so it usually arrives as a JSON
+ * *string* containing the array, not the array itself. Handle both (a future integration version
+ * decoding server-side must not break us), and treat anything else as "no events": the caller's
+ * contract is an empty timeline, never a throw.
+ */
+export function parseFrigateWsEvents(result: unknown): RawFrigateEvent[] {
+  let raw: unknown = result;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(raw) ? (raw as RawFrigateEvent[]) : [];
+}
+
 export function normalizeFrigateEvents(
   raw: RawFrigateEvent[],
   base: string = FRIGATE_BASE,

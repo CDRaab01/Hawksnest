@@ -14,11 +14,11 @@ import type { AutomationConfig } from "../lib/automations";
 import { normalizeLogbook, type LogEvent, type RawLogbookEntry } from "../lib/logbook";
 import {
   normalizeFrigateEvents,
+  parseFrigateWsEvents,
   recordingUrlAt as buildRecordingUrl,
   eventClipUrl as buildEventClipUrl,
   FRIGATE_BASE,
   type CameraEvent,
-  type RawFrigateEvent,
 } from "../lib/cameraEvents";
 import { dedupeRingMqtt } from "../lib/dedupe";
 import {
@@ -234,28 +234,43 @@ async function fetchStreamUrl(
 }
 
 /**
- * Read recorded events for a Frigate camera over `[startMs, endMs]`. Frigate's
- * HA integration exposes its API under `/api/frigate/…` (same-origin through the
- * nginx proxy). Degrades to [] if Frigate isn't installed yet or the request
- * fails, so the timeline renders empty rather than throwing.
+ * Read recorded events for a Frigate camera over `[startMs, endMs]`, via the integration's
+ * `frigate/events/get` **websocket command**. Degrades to [] on any failure, so the timeline
+ * renders empty rather than throwing.
+ *
+ * ## Why the websocket and not `GET /api/frigate/events`
+ *
+ * **That REST route does not exist and never did.** frigate-hass-integration proxies media
+ * (snapshot/recording/vod/clips/…) over REST but exposes its *query* API as websocket commands
+ * (`ws_api.py`: `frigate/events/get`, `frigate/recordings/get`, …). The old fetch here 404'd on
+ * every call and the catch turned that into [], so every Frigate camera's timeline silently
+ * rendered without a single event chip — on both platforms, since Android was a 1:1 port of the
+ * same wrong call. The same "the tests stubbed a route that never existed" failure as the
+ * `/api/frigate/config` bug this file already documents; verified against the integration's
+ * registered views AND the working websocket command on the live cluster, 2026-07-30.
+ *
+ * `instance_id` is the Frigate `client_id` the integration stamps on the camera entity — read
+ * from the store rather than hardcoded, so a renamed instance keeps working. The result arrives
+ * as a JSON **string** (the integration skips decoding), hence the manual parse.
  */
 async function fetchFrigateEvents(
-  creds: HaCredentials,
+  conn: Connection,
+  instanceId: string,
   camera: string,
   startMs: number,
   endMs: number,
+  baseUrl: string,
 ): Promise<CameraEvent[]> {
-  const base = withBase(FRIGATE_BASE, creds.url);
-  const url =
-    `${base}/events?camera=${encodeURIComponent(camera)}` +
-    `&after=${Math.floor(startMs / 1000)}&before=${Math.floor(endMs / 1000)}&limit=500`;
   try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${creds.token}` },
+    const result = await conn.sendMessagePromise<unknown>({
+      type: "frigate/events/get",
+      instance_id: instanceId,
+      cameras: [camera],
+      after: Math.floor(startMs / 1000),
+      before: Math.floor(endMs / 1000),
+      limit: 500,
     });
-    if (!res.ok) return [];
-    const raw = (await res.json()) as RawFrigateEvent[];
-    return normalizeFrigateEvents(raw ?? [], base);
+    return normalizeFrigateEvents(parseFrigateWsEvents(result), withBase(FRIGATE_BASE, baseUrl));
   } catch {
     return [];
   }
@@ -369,7 +384,12 @@ export function createHaSource(
       return fetchStreamUrl(conn, entityId, store().baseUrl, format);
     },
     async fetchCameraEvents(camera, startMs, endMs) {
-      return fetchFrigateEvents(creds, camera, startMs, endMs);
+      if (!conn) return [];
+      // The integration stamps its instance id (`client_id`) on the camera entity — the same
+      // marker `isFrigateCamera` matches on. Fall back to the integration's default.
+      const clientId = store().entities[`camera.${camera}`]?.attributes?.client_id;
+      const instanceId = typeof clientId === "string" && clientId ? clientId : "frigate";
+      return fetchFrigateEvents(conn, instanceId, camera, startMs, endMs, store().baseUrl);
     },
     recordingUrlAt(camera, startMs, endMs) {
       return buildRecordingUrl(camera, startMs, endMs, withBase(FRIGATE_BASE, creds.url));

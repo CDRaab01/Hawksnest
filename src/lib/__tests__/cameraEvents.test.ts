@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   normalizeFrigateEvents,
+  parseFrigateWsEvents,
   recordingUrlAt,
   vodPositionSeconds,
   eventClipUrl,
@@ -31,6 +32,32 @@ describe("cameraEvents", () => {
       snapshotUrl: null,
     });
     expect(out[1].thumbnailUrl).toBe(eventSnapshotUrl("b"));
+  });
+
+  describe("parseFrigateWsEvents (frigate/events/get websocket result)", () => {
+    // The transport matters here: `GET /api/frigate/events` DOES NOT EXIST — the integration's
+    // query API is websocket-only, and the old REST fetch 404'd on every call while its catch
+    // returned []. These pin the websocket result shapes so a stubbed-wrong transport can't pass
+    // again (the exact failure mode the /api/frigate/config tests document).
+    it("unwraps the JSON-string result the integration actually sends (decode_json=False)", () => {
+      const events = parseFrigateWsEvents(
+        JSON.stringify([{ id: "1", camera: "kitchen", start_time: 1, has_clip: true }]),
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0].camera).toBe("kitchen");
+    });
+
+    it("accepts an already-decoded array, in case a future version decodes server-side", () => {
+      expect(parseFrigateWsEvents([{ id: "1", start_time: 1 }])).toHaveLength(1);
+    });
+
+    it("returns [] for junk rather than throwing — the timeline renders empty, never breaks", () => {
+      expect(parseFrigateWsEvents("not json")).toEqual([]);
+      expect(parseFrigateWsEvents(null)).toEqual([]);
+      expect(parseFrigateWsEvents(undefined)).toEqual([]);
+      expect(parseFrigateWsEvents({ events: [] })).toEqual([]);
+      expect(parseFrigateWsEvents('{"an":"object"}')).toEqual([]);
+    });
   });
 
   it("treats a missing end_time as an ongoing event (endMs null)", () => {

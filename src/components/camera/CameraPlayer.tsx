@@ -363,10 +363,12 @@ export function CameraPlayer({
   // rather than during render. Keyed on the page, so it re-signs exactly when the page turns.
   const [vodSrc, setVodSrc] = useState<string | null>(null);
   useEffect(() => {
-    if (!vodPage) {
-      setVodSrc(null);
-      return;
-    }
+    // Reset first, not just on the null branch: state would otherwise hold the PREVIOUS page's
+    // URL while the new signature resolves, and the player would briefly play the old page with a
+    // seek computed against the new page's origin — a plausible-but-wrong moment. (The Android
+    // player had the worse version of this: its page-turn swap leaked the old ExoPlayer entirely.)
+    setVodSrc(null);
+    if (!vodPage) return;
     let active = true;
     void signedRecordingUrlAt(cameraName, vodPage.startMs, vodPage.endMs)
       .then((url) => active && setVodSrc(url))
