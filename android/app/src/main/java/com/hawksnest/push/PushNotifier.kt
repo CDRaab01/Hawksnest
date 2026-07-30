@@ -22,7 +22,12 @@ import javax.inject.Singleton
  * notification (or the persistent foreground notification the service runs
  * under). Channel + importance + tap destination are derived from [PushRoute],
  * so a doorbell buzzes loudly and deep-links to its camera, an alarm change
- * opens Home. A doorbell that carries a snapshot renders it as a big picture.
+ * opens Home, and a camera object alert lands on its own mutable channel. Any
+ * message carrying a snapshot renders it as a big picture.
+ *
+ * The image is fetched with **no auth headers** — every URL the automations send
+ * must self-authenticate (HA's signed `camera_proxy` token). A URL needing a
+ * bearer would silently fall back to a text-only notification.
  */
 @Singleton
 class PushNotifier @Inject constructor(
@@ -39,6 +44,18 @@ class PushNotifier @Inject constructor(
         mgr.createNotificationChannel(
             NotificationChannel(CHANNEL_ALARM, "Alarm", NotificationManager.IMPORTANCE_HIGH)
                 .apply { description = "Security alarm state changes." },
+        )
+        mgr.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_PERSON,
+                "Person detected",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply { description = "A camera saw a person while the alarm was armed." },
+        )
+        mgr.createNotificationChannel(
+            // Default importance: it posts, but doesn't shove a heads-up in your face.
+            NotificationChannel(CHANNEL_PET, "Pet detected", NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { description = "A camera saw a dog or cat." },
         )
         mgr.createNotificationChannel(
             NotificationChannel(CHANNEL_GENERIC, "Alerts", NotificationManager.IMPORTANCE_DEFAULT)
@@ -70,6 +87,8 @@ class PushNotifier @Inject constructor(
         val channel = when (kind) {
             PushKind.Doorbell -> CHANNEL_DOORBELL
             PushKind.Alarm -> CHANNEL_ALARM
+            PushKind.Person -> CHANNEL_PERSON
+            PushKind.Pet -> CHANNEL_PET
             PushKind.Generic -> CHANNEL_GENERIC
         }
         // Doorbell snapshot: fetch best-effort (the camera_proxy URL is self-authing via its
@@ -80,7 +99,16 @@ class PushNotifier @Inject constructor(
             .setContentText(msg.body)
             .setSmallIcon(context.applicationInfo.icon)
             .setAutoCancel(true)
-            .setCategory(if (kind == PushKind.Alarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_MESSAGE)
+            // Person counts as CATEGORY_ALARM alongside the alarm panel: the HA
+            // automation only sends it while armed, so it genuinely is a security
+            // event, not a message.
+            .setCategory(
+                if (kind == PushKind.Alarm || kind == PushKind.Person) {
+                    NotificationCompat.CATEGORY_ALARM
+                } else {
+                    NotificationCompat.CATEGORY_MESSAGE
+                },
+            )
             .setPriority(if (msg.priority >= 4) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(contentIntent(PushRoute.cameraOf(msg)))
         if (snapshot != null) {
@@ -95,12 +123,32 @@ class PushNotifier @Inject constructor(
         }
         val notification = builder.build()
         try {
-            // Stable-ish id per message so repeats replace rather than stack endlessly.
-            nm.notify(msg.id.hashCode(), notification)
+            nm.notify(notificationId(msg, kind), notification)
         } catch (e: SecurityException) {
             // POST_NOTIFICATIONS revoked between the check and here — ignore.
         }
     }
+
+    /**
+     * The notification id, which decides whether a new alert **replaces** an old one
+     * or stacks beside it.
+     *
+     * Camera object alerts key on the CAMERA, not the message: Frigate tracks each
+     * object separately, and one person crossing a room routinely produces several
+     * concurrent tracked objects (measured on the live kitchen camera: three at
+     * once). Keying on `msg.id` would post three near-identical notifications for
+     * one person. Keying on the camera means the newest frame for that camera wins
+     * and the phone shows one entry per camera — which is also why no server-side
+     * cooldown was needed.
+     *
+     * Everything else keeps the per-message id: two doorbell presses ARE two events.
+     */
+    private fun notificationId(msg: NtfyMessage, kind: PushKind): Int =
+        when (kind) {
+            PushKind.Person, PushKind.Pet ->
+                ("camobj:" + (PushRoute.cameraOf(msg) ?: "unknown")).hashCode()
+            else -> msg.id.hashCode()
+        }
 
     /** Best-effort image fetch for the notification snapshot; null on any failure. */
     private fun fetchBitmap(url: String): Bitmap? = try {
@@ -133,6 +181,13 @@ class PushNotifier @Inject constructor(
     companion object {
         const val CHANNEL_DOORBELL = "doorbell"
         const val CHANNEL_ALARM = "alarm"
+
+        // NEW ids rather than re-tuning `alerts`: Android ignores importance changes
+        // to a channel it has already created, so editing the existing one would be
+        // a silent no-op on every install that already ran.
+        const val CHANNEL_PERSON = "camera_person"
+        const val CHANNEL_PET = "camera_pet"
+
         const val CHANNEL_GENERIC = "alerts"
         const val CHANNEL_SERVICE = "push_service"
 
