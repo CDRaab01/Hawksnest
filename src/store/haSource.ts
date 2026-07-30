@@ -388,9 +388,13 @@ export function createHaSource(
       } catch {
         return unsigned;
       }
+      // No socket, no signature — hand back the unsigned URL rather than throwing. Matches the
+      // catch below: the caller's fallback is the pre-signing behaviour, not a dead player.
+      const socket = conn;
+      if (!socket) return unsigned;
       try {
         const res = await Promise.race([
-          conn.sendMessagePromise<{ path?: string }>({
+          socket.sendMessagePromise<{ path?: string }>({
             type: "auth/sign_path",
             path,
             expires: SIGN_PATH_EXPIRY_SECONDS,
