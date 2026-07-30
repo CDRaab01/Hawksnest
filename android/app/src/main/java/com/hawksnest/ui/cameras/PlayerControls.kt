@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -48,6 +49,25 @@ import java.util.Locale
  * and the Low/High live-quality toggle. Twins of the web's `MuteButton.tsx`,
  * `SnapshotButton.tsx` and `QualityToggle.tsx` — keep behaviour in lockstep.
  */
+
+/** Opens the camera-movement drawer. Only shown for cameras that can actually move. */
+@Composable
+fun MoveButton(active: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    ChromeButton(
+        icon = { fg ->
+            Icon(
+                Icons.Filled.OpenWith,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(16.dp),
+            )
+        },
+        label = "Move",
+        active = active,
+        onClick = onToggle,
+        modifier = modifier,
+    )
+}
 
 /** Speaker toggle. Every player mounts muted; this is the way back to sound. */
 @Composable

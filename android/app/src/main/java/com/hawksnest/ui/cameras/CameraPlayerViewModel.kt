@@ -8,6 +8,8 @@ import com.hawksnest.core.ha.WebRtcHandle
 import com.hawksnest.core.ha.WebRtcSignal
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.PtzControls
+import com.hawksnest.core.logic.resolvePtz
 import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
 import com.hawksnest.core.logic.ringEventsFromOptions
@@ -23,6 +25,7 @@ import com.hawksnest.core.net.RingTimelineClient
 import com.hawksnest.util.CredentialStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
@@ -221,6 +224,61 @@ class CameraPlayerViewModel @Inject constructor(
      *  control gate — a failed siren call must never crash the player. */
     fun setSiren(entityId: String, on: Boolean) {
         connection.control(entityId, if (on) "turn_on" else "turn_off", label = "Siren")
+    }
+
+    // --- camera movement (Reolink PTZ via the HA integration) --------------------
+    //
+    // All of these go through `control` (crash-safe, like the siren) with
+    // `awaitEcho = false`: a `button.press` has no state to echo, and a move must
+    // not be gated on one — least of all `stopPtz`, which has to reach the camera
+    // even while a previous call is still settling.
+
+    /** The movement controls for a camera, or null when it has none. Recomputed as
+     *  entities arrive, so PTZ appears the moment the integration's entities land. */
+    fun ptzControls(cameraBase: String): Flow<PtzControls?> =
+        connection.state.entities
+            .map { resolvePtz(cameraBase, it.keys) }
+            .distinctUntilChanged()
+
+    /** Live state of one entity — backs the zoom/focus positions and autofocus toggle. */
+    fun entityFlow(entityId: String): Flow<HassEntity?> =
+        connection.state.entities.map { it[entityId] }.distinctUntilChanged()
+
+    /** Start moving (or step — see `PtzPad`), by pressing a direction button. */
+    fun pressPtz(entityId: String) {
+        connection.control(entityId, "press", label = "Move camera", awaitEcho = false)
+    }
+
+    /** Halt a move. Sent on every release, teardown and lifecycle stop. */
+    fun stopPtz(entityId: String) {
+        connection.control(entityId, "press", label = "Stop camera", awaitEcho = false)
+    }
+
+    /** Commit a `number` entity (optical zoom / manual focus position). */
+    fun setNumber(entityId: String, value: Double, label: String) {
+        connection.control(
+            entityId,
+            "set_value",
+            label = label,
+            extra = mapOf("value" to value),
+            awaitEcho = false,
+        )
+    }
+
+    /** Toggle the camera's autofocus. */
+    fun setAutofocus(entityId: String, on: Boolean) {
+        connection.control(entityId, if (on) "turn_on" else "turn_off", label = "Autofocus")
+    }
+
+    /** Recall a saved camera position. */
+    fun selectPtzPreset(entityId: String, option: String) {
+        connection.control(
+            entityId,
+            "select_option",
+            label = "Camera position",
+            extra = mapOf("option" to option),
+            awaitEcho = false,
+        )
     }
 
     /**

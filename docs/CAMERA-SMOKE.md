@@ -37,6 +37,32 @@ live Ring/go2rtc backend (a real doorbell + one other camera is enough).
       (Offline state, not a crash); restore → live re-negotiates on reopen.
 - [ ] **No console errors** beyond expected ICE churn.
 
+## Camera movement (Reolink PTZ) — run on BOTH platforms
+
+Only on the Reolink cameras (`big_room`, `first_floor_stairway`, `kitchen`). The pad is behind
+the **Move** button in the player chrome, live view only.
+
+- [ ] **The unanswered question: does a press move continuously or one step?** Hold a direction
+      ~2 s. If the camera keeps moving the whole time and halts on release, presses are
+      *continuous*; if it nudges once and stops by itself, they're *steps*. Either is fine —
+      the UI is built for both — but **record the answer here** once it's known, since it
+      decides whether a future repeat-while-held timer would help or double-fire.
+- [ ] **Stop on release actually stops.** Hold, release, and confirm the lens is stationary
+      within a beat. This is the invariant everything else protects.
+- [ ] **Stop on leaving.** Start a move and immediately close the player (or background the
+      app / switch tabs). The camera must not still be panning when you come back.
+- [ ] **Zoom** (E1 Zooms only — `big_room`, `first_floor_stairway`): drag the slider, release →
+      the image visibly zooms and the value settles to what the camera reports. `kitchen` is an
+      E1 Pro and must show **no** zoom/focus controls at all.
+- [ ] **Focus + autofocus.** Autofocus on → the focus slider is disabled. Turn it off → the
+      slider enables and moving it visibly changes focus.
+- [ ] **The stairway alias.** Confirm the pad appears on `first_floor_stairway` and moves *that*
+      camera — its Reolink device is named `stairway`, so this is the case a naive
+      name-derivation would have silently dropped.
+- [ ] **Ring cameras show no Move button** (they can't move).
+- [ ] **Presets.** None exist until one is saved in the Reolink app; after saving one, a
+      Position control appears and recalling it slews the camera.
+
 ## Android (LL-HLS)
 
 - [ ] **Live paints < 3 s** on a cold app open of a camera.

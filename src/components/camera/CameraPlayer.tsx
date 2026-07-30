@@ -37,6 +37,10 @@ import { TalkButton } from "./TalkButton";
 import { MuteButton } from "./MuteButton";
 import { SnapshotButton } from "./SnapshotButton";
 import { QualityToggle } from "./QualityToggle";
+import { PtzPanel } from "./PtzPanel";
+import { resolvePtz } from "../../lib/cameraPtz";
+import { useEntityStore } from "../../store/entityStore";
+import { Move } from "lucide-react";
 import { Timeline24h } from "./Timeline24h";
 import { TransportBar } from "./TransportBar";
 
@@ -127,6 +131,16 @@ export function CameraPlayer({
       active = false;
     };
   }, []);
+  // Movement controls, if this camera has any. Resolved from the entity ids that
+  // exist rather than derived from the camera name — see `cameraPtz.ts` for why
+  // (the stairway's Reolink device is named differently from its Frigate camera).
+  const entityIds = useEntityStore((s) => s.entities);
+  const ptz = useMemo(
+    () => resolvePtz(cameraName, Object.keys(entityIds)),
+    [cameraName, entityIds],
+  );
+  const [showPtz, setShowPtz] = useState(false);
+
   const subSrc = `${cameraName}_sub`;
   const hasSubStream = go2rtcKnown && go2rtcMaybeAvailable(subSrc);
   // A camera without a sub stream always plays High — don't let a stale Low
@@ -534,6 +548,21 @@ export function CameraPlayer({
       <div className="flex items-center justify-between gap-md">
         <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
         <div className="flex items-center gap-sm">
+          {isLive && ptz && (
+            <button
+              type="button"
+              onClick={() => setShowPtz((s) => !s)}
+              aria-pressed={showPtz}
+              aria-label={showPtz ? "Hide camera controls" : "Move camera"}
+              className={[
+                "flex items-center gap-xs rounded-sm px-sm py-xs caption-label transition-colors duration-fast",
+                showPtz ? "bg-panel-high text-ink" : "bg-panel text-ink-dim hover:text-ink",
+              ].join(" ")}
+            >
+              <Move size={14} />
+              Move
+            </button>
+          )}
           {isLive && hasSubStream && <QualityToggle quality={quality} onChange={setQuality} />}
           <MuteButton muted={muted} onToggle={() => setMuted((m) => !m)} />
           <SnapshotButton
@@ -606,6 +635,11 @@ export function CameraPlayer({
           }}
         />
       )}
+
+      {/* Live only: moving the lens while watching recorded footage would re-aim
+          the camera with no visible feedback. Unmounting on the way out is what
+          guarantees any in-flight move is stopped (see PtzPad). */}
+      {isLive && ptz && showPtz && <PtzPanel ptz={ptz} />}
 
       <Timeline24h
         events={displayEvents}

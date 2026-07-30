@@ -2,6 +2,7 @@ package com.hawksnest.core.ha
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -30,6 +31,17 @@ fun domainOf(entityId: String): String = entityId.substringBefore('.')
 /** Read a string attribute, or null if absent / not a string. */
 fun HassEntity.stringAttr(key: String): String? =
     (attributes[key] as? JsonPrimitive)?.contentOrNull
+
+/** Read a numeric attribute, or null if absent / not a number. Powers `number.*`
+ *  bounds (min/max/step), which arrive as attributes rather than state. */
+fun HassEntity.numberAttr(key: String): Double? =
+    (attributes[key] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()
+
+/** Read a list-of-strings attribute (e.g. a `select.*` entity's `options`). Empty when absent. */
+fun HassEntity.stringListAttr(key: String): List<String> =
+    (attributes[key] as? JsonArray)
+        ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        .orEmpty()
 
 /** HA `friendly_name` attribute, trimmed, or null. */
 fun HassEntity.friendlyName(): String? = stringAttr("friendly_name")?.trim()?.ifEmpty { null }
