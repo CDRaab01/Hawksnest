@@ -113,6 +113,8 @@ private fun QualityChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         label,
         style = MaterialTheme.typography.labelMedium,
+        maxLines = 1,
+        softWrap = false,
         color = if (selected) MaterialTheme.colorScheme.onSurface
         else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
@@ -228,6 +230,15 @@ private fun ChromeButton(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         icon(fg)
-        Text(label, style = MaterialTheme.typography.labelMedium, color = fg)
+        // Never wrap. Without this a squeezed row renders the label one character
+        // per line vertically, which is how the overflow bug showed up on-device
+        // rather than as an obvious clip.
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = fg,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }

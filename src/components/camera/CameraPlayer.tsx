@@ -556,9 +556,31 @@ export function CameraPlayer({
 
   return (
     <div className="space-y-md">
+      {/* Identity + status on one line, actions on their own WRAPPING line.
+          A single non-wrapping row cannot hold this many controls at phone
+          width: each child shrinks to its minimum and the labels end up
+          wrapping one character per line rather than clipping or scrolling.
+          `flex-wrap` + `shrink-0` lets the set grow (Move/Low-High/Muted/
+          Snapshot/Talk/Siren, varying per camera) without ever crushing one. */}
       <div className="flex items-center justify-between gap-md">
         <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
-        <div className="flex items-center gap-sm">
+        <span
+          className={[
+            "flex shrink-0 items-center gap-xs whitespace-nowrap caption-label",
+            isLive ? "text-recovery" : "text-ink-dim",
+          ].join(" ")}
+        >
+          <span
+            className={[
+              "h-2 w-2 rounded-full",
+              isLive ? "bg-recovery" : "bg-ink-faint",
+            ].join(" ")}
+          />
+          {isLive ? "Live" : "Recorded"}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-sm">
           {isLive && ptz && (
             <button
               type="button"
@@ -582,21 +604,6 @@ export function CameraPlayer({
           />
           {isRing && isLive && <TalkButton src={cameraName} />}
           {camera.sirenSwitchId && <SirenButton entityId={camera.sirenSwitchId} />}
-          <span
-            className={[
-              "flex items-center gap-xs rounded-sm px-sm py-xs caption-label",
-              isLive ? "text-recovery" : "text-ink-dim",
-            ].join(" ")}
-          >
-            <span
-              className={[
-                "h-2 w-2 rounded-full",
-                isLive ? "bg-recovery" : "bg-ink-faint",
-              ].join(" ")}
-            />
-            {isLive ? "Live" : "Recorded"}
-          </span>
-        </div>
       </div>
 
       {isLive ? (

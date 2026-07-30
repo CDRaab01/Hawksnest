@@ -3,6 +3,7 @@ package com.hawksnest.ui.cameras
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -396,29 +397,18 @@ fun CameraPlayer(
     } ?: events
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // TWO rows, not one. Identity + status on top, actions below.
+        //
+        // A single Row cannot hold this many controls on a phone: Row gives every
+        // child its minimum width and then keeps going, so the overflow doesn't
+        // clip or scroll — the last chips get squeezed until their labels wrap one
+        // character per line ("S n a p s h o t" stacked vertically). Splitting the
+        // status pill out and letting the actions FLOW onto extra lines means the
+        // set can grow (Move/Low-High/Muted/Snapshot/Talk/Siren, per-camera) without
+        // ever crushing a label again.
         Row(verticalAlignment = Alignment.CenterVertically) {
             CameraSwitcher(cameras = cameras, current = cam, onSelect = onSelectCamera)
             Spacer(Modifier.weight(1f))
-            if (isLive && ptz != null) {
-                MoveButton(active = showPtz, onToggle = { showPtz = !showPtz })
-                Spacer(Modifier.size(8.dp))
-            }
-            if (isLive && subAvailable) {
-                QualityToggle(low = qualityLow, onChange = { qualityLow = it })
-                Spacer(Modifier.size(8.dp))
-            }
-            MuteButton(muted = muted, onToggle = { muted = !muted })
-            Spacer(Modifier.size(8.dp))
-            SnapshotButton(snapshotUrl = cam.snapshotUrl, cameraName = cameraName)
-            if (cam.snapshotUrl != null) Spacer(Modifier.size(8.dp))
-            if (isRing && isLive) {
-                TalkButton(cameraName, viewModel)
-                Spacer(Modifier.size(8.dp))
-            }
-            cam.sirenSwitchId?.let { sirenId ->
-                SirenButton(sirenId, viewModel)
-                Spacer(Modifier.size(8.dp))
-            }
             Box(
                 Modifier
                     .size(8.dp)
@@ -432,8 +422,27 @@ fun CameraPlayer(
                 if (isLive) "Live" else "Recorded",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
                 modifier = Modifier.padding(start = 6.dp),
             )
+        }
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (isLive && ptz != null) {
+                MoveButton(active = showPtz, onToggle = { showPtz = !showPtz })
+            }
+            if (isLive && subAvailable) {
+                QualityToggle(low = qualityLow, onChange = { qualityLow = it })
+            }
+            MuteButton(muted = muted, onToggle = { muted = !muted })
+            SnapshotButton(snapshotUrl = cam.snapshotUrl, cameraName = cameraName)
+            if (isRing && isLive) {
+                TalkButton(cameraName, viewModel)
+            }
+            cam.sirenSwitchId?.let { sirenId -> SirenButton(sirenId, viewModel) }
         }
 
         // Transport ladder: recorded VOD (when scrubbed) → live RTSP straight to the camera →

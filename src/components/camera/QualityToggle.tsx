@@ -29,7 +29,7 @@ export function QualityToggle({
           onClick={() => onChange(q)}
           aria-pressed={quality === q}
           className={[
-            "rounded-sm px-sm py-xs caption-label transition-colors duration-fast",
+            "whitespace-nowrap rounded-sm px-sm py-xs caption-label transition-colors duration-fast",
             quality === q ? "bg-panel-high text-ink" : "text-ink-dim hover:text-ink",
           ].join(" ")}
         >

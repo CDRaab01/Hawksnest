@@ -49,7 +49,7 @@ export function SnapshotButton({
       disabled={state === "saving"}
       aria-label="Save a snapshot of this camera"
       className={[
-        "flex items-center gap-xs rounded-sm px-sm py-xs caption-label transition-colors duration-fast",
+        "flex shrink-0 items-center gap-xs whitespace-nowrap rounded-sm px-sm py-xs caption-label transition-colors duration-fast",
         state === "failed"
           ? "bg-panel text-streak"
           : "bg-panel text-ink-dim hover:text-ink",
