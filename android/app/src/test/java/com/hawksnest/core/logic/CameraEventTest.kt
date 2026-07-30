@@ -1,7 +1,10 @@
 package com.hawksnest.core.logic
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -48,6 +51,32 @@ class CameraEventTest {
         assertFalse(first.hasSnapshot)
         assertNull(first.thumbnailUrl)
         assertEquals(eventSnapshotUrl("b"), out[1].thumbnailUrl)
+    }
+
+    // The transport matters here: `GET /api/frigate/events` DOES NOT EXIST — the integration's
+    // query API is websocket-only, and the old REST fetch 404'd on every call while its catch
+    // returned []. These pin the websocket result shapes (mirrors the web parseFrigateWsEvents
+    // tests) so a stubbed-wrong transport can't pass again.
+    @Test
+    fun `unwraps the JSON-string result the integration actually sends`() {
+        val result = JsonPrimitive("""[{"id":"1","camera":"kitchen","start_time":1,"has_clip":true}]""")
+        val events = parseFrigateWsEvents(result)
+        assertEquals(1, events.size)
+        assertEquals("kitchen", (events[0]["camera"] as? JsonPrimitive)?.contentOrNull)
+    }
+
+    @Test
+    fun `accepts an already-decoded array, in case a future version decodes server-side`() {
+        val arr = JsonArray(listOf(buildJsonObject { put("id", "1"); put("start_time", 1) }))
+        assertEquals(1, parseFrigateWsEvents(arr).size)
+    }
+
+    @Test
+    fun `returns empty for junk rather than throwing`() {
+        assertEquals(emptyList(), parseFrigateWsEvents(JsonPrimitive("not json")))
+        assertEquals(emptyList(), parseFrigateWsEvents(null))
+        assertEquals(emptyList(), parseFrigateWsEvents(buildJsonObject { put("events", "x") }))
+        assertEquals(emptyList(), parseFrigateWsEvents(JsonPrimitive("""{"an":"object"}""")))
     }
 
     @Test

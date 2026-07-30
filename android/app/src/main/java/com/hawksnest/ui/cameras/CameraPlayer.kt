@@ -300,9 +300,14 @@ fun CameraPlayer(
     // rather than during composition. Keyed on the PAGE: a signature only authorises the path
     // prefix it was minted for, so it re-signs exactly when the page turns.
     val signedVodUrl by produceState<String?>(null, cameraName, vodPage) {
+        // produceState does NOT reset on key change — it keeps the previous page's URL while the
+        // new signature resolves. Left in place, the player briefly plays the OLD page with a seek
+        // computed against the NEW page's origin (a plausible-but-wrong moment), and the URL then
+        // swaps under a mounted player. Reset first: the placeholder covers the round trip, and
+        // the player remounts cleanly when the signed URL lands.
+        value = null
         val page = vodPage
-        value = if (page == null) null
-        else viewModel.signedRecordingUrl(cameraName, page.startMs, page.endMs)
+        if (page != null) value = viewModel.signedRecordingUrl(cameraName, page.startMs, page.endMs)
     }
     val recordingUrl = when {
         isLive -> null

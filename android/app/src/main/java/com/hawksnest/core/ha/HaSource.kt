@@ -13,6 +13,7 @@ import com.hawksnest.core.logic.FRIGATE_BASE
 import com.hawksnest.core.logic.LogEvent
 import com.hawksnest.core.logic.normalizeLogbook
 import com.hawksnest.core.logic.normalizeFrigateEvents
+import com.hawksnest.core.logic.parseFrigateWsEvents
 import com.hawksnest.core.logic.recordingUrlAt as buildRecordingUrl
 import com.hawksnest.core.logic.eventClipUrl as buildEventClipUrl
 import kotlinx.coroutines.Dispatchers
@@ -186,25 +187,39 @@ class HaSource(
     }
 
     /**
-     * Read recorded events for a Frigate camera over `[startMs, endMs]`. Frigate's HA integration
-     * exposes its API under `/api/frigate/…` (same-origin through nginx). Degrades to [] if Frigate
-     * isn't installed yet or the request fails, so the timeline renders empty rather than throwing.
+     * Read recorded events for a Frigate camera over `[startMs, endMs]`, via the integration's
+     * `frigate/events/get` **websocket command**. Degrades to [] on any failure, so the timeline
+     * renders empty rather than throwing. Mirrors the web `fetchFrigateEvents`.
+     *
+     * ## Why the websocket and not `GET /api/frigate/events`
+     *
+     * **That REST route does not exist and never did.** frigate-hass-integration proxies media
+     * (snapshot/recording/vod/clips/…) over REST but exposes its *query* API as websocket commands
+     * (`ws_api.py`). The old fetch here 404'd on every call and the catch turned that into [], so
+     * every Frigate camera's timeline silently rendered without a single event chip — the same
+     * "tests stubbed a route that never existed" failure as `/api/frigate/config`. Verified
+     * against the integration's registered views AND the working command on the live cluster,
+     * 2026-07-30.
+     *
+     * `instance_id` is the Frigate `client_id` stamped on the camera entity — read from live
+     * state rather than hardcoded, so a renamed instance keeps working. The result arrives as a
+     * JSON **string** (the integration skips decoding), hence the parse-either-shape handling.
      */
     override suspend fun fetchCameraEvents(camera: String, startMs: Long, endMs: Long): List<CameraEvent> {
-        val base = withBase(FRIGATE_BASE, baseUrl)
-        val url = "$base/events?camera=$camera&after=${startMs / 1000}&before=${endMs / 1000}&limit=500"
-        return withContext(Dispatchers.IO) {
-            try {
-                val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
-                client.newCall(req).execute().use { res ->
-                    if (!res.isSuccessful) return@use emptyList()
-                    val body = res.body?.string() ?: return@use emptyList()
-                    val arr = json.parseToJsonElement(body) as? JsonArray ?: return@use emptyList()
-                    normalizeFrigateEvents(arr.mapNotNull { it as? JsonObject }, base)
-                }
-            } catch (_: Exception) {
-                emptyList()
+        val c = conn ?: return emptyList()
+        val clientId = state.entities.value["camera.$camera"]
+            ?.stringAttr("client_id")?.takeIf { it.isNotBlank() } ?: "frigate"
+        return try {
+            val frame = c.request("frigate/events/get") {
+                put("instance_id", clientId)
+                putJsonArray("cameras") { add(camera) }
+                put("after", startMs / 1000)
+                put("before", endMs / 1000)
+                put("limit", 500)
             }
+            normalizeFrigateEvents(parseFrigateWsEvents(frame["result"]), withBase(FRIGATE_BASE, baseUrl))
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 

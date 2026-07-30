@@ -102,6 +102,37 @@ constant that **must be kept in step with `record.continuous.days` in the Frigat
 Too low and kept footage is unreachable; too high and the timeline offers days that 404, which
 degrades to the "no recording kept" placeholder — so it fails safe in the direction of guessing high.
 
+**`GET /api/frigate/events` is not a route either — the integration's query API is
+websocket-only.** Registered REST views proxy *media* (the list above); queries live in
+`ws_api.py` as websocket commands: `frigate/events/get`, `frigate/recordings/get`,
+`frigate/recordings/summary`, and friends. The original event fetch on both platforms hit the
+REST path, 404'd on every call, and the defensive catch turned that into an empty list — so every
+Frigate camera's timeline silently rendered without a single event chip, and the tests passed
+because they stubbed the nonexistent route (the identical failure mode to `/api/frigate/config`
+above; verified against the registered view list and the working command, 2026-07-30). Events now
+ride `frigate/events/get` over the existing HA socket (`haSource.ts fetchFrigateEvents` ⇄
+`HaSource.fetchCameraEvents`). Two contract details worth knowing: `instance_id` is required —
+it's the same `client_id` the integration stamps on the camera entity, so it is read from state,
+not hardcoded — and the result arrives as a JSON **string** (the integration skips decoding),
+unwrapped by the mirrored `parseFrigateWsEvents` (`lib/cameraEvents.ts` ⇄ `core/logic/CameraEvent.kt`).
+`frigate/recordings/get` returns per-segment recording spans and is the natural data source for a
+future Frigate footage lane (plan item 8b) — confirmed working, not yet consumed.
+
+**A Compose page-turn trap that froze scrubbing (fixed 2026-07-30).** `produceState` does NOT
+reset its value when its keys change — only the producer restarts — so when the playhead crossed
+a VOD page boundary, the signed URL held the *old page's* URL until the new signature arrived,
+then swapped directly to the new one with no null in between. `VideoPlayer` therefore never
+unmounted, and inside it `remember(authSig, …)` built a fresh ExoPlayer mid-composition while
+`DisposableEffect(Unit)` never released the old one and the `AndroidView` (whose factory runs
+once, with no `update` block) stayed bound to it: the picture froze on the old page while the new
+player streamed invisibly, and every crossing leaked another live player. Ring never tripped this
+because its URLs carry no authSig — the remember key never changed identity. Three guards now
+hold: the signed-URL producer resets to null first (placeholder covers the sign round trip — same
+fix on web, whose `useState` kept the stale URL too, briefly playing the old page at a
+wrong-page-relative seek), `DisposableEffect` is keyed on the player, and `AndroidView` has an
+`update` that re-points the view. If a player identity can change without its host unmounting,
+all three must key on it.
+
 **Frigate VOD URLs must be signed, and the signature has to reach the segments.**
 frigate-hass-integration validates an `authSig` query parameter on every VOD *segment* request
 (`VodSegmentProxyView`) — unconditionally, and a Bearer token does not satisfy it. Playlists are

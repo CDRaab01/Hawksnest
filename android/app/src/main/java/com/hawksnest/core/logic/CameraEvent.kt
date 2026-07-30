@@ -1,5 +1,8 @@
 package com.hawksnest.core.logic
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -68,6 +71,27 @@ fun eventSnapshotUrl(eventId: String, base: String = FRIGATE_BASE): String =
  * start time are dropped. A missing `end_time` means the event is still in progress (`endMs = null`).
  * Ported from `cameraEvents.ts normalizeFrigateEvents`.
  */
+/**
+ * Unwrap a `frigate/events/get` websocket result into the raw event list.
+ *
+ * The integration sends the result **without decoding it** — so it usually arrives as a JSON
+ * *string* containing the array, not the array itself. Handle both (a future integration version
+ * decoding server-side must not break us), and treat anything else as "no events": the caller's
+ * contract is an empty timeline, never a throw. 1:1 with the web `parseFrigateWsEvents`.
+ */
+fun parseFrigateWsEvents(result: JsonElement?): List<JsonObject> {
+    val element = when {
+        result is JsonPrimitive && result.isString ->
+            try {
+                Json.parseToJsonElement(result.content)
+            } catch (_: Exception) {
+                return emptyList()
+            }
+        else -> result
+    }
+    return (element as? JsonArray)?.mapNotNull { it as? JsonObject } ?: emptyList()
+}
+
 fun normalizeFrigateEvents(raw: List<JsonObject>, base: String = FRIGATE_BASE): List<CameraEvent> =
     raw.mapNotNull { e ->
         val id = e.prim("id")?.contentOrNull

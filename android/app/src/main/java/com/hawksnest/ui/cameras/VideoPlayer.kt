@@ -98,7 +98,13 @@ fun VideoPlayer(
         builder.build().apply { volume = 0f }
     }
 
-    DisposableEffect(Unit) {
+    // Keyed on the PLAYER, not Unit. `player` changes identity WITHOUT this composable unmounting:
+    // remember(authSig, authToken) builds a new ExoPlayer whenever the Frigate VOD page turns
+    // (each page is signed separately, so its URL carries a new authSig). Keyed on Unit, the old
+    // player was never released and kept streaming its page invisibly, the listener stayed attached
+    // to it, and the on-screen picture froze on the old page — scrubbing across a page boundary
+    // looked like playback dying while nginx logs showed two players' segments happily downloading.
+    DisposableEffect(player) {
         val listener = object : Player.Listener {
             fun reportDuration() {
                 val d = player.duration
@@ -168,6 +174,9 @@ fun VideoPlayer(
                 this.player = player
             }
         },
+        // factory runs once per view; when the page turn above swaps players the view must be
+        // re-pointed or it keeps rendering the released one's last frame.
+        update = { view -> if (view.player !== player) view.player = player },
     )
 }
 
