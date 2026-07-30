@@ -120,7 +120,26 @@ export function HlsPlayer({
             onError?.();
             return;
           }
-          const hls = new Hls();
+          // Carry the manifest's `authSig` onto every derived request.
+          //
+          // frigate-hass-integration rejects VOD *segment* requests without it, and hls.js
+          // resolves segment URLs RELATIVE to the manifest — which drops the query string. So a
+          // correctly signed manifest still yields unsigned, 401ing segments: a black video with
+          // no error. Requests that already carry the param are left alone, so this is safe to
+          // apply to every request rather than guessing which are segments.
+          const authSig = new URL(src, globalThis.location.origin).searchParams.get("authSig");
+          const hls = new Hls(
+            authSig
+              ? {
+                  xhrSetup: (xhr: XMLHttpRequest, url: string) => {
+                    if (url.includes("authSig=")) return;
+                    const u = new URL(url, globalThis.location.origin);
+                    u.searchParams.set("authSig", authSig);
+                    xhr.open("GET", u.toString(), true);
+                  },
+                }
+              : undefined,
+          );
           hls.loadSource(src);
           hls.attachMedia(video);
           hls.on(Hls.Events.ERROR, (_e: unknown, data: { fatal?: boolean }) => {

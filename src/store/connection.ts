@@ -148,6 +148,19 @@ export function recordingUrlAt(
   return current?.recordingUrlAt?.(camera, startMs, endMs) ?? null;
 }
 
+/** As {@link recordingUrlAt}, signed where the backend requires it (see `Source.signedRecordingUrlAt`). */
+export async function signedRecordingUrlAt(
+  camera: string,
+  startMs: number,
+  endMs: number,
+): Promise<string | null> {
+  const src = current;
+  if (!src) return null;
+  if (src.signedRecordingUrlAt) return src.signedRecordingUrlAt(camera, startMs, endMs);
+  // Sources without signing (fixture/demo) keep their plain URL.
+  return src.recordingUrlAt?.(camera, startMs, endMs) ?? null;
+}
+
 /** Clip URL for one recorded event (null if unsupported). */
 export function eventClipUrl(eventId: string): string | null {
   return current?.eventClipUrl?.(eventId) ?? null;

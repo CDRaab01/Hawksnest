@@ -184,6 +184,19 @@ function withBase(path: string, baseUrl: string): string {
 /** How long we give HA to produce an HLS stream URL before stepping down. */
 const STREAM_URL_TIMEOUT_MS = 15_000;
 
+/** Signing is one websocket round trip; if it stalls, fall back rather than block playback. */
+const SIGN_PATH_TIMEOUT_MS = 10_000;
+
+/**
+ * Lifetime of a VOD signature, in seconds. Mirrors Android's `SIGN_PATH_EXPIRY_SECONDS`.
+ *
+ * One hour, deliberately shorter than the retention the timeline spans: the signature is a bearer
+ * credential embedded in a URL, so it should not outlive a plausible viewing session. Pages are
+ * re-signed as the playhead moves between them, so this only bites a session that sits on ONE
+ * page for over an hour — which then surfaces as a playback error rather than silently.
+ */
+const SIGN_PATH_EXPIRY_SECONDS = 3_600;
+
 /**
  * Ask HA for an on-demand stream URL for a camera. `camera/stream` returns a
  * signed, root-relative HLS playlist path (`/api/hls/<token>/master.m3u8`) that
@@ -360,6 +373,40 @@ export function createHaSource(
     },
     recordingUrlAt(camera, startMs, endMs) {
       return buildRecordingUrl(camera, startMs, endMs, withBase(FRIGATE_BASE, creds.url));
+    },
+    async signedRecordingUrlAt(camera, startMs, endMs) {
+      const unsigned = buildRecordingUrl(
+        camera,
+        startMs,
+        endMs,
+        withBase(FRIGATE_BASE, creds.url),
+      );
+      // auth/sign_path wants a server-relative path, not the absolute URL the player gets.
+      let path: string;
+      try {
+        path = new URL(unsigned, globalThis.location?.origin ?? "http://localhost").pathname;
+      } catch {
+        return unsigned;
+      }
+      // No socket, no signature — hand back the unsigned URL rather than throwing. Matches the
+      // catch below: the caller's fallback is the pre-signing behaviour, not a dead player.
+      const socket = conn;
+      if (!socket) return unsigned;
+      try {
+        const res = await Promise.race([
+          socket.sendMessagePromise<{ path?: string }>({
+            type: "auth/sign_path",
+            path,
+            expires: SIGN_PATH_EXPIRY_SECONDS,
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), SIGN_PATH_TIMEOUT_MS)),
+        ]);
+        return res?.path ? withBase(res.path, creds.url) : unsigned;
+      } catch {
+        // Fall back to the unsigned URL: that is the behaviour before signing existed, so the
+        // worst case is the original bug rather than an empty player.
+        return unsigned;
+      }
     },
     eventClipUrl(eventId) {
       return buildEventClipUrl(eventId, withBase(FRIGATE_BASE, creds.url));

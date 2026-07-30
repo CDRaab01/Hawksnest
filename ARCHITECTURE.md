@@ -39,11 +39,16 @@ Channel hues intentionally shift between themes so a vivid accent still clears c
 
 Camera streaming: the live transport ladder (`LivePlayer`) is **go2rtc-direct → HA WebRTC → HLS →
 MJPEG → snapshot-poll**. The top tier (`Go2rtcPlayer`) negotiates WebRTC straight with the dedicated
-go2rtc (native Ring source) over its WS API (`/go2rtc/api/ws?src=<base>`, proxied same-origin by
+go2rtc over its WS API (`/go2rtc/api/ws?src=<base>`, proxied same-origin by
 nginx) — no ring-mqtt/ffmpeg hop, ~1–2 s first frame, and the same signaling the Talk backchannel
-uses. It's tried for ring cameras when it looks reachable (`go2rtcMaybeAvailable` in `lib/go2rtc.ts`:
-a cached `/go2rtc/api/streams` gate + a **session circuit-breaker** that skips the tier once media is
-known-unreachable — e.g. before the §7c `:8555` host forwarder is up — so there's no repeated stall).
+uses. It's offered for **every** camera, not just Ring ones: go2rtc fronts the Reolink main stream
+too, so which cameras it can serve is go2rtc's own stream list to answer, not something inferred
+from the camera's kind. The gate is `go2rtcMaybeAvailable` in `lib/go2rtc.ts`: a cached
+`/go2rtc/api/streams` list + a **session circuit-breaker** that skips the tier once media is
+known-unreachable — e.g. before the §7c `:8555` host forwarder is up — so there's no repeated stall.
+`LivePlayer` **waits for that list** (`primeGo2rtcStreams` resolves, `go2rtcStreamsKnown`) before
+taking the tier; the list's absence used to read as an optimistic "yes", which was harmless while
+only Ring cameras were offered it and would now stall every camera go2rtc doesn't serve.
 The next tier, HA WebRTC, negotiates over `/api/websocket` (media UDP direct to HA's go2rtc) and
 is gated on the camera's STREAM `supported_features` bit with **absent treated as "try"**
 (`canStreamWebRtc` in `lib/cameraUrl.ts` — modern HA dropped the old `frontend_stream_type`
@@ -51,9 +56,56 @@ attribute, and a battery cam's entity churns attribute-less mid-negotiation), ho
 watchdog + "Connecting…" overlay for battery-camera wake, and the HLS tier resolves its
 `camera/stream` URL **only when that tier is active** (an eager resolve wakes the camera twice)
 with a 15 s bound in `haSource`. Tile age badges use `snapshotFreshnessMs` (`timestamp` attr →
-`last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras. Recorded
-playback = the last ~5 Ring events via the event-selector entity (not continuous VOD; a Frigate
-seam exists in `cameraEvents.ts`, unused). The **timeline shows only playable recordings**
+`last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras.
+
+**Which backend holds a camera's recordings is a three-way derivation, not a boolean**
+(`lib/recordedBackend.ts` → `"ring" | "frigate" | "none"`, ported to `core/logic/RecordedBackend.kt`).
+It used to be `isRing = camera.eventSelectId !== null`, one flag standing in for three unrelated
+questions — where recorded events come from, whether playback is a per-clip resolution or a seekable
+VOD, and whether the go2rtc live tier applies — which only held while the sole NVR was Ring. Ring
+wins when a camera looks like both, because the Ring path owns the retry/signature-expiry mechanics.
+Frigate membership comes from `lib/frigate.ts` (`primeFrigateCameras`/`frigateHasCamera`, a cached
+`/api/frigate/config` read); it **fails closed**, the opposite of `go2rtc.ts`, because a wrong "yes"
+silently turns the demo loop into a broken NVR path, whereas a wrong "no" is just today's behaviour.
+Derived per render rather than stored on `LogicalCamera` so `cameraModel.ts` stays synchronous.
+`"none"` (demo / no NVR) is the only backend whose media loops, and the only one that ignores
+playback errors — the source hands it the same bundled clip for every seek.
+
+Recorded playback = the last ~5 Ring events via the event-selector entity on `"ring"`; on
+`"frigate"`, one continuous VOD spanning the window (`recordingUrlAt`). That VOD URL is built from
+the window alone, so it exists whether or not Frigate kept anything — a scrub into a gap mounts a
+playlist that 404s, and the player tracks the failed src (`vodFailed`) to swap in the placeholder
+with a Retry rather than sit dead. Replacing that with real gap knowledge means normalizing
+Frigate's `/recordings` into the `ringFootage.ts` segment shape; not done yet.
+
+**The Frigate VOD is PAGED, not one continuous manifest.** Frigate serves `/vod/` through
+nginx-vod-module, whose durations array has a hard ~1024-element ceiling; past it the request 503s
+outright (`media_set_parse_durations: invalid number of elements`). Measured 2026-07-29: 220 min /
+940 segments returns 200, 230 min does not — roughly a **3-hour ceiling** at these segment lengths,
+and not configurable without rebuilding the module. The earlier "one continuous VOD spanning the
+window" was therefore never workable: the window was a hardcoded 24h, already 8× over. So the
+timeline and the media are decoupled — the **timeline** spans the camera's real retention
+(`record.continuous.days`, read from `/api/frigate/config`; Ring stays at 24h because its recorded
+path is a handful of cloud events), while the **media** is a bounded 2h page that follows the
+playhead (`lib/vodWindow.ts` ⇄ `core/logic/VodWindow.kt`, ported 1:1 and tested on both). Pages are
+grid-aligned so scrubbing *within* one yields the identical URL — no re-prepare, cache stays warm,
+and the page's signature stays valid. Zoom-out is no longer capped at 24h (`maxSpanMs` is now the
+window itself), or a 3-day retention could be panned but never seen whole.
+
+**Frigate VOD URLs must be signed, and the signature has to reach the segments.**
+frigate-hass-integration validates an `authSig` query parameter on every VOD *segment* request
+(`VodSegmentProxyView`) — unconditionally, and a Bearer token does not satisfy it. Playlists are
+exempt, so an unsigned URL produces the worst possible symptom: `master.m3u8` and `index-*.m3u8`
+both load, every `.m4s` 401s, and the player shows a black frame with no error. Android obtains
+the signature via `auth/sign_path` over the existing websocket
+(`Source.signedRecordingUrlAt` → `HaSource`), which also removes any need for an `Authorization`
+header on media requests — a signed URL authenticates on its own. Because players resolve segment
+URIs *relative* to the manifest and drop the query string, `VideoPlayer.kt` wraps the
+`DataSource.Factory` to re-attach `authSig` to every request. One signature covers the whole
+window (the integration checks it as a path prefix), but it is scoped to that `start/end`, so a
+new scrub window re-signs. **Web has the same gap and is not fixed** — `HlsPlayer` would need the
+equivalent via hls.js `xhrSetup`, and native HLS (Safari/iOS) has no such hook at all.
+The **timeline shows only playable recordings**
 (Ring-style: every block is watchable) — the selector's ~5 on ring, clip-bearing events on
 Frigate/demo; no history-derived markers. Scrubbing is **live**: `Timeline24h` streams the time
 under the center playhead during a drag (`onScrub`, rAF-throttled) and the playhead is a true ms —

@@ -16,7 +16,7 @@ const val HOUR_MS = 3_600_000L
 /** Most zoomed-IN visible span (Ring-style ~10 min). */
 const val MIN_SPAN_MS = 10 * MINUTE_MS
 
-/** Most zoomed-OUT visible span ceiling (the rolling data window is usually 24h). */
+/** The default Ring window span. No longer a zoom ceiling — see [maxSpanMs]. */
 const val MAX_SPAN_MS = 24 * HOUR_MS
 
 /** The fixed data window the viewport lives inside (epoch ms). */
@@ -35,9 +35,15 @@ fun timeToX(t: Long, vp: Viewport, width: Float): Float =
 fun xToTime(x: Float, vp: Viewport, width: Float): Long =
     vp.centerMs + ((x - width / 2f) * vp.msPerPx).toLong()
 
-/** Largest visible span allowed: min(24h, the data window itself). */
+/**
+ * Largest visible span allowed: the data window itself. 1:1 with the web `maxSpanMs`.
+ *
+ * No fixed ceiling: the window used to be a hardcoded rolling 24h, so a 24h cap was the same
+ * thing. A Frigate camera's window now spans its actual retention, and a 24h cap would let the
+ * user pan across it but never see it whole. MAX_SPAN_MS remains the documented Ring default.
+ */
 fun maxSpanMs(window: TimeWindow): Long =
-    minOf(MAX_SPAN_MS, maxOf(1L, window.endMs - window.startMs))
+    maxOf(1L, window.endMs - window.startMs)
 
 /** Smallest visible span allowed (collapses if the window is itself < MIN_SPAN). */
 fun minSpanMs(window: TimeWindow): Long = minOf(MIN_SPAN_MS, maxSpanMs(window))

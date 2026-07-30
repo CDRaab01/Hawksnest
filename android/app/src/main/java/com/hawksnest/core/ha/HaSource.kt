@@ -39,6 +39,23 @@ import kotlin.coroutines.coroutineContext
 /** How long we give HA to produce an HLS stream URL before stepping down (see [HaSource.streamUrl]). */
 private const val STREAM_URL_TIMEOUT_MS = 15_000L
 
+/** Signing is a single websocket round trip; if it is slow, fall back rather than stall playback. */
+private const val SIGN_PATH_TIMEOUT_MS = 10_000L
+
+/**
+ * Lifetime of a VOD signature, in seconds.
+ *
+ * One hour, not the 24h the scrub window spans. The signature is a bearer credential embedded in a
+ * URL — it grants anyone holding it access to that camera's recordings for that window, with no
+ * further auth — so it should not outlive a plausible viewing session just to save a round trip.
+ *
+ * The cost is real but bounded: a session that scrubs continuously for over an hour will start
+ * getting 401s on segments, which surfaces through [VideoPlayer]'s `onError` (whose contract
+ * already names "expired token") and steps the player down. Re-signing on that error, rather than
+ * lengthening this, is the right fix if it turns out to bite.
+ */
+private const val SIGN_PATH_EXPIRY_SECONDS = 3_600
+
 /**
  * The live Home Assistant source over the WebSocket. Mirrors `src/store/haSource.ts`: connect +
  * auth, `subscribe_entities` (compressed deltas applied via [applyEntitiesEvent]), pull the three
@@ -231,6 +248,78 @@ class HaSource(
 
     override fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String =
         buildRecordingUrl(camera, startMs, endMs, withBase(FRIGATE_BASE, baseUrl))
+
+    /** Cached `record.continuous.days` per camera; one config read serves every camera. */
+    @Volatile private var retentionCache: Map<String, Double>? = null
+
+    /**
+     * Read per-camera retention from `/api/frigate/config`, cached for the session.
+     *
+     * Confirmed against the real cluster 2026-07-29: the route returns 200 through the HA proxy
+     * and carries `cameras.<name>.record.continuous.days`. Returns null on any failure, which the
+     * caller treats as "unknown" and falls back — a wrong high guess would offer a timeline
+     * reaching into recordings Frigate has already pruned.
+     */
+    override suspend fun frigateRetentionDays(camera: String): Double? {
+        retentionCache?.let { return it[camera] }
+        val url = "${withBase(FRIGATE_BASE, baseUrl)}/config"
+        val parsed = withContext(Dispatchers.IO) {
+            try {
+                val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
+                client.newCall(req).execute().use { res ->
+                    if (!res.isSuccessful) return@use null
+                    val body = res.body?.string() ?: return@use null
+                    val root = json.parseToJsonElement(body) as? JsonObject ?: return@use null
+                    val globalDays = (root["record"] as? JsonObject)
+                        ?.get("continuous")?.let { it as? JsonObject }
+                        ?.get("days")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val cams = root["cameras"] as? JsonObject ?: return@use emptyMap<String, Double>()
+                    cams.mapNotNull { (name, cfg) ->
+                        val days = ((cfg as? JsonObject)?.get("record") as? JsonObject)
+                            ?.get("continuous")?.let { it as? JsonObject }
+                            ?.get("days")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                            ?: globalDays
+                        if (days != null && days > 0) name to days else null
+                    }.toMap()
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+        if (parsed != null) retentionCache = parsed
+        return parsed?.get(camera)
+    }
+
+    /**
+     * Sign the VOD manifest path so its segments are actually fetchable — see
+     * [Source.signedRecordingUrlAt] for why this is required at all.
+     *
+     * Signs the *manifest* path deliberately: the integration checks
+     * `claims["path"].startswith(<segment's directory>)`, so this one signature authorises every
+     * segment in the window and we avoid a round trip per segment.
+     *
+     * Falls back to the unsigned URL on any failure. That is not a silent swallow — an unsigned
+     * URL is what the app sent before this existed, so the worst case is the previous behaviour
+     * (a black recorded view) rather than a crash or an empty player.
+     */
+    override suspend fun signedRecordingUrlAt(camera: String, startMs: Long, endMs: Long): String {
+        val unsigned = recordingUrlAt(camera, startMs, endMs)
+        val c = conn ?: return unsigned
+        // auth/sign_path wants a server-relative path, not the absolute URL we hand the player.
+        val path = runCatching { java.net.URI(unsigned).path }.getOrNull() ?: return unsigned
+        return try {
+            withTimeoutOrNull(SIGN_PATH_TIMEOUT_MS) {
+                val frame = c.request("auth/sign_path") {
+                    put("path", path)
+                    put("expires", SIGN_PATH_EXPIRY_SECONDS)
+                }
+                val signed = (frame["result"] as? JsonObject)?.get("path")?.jsonPrimitive?.contentOrNull
+                signed?.let { withBase(it, baseUrl) }
+            } ?: unsigned
+        } catch (_: Exception) {
+            unsigned
+        }
+    }
 
     override fun eventClipUrl(eventId: String): String =
         buildEventClipUrl(eventId, withBase(FRIGATE_BASE, baseUrl))

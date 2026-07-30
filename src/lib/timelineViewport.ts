@@ -13,7 +13,7 @@ export const MINUTE_MS = 60_000;
 export const HOUR_MS = 3_600_000;
 /** Most zoomed-IN visible span (Ring-style ~10 min). */
 export const MIN_SPAN_MS = 10 * MINUTE_MS;
-/** Most zoomed-OUT visible span ceiling (the rolling data window is usually 24h). */
+/** The default Ring window span. No longer a zoom ceiling — see `maxSpanMs`. */
 export const MAX_SPAN_MS = 24 * HOUR_MS;
 
 /** The fixed data window the viewport lives inside (epoch ms). */
@@ -42,9 +42,17 @@ export function xToTime(x: number, vp: Viewport, width: number): number {
   return vp.centerMs + (x - width / 2) * vp.msPerPx;
 }
 
-/** Largest visible span allowed: min(24h, the data window itself). */
+/**
+ * Largest visible span allowed: the data window itself.
+ *
+ * There is deliberately no fixed ceiling any more. The window used to be a hardcoded rolling 24h,
+ * so capping zoom-out at 24h was the same thing; now a Frigate camera's window spans its actual
+ * retention (`record.continuous.days`, e.g. 3 days), and a 24h cap would mean the user could pan
+ * across the retention but never see it whole. `MAX_SPAN_MS` is kept as the documented default for
+ * Ring cameras, whose window is still 24h.
+ */
 export function maxSpanMs(window: TimeWindow): number {
-  return Math.min(MAX_SPAN_MS, Math.max(1, window.endMs - window.startMs));
+  return Math.max(1, window.endMs - window.startMs);
 }
 
 /** Smallest visible span allowed (collapses if the window is itself < MIN_SPAN). */

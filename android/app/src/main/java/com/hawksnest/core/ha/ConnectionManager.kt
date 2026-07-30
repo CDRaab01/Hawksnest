@@ -134,6 +134,14 @@ class ConnectionManager @Inject constructor(
     fun recordingUrlAt(camera: String, startMs: Long, endMs: Long): String? =
         current?.recordingUrlAt(camera, startMs, endMs)
 
+    /** As [recordingUrlAt], but signed where the backend requires it (see [Source.signedRecordingUrlAt]). */
+    suspend fun signedRecordingUrlAt(camera: String, startMs: Long, endMs: Long): String? =
+        current?.signedRecordingUrlAt(camera, startMs, endMs)
+
+    /** Days of continuous recording Frigate keeps for [camera] (see [Source.frigateRetentionDays]). */
+    suspend fun frigateRetentionDays(camera: String): Double? =
+        current?.frigateRetentionDays(camera)
+
     /** True when the active source can negotiate WebRTC (live HA, not demo). */
     fun supportsWebRtc(): Boolean = current?.supportsWebRtc() ?: false
 

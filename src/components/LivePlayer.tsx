@@ -9,7 +9,7 @@ import {
   snapshotUrl,
   canStreamWebRtc,
 } from "../lib/cameraUrl";
-import { go2rtcMaybeAvailable, primeGo2rtcStreams } from "../lib/go2rtc";
+import { go2rtcMaybeAvailable, go2rtcStreamsKnown, primeGo2rtcStreams } from "../lib/go2rtc";
 import { HlsPlayer } from "./HlsPlayer";
 import { WebRtcPlayer } from "./WebRtcPlayer";
 import { Go2rtcPlayer } from "./Go2rtcPlayer";
@@ -19,10 +19,13 @@ import { Go2rtcPlayer } from "./Go2rtcPlayer";
  *
  *   go2rtc-direct (~1-2s) → HA WebRTC → HLS/video → MJPEG proxy → snapshot poll → dead
  *
- * The dedicated go2rtc path (native Ring source, `go2rtcSrc` given for ring
- * cameras) is tried first when it looks reachable (`go2rtcMaybeAvailable` — a
- * session circuit-breaker skips it once media is known-unreachable, e.g. before
- * the §7c host forwarder is up). Then HA WebRTC when the camera is STREAM-capable
+ * The dedicated go2rtc path is tried first when go2rtc actually serves this
+ * camera. `go2rtcSrc` is now given for EVERY camera — go2rtc fronts the Reolink
+ * main stream as well as the native Ring sources — so which cameras it can serve
+ * is decided by its own stream list (`go2rtcMaybeAvailable`, plus a session
+ * circuit-breaker that skips the tier once media is known-unreachable, e.g.
+ * before the §7c host forwarder is up), not by what kind of camera it is.
+ * Then HA WebRTC when the camera is STREAM-capable
  * (or doesn't say — see `canStreamWebRtc`; modern HA dropped the old
  * `frontend_stream_type` attribute this used to gate on); otherwise the HLS/demo
  * video tier. Each tier steps down on error. Nothing streams in the background —
@@ -42,7 +45,16 @@ export function LivePlayer({
   const mjpeg = mjpegUrl(entity, baseUrl);
   const hasSnapshot = snapshotUrl(entity, baseUrl) !== null;
   const canWebRtc = canStreamWebRtc(entity) && supportsWebRtc();
-  const canGo2rtc = !!go2rtcSrc && go2rtcMaybeAvailable(go2rtcSrc);
+  // Wait for the stream list before betting on go2rtc. `go2rtcMaybeAvailable` is
+  // optimistic until that list lands, which was harmless while `go2rtcSrc` was
+  // passed for Ring cameras only — every camera that got here really did have a
+  // stream. Now it's passed for every camera, so an un-primed optimistic "yes"
+  // would send demo cameras (and any HA camera go2rtc doesn't serve) down a tier
+  // that can only fail, costing a watchdog stall before the ladder steps down.
+  // The fetch is same-origin and lands in milliseconds; it flips false→true once
+  // per session, before the first frame.
+  const [streamsKnown, setStreamsKnown] = useState(() => go2rtcStreamsKnown());
+  const canGo2rtc = !!go2rtcSrc && streamsKnown && go2rtcMaybeAvailable(go2rtcSrc);
   const topMode = (): Mode => (canGo2rtc ? "go2rtc" : canWebRtc ? "webrtc" : "video");
 
   const [src, setSrc] = useState<string | null>(null);
@@ -50,19 +62,26 @@ export function LivePlayer({
   const [mode, setMode] = useState<Mode>(topMode);
   const [tick, setTick] = useState(0);
 
-  // Warm the go2rtc stream-list cache (so the *next* camera open can gate the
-  // tier accurately); fire-and-forget, safe to call repeatedly.
+  // Warm the go2rtc stream-list cache so the tier can be gated accurately.
   useEffect(() => {
-    if (go2rtcSrc) primeGo2rtcStreams();
+    if (!go2rtcSrc) return;
+    let active = true;
+    void primeGo2rtcStreams().then(() => active && setStreamsKnown(true));
+    return () => {
+      active = false;
+    };
   }, [go2rtcSrc]);
 
-  // Reset the ladder when the camera changes.
+  // Reset the ladder when the camera changes — or when the stream list first
+  // arrives, which is what promotes a go2rtc-served camera up to that tier. That
+  // transition happens once per session, within ms of mount and before any frame,
+  // so it can't tear down an established stream.
   useEffect(() => {
     setSrc(null);
     setSrcResolved(false);
     setMode(topMode());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entity.entity_id, go2rtcSrc]);
+  }, [entity.entity_id, go2rtcSrc, streamsKnown]);
 
   // Resolve the HLS/demo stream URL only once the "video" tier is actually
   // active — NOT eagerly on mount. `camera/stream` makes HA spin up an HLS
