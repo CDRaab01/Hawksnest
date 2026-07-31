@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  DEFAULT_SPAN_MS,
   HOUR_MS,
   MINUTE_MS,
   MIN_SPAN_MS,
@@ -114,5 +115,32 @@ describe("ticks", () => {
       expect(x).toBeLessThanOrEqual(endMs);
       expect(x % interval).toBe(0);
     }
+  });
+});
+
+describe("DEFAULT_SPAN_MS", () => {
+  // A phone-width track. The opening zoom is only useful if a single event is a
+  // *distinguishable block* at this width — the 8h default made every event sub-pixel,
+  // so the strip showed one solid bar and answered nothing.
+  const PHONE_W = 360;
+  const TYPICAL_EVENT_MS = 30_000;
+
+  it("renders a typical 30s event as a block wide enough to see and tap", () => {
+    const pxPerMs = PHONE_W / DEFAULT_SPAN_MS;
+    expect(TYPICAL_EVENT_MS * pxPerMs).toBeGreaterThanOrEqual(3);
+  });
+
+  it("resolves two events a minute apart as separate blocks", () => {
+    const v = viewportForSpan(0, DEFAULT_SPAN_MS, PHONE_W, {
+      startMs: -DEFAULT_SPAN_MS,
+      endMs: DEFAULT_SPAN_MS,
+    });
+    const gapPx = timeToX(60_000, v, PHONE_W) - timeToX(0, v, PHONE_W);
+    expect(gapPx).toBeGreaterThanOrEqual(4);
+  });
+
+  it("sits inside the zoom limits, so the opening view is reachable by pinching", () => {
+    expect(DEFAULT_SPAN_MS).toBeGreaterThanOrEqual(MIN_SPAN_MS);
+    expect(DEFAULT_SPAN_MS).toBeLessThanOrEqual(24 * HOUR_MS);
   });
 });

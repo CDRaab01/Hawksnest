@@ -27,7 +27,13 @@ test.describe("ring recorded playback", () => {
     await expect(mockHaPage.getByRole("dialog")).toBeVisible();
 
     // Seek to a recorded moment via its timeline chip.
-    await mockHaPage.getByRole("button", { name: /motion at/i }).first().click();
+    //
+    // The NEWEST motion chip, not `.first()` (which is the oldest — chips render in ascending
+    // time order). The timeline opens at a 1h zoom, so an older chip is scrolled off the track
+    // and Playwright fails with "element is outside of the viewport". This spec is about the
+    // failed-stream tri-state, not about panning the timeline, so it takes the chip that the
+    // opening view actually shows.
+    await mockHaPage.getByRole("button", { name: /motion at/i }).last().click();
     await expect(mockHaPage.getByText("Recorded")).toBeVisible();
 
     // Honest tri-state: loading while resolving, then a visible failure — not a

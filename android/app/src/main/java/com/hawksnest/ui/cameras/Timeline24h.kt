@@ -38,7 +38,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hawksnest.core.logic.HOUR_MS
+import com.hawksnest.core.logic.DEFAULT_SPAN_MS
 import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.FootageSpan
 import com.hawksnest.core.logic.TimeWindow
@@ -73,8 +73,6 @@ private fun dayHeader(ms: Long): String {
     }
 }
 
-/** Opening zoom: ~8h visible so the day reads at a glance (Ring-like), clamped into [10min, 24h]. */
-private const val DEFAULT_SPAN_MS = 8 * HOUR_MS
 private const val TAP_SLOP_PX = 8f
 
 /**

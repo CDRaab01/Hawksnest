@@ -257,6 +257,24 @@ note over the snapshot. Rendered Ring-style — solid `effort`-blue blocks, a tr
 dim "Live" region right of now, a "TODAY" header (`Timeline24h`) — over the tested
 `timelineViewport` math.
 
+**The timeline opens at a 1h span** (`DEFAULT_SPAN_MS`, in `timelineViewport` rather than in the
+two components, because a constant duplicated across platforms is one that drifts). It was 8h,
+which on a phone-width track put a 30 s event under one pixel: adjacent events merged into a solid
+bar and the strip only ever said "something was recorded today". The zoom range is unchanged
+(10 min – full retention) and pinch reaches all of it. Anything that needs to click an event chip —
+E2E specs especially — must now assume only the last ~30 minutes are on screen.
+
+**Pinch-to-zoom over the picture** is `lib/videoZoom.ts` ↔ `core/logic/VideoZoom.kt` (clamping and
+focal-point math, tested on both) behind the `ZoomableFrame` component/composable. It wraps the
+*whole* player ladder rather than any one tier, so all seven transports (RTSP, go2rtc WebRTC, HA
+WebRTC, HLS, MJPEG, snapshot, recorded VOD) magnify identically instead of seven times differently.
+It is a **view** transform — bigger pixels, not a sharper image, and it does not move the camera;
+real optical zoom is PTZ (above). `shouldCaptureDrag` is shared because it encodes the one rule
+both platforms must agree on: an unzoomed frame must let a drag through so the page can still
+scroll. Fullscreen lives in the same component — on Android it rotates to landscape and hides the
+system bars, which is why `MainActivity` now declares `configChanges` for orientation (without it
+the rotation recreates the activity and costs a 2–4 s WebRTC renegotiation).
+
 **The 24/7 continuous track is a second, separate source** (`/footage`, `lib/ringFootage.ts`,
 mirrored in `core/logic/RingFootage.kt`). `video_search` returns only discrete *events*, so before
 this a quiet 3–5 AM window read as "no recording" on the seven cameras that record all night. Ring
