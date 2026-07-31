@@ -416,9 +416,14 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   `WidgetConfigActivity` (it learns which widget it is configuring from the provider that launched
   it) picking an entity from `GET /api/states`.
   - **The temperature widget is the read-only one**, so none of the pending/confirm/echo machinery
-    below applies to it. It colours its reading by three bands — cold / comfortable / warm — split
-    on **two thresholds stored per widget instance**, because a nursery and a garage disagree about
-    what comfortable means. Thresholds are entered in a second config step after the picker, in the
+    below applies to it. It colours its reading by four bands — cold / comfortable / warm / hot —
+    split on **three thresholds stored per widget instance**, because a nursery and a garage
+    disagree about what comfortable means. Warm and hot are separate on purpose: in a nursery,
+    warm is a nudge and hot is a problem, and folding them into one orange "not ideal" would make
+    the urgent case stop reading as urgent. **Hot is the one band with no PULSE channel** — the
+    four channels are blue/violet/orange/green and none is red — so it wears the app's *error*
+    colour, on the number and on the panel rim (`widget_panel_alert`), which is the honest
+    semantic for the only state that means "deal with this now". Thresholds are entered in a second config step after the picker, in the
     **sensor's own unit**: nothing converts, so a °C household types °C and the comparison, the
     display and the stored pair all stay in that unit with no flag anywhere. It takes the *light's*
     staleness stance, not the lock's — an old reading is still shown with its age, because a room's

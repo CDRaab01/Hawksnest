@@ -521,47 +521,64 @@ class WidgetModelTest {
     // ── Temperature widget ────────────────────────────────────────────────────────────────────
 
     @Test
-    fun `bands split on the two thresholds`() {
-        assertEquals(TempBand.COLD, temperatureBand(64.0, 68.0, 72.0))
-        assertEquals(TempBand.GOOD, temperatureBand(70.0, 68.0, 72.0))
-        assertEquals(TempBand.HOT, temperatureBand(74.8, 68.0, 72.0))
+    fun `bands split on the three thresholds`() {
+        assertEquals(TempBand.COLD, temperatureBand(64.0, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.GOOD, temperatureBand(70.0, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.WARM, temperatureBand(74.8, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.HOT, temperatureBand(78.0, 68.0, 72.0, 77.0))
     }
 
-    // "68" reads to a person as "68 is fine, 67 is not", and a sensor parked exactly
-    // on the number must not flicker between two colours.
+    // Each boundary belongs to the CALMER band: a sensor parked exactly on 77 must
+    // not flicker between orange and red.
     @Test
-    fun `the boundaries themselves are comfortable, not cold or warm`() {
-        assertEquals(TempBand.GOOD, temperatureBand(68.0, 68.0, 72.0))
-        assertEquals(TempBand.GOOD, temperatureBand(72.0, 68.0, 72.0))
-        assertEquals(TempBand.COLD, temperatureBand(67.9, 68.0, 72.0))
-        assertEquals(TempBand.HOT, temperatureBand(72.1, 68.0, 72.0))
+    fun `every boundary belongs to the calmer band`() {
+        assertEquals(TempBand.GOOD, temperatureBand(68.0, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.GOOD, temperatureBand(72.0, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.WARM, temperatureBand(77.0, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.COLD, temperatureBand(67.9, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.WARM, temperatureBand(72.1, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.HOT, temperatureBand(77.1, 68.0, 72.0, 77.0))
     }
 
-    // A swapped pair should narrow the good range, not make the widget permanently cold.
+    // Three fields are three chances to fat-finger the order.
     @Test
-    fun `thresholds entered backwards still describe a usable range`() {
-        assertEquals(TempBand.GOOD, temperatureBand(70.0, 72.0, 68.0))
-        assertEquals(TempBand.COLD, temperatureBand(60.0, 72.0, 68.0))
-        assertEquals(TempBand.HOT, temperatureBand(80.0, 72.0, 68.0))
+    fun `thresholds entered out of order still describe a usable ladder`() {
+        // Same three numbers, scrambled — the ladder must come out identical.
+        assertEquals(TempBand.COLD, temperatureBand(60.0, 77.0, 68.0, 72.0))
+        assertEquals(TempBand.GOOD, temperatureBand(70.0, 77.0, 68.0, 72.0))
+        assertEquals(TempBand.WARM, temperatureBand(75.0, 72.0, 77.0, 68.0))
+        assertEquals(TempBand.HOT, temperatureBand(80.0, 72.0, 77.0, 68.0))
     }
 
     @Test
     fun `equal thresholds leave a single comfortable point rather than dividing by zero`() {
-        assertEquals(TempBand.GOOD, temperatureBand(70.0, 70.0, 70.0))
-        assertEquals(TempBand.COLD, temperatureBand(69.9, 70.0, 70.0))
-        assertEquals(TempBand.HOT, temperatureBand(70.1, 70.0, 70.0))
+        assertEquals(TempBand.GOOD, temperatureBand(70.0, 70.0, 70.0, 70.0))
+        assertEquals(TempBand.COLD, temperatureBand(69.9, 70.0, 70.0, 70.0))
+        assertEquals(TempBand.HOT, temperatureBand(70.1, 70.0, 70.0, 70.0))
     }
 
     // Colour is never the only signal — colour blindness, and a glance in bright sun.
     @Test
-    fun `each band has its own channel and its own words`() {
-        assertEquals(Channel.EFFORT, temperatureChannel(TempBand.COLD))
-        assertEquals(Channel.RECOVERY, temperatureChannel(TempBand.GOOD))
-        assertEquals(Channel.STREAK, temperatureChannel(TempBand.HOT))
+    fun `each band has its own words`() {
         assertEquals(
-            listOf("Cold", "Comfortable", "Warm"),
+            listOf("Cold", "Comfortable", "Warm", "Hot"),
             TempBand.entries.map { temperatureLabel(it) },
         )
+    }
+
+    // PULSE's four channels are blue/violet/orange/green — none of them is red, so
+    // the hot band deliberately has NO channel and renders in the error colour.
+    @Test
+    fun `hot has no channel because PULSE has no red one`() {
+        assertEquals(Channel.EFFORT, temperatureChannel(TempBand.COLD))
+        assertEquals(Channel.RECOVERY, temperatureChannel(TempBand.GOOD))
+        assertEquals(Channel.STREAK, temperatureChannel(TempBand.WARM))
+        assertNull(temperatureChannel(TempBand.HOT))
+
+        assertTrue(temperatureIsAlert(TempBand.HOT))
+        assertFalse(temperatureIsAlert(TempBand.WARM))
+        assertFalse(temperatureIsAlert(TempBand.GOOD))
+        assertFalse(temperatureIsAlert(TempBand.COLD))
     }
 
     @Test

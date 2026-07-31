@@ -47,6 +47,7 @@ import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.WIDGET_TEMP_COLD_BELOW_DEFAULT
 import com.hawksnest.core.logic.WIDGET_TEMP_HOT_ABOVE_DEFAULT
+import com.hawksnest.core.logic.WIDGET_TEMP_WARM_ABOVE_DEFAULT
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.blockerCopy
@@ -119,7 +120,9 @@ class WidgetConfigActivity : ComponentActivity() {
                             sensor = sensor,
                             name = resolveName(sensor, overrides),
                             onBack = { pendingSensor = null },
-                            onSave = { cold, hot -> save(kind, sensor, cold to hot) },
+                            onSave = { cold, warm, hot ->
+                                save(kind, sensor, Triple(cold, warm, hot))
+                            },
                         )
                     } else {
                         PickerScreen(
@@ -153,7 +156,7 @@ class WidgetConfigActivity : ComponentActivity() {
     private fun save(
         kind: WidgetKind,
         entity: HassEntity,
-        thresholds: Pair<Double, Double>? = null,
+        thresholds: Triple<Double, Double, Double>? = null,
     ) {
         lifecycleScope.launch {
             val glanceId = GlanceAppWidgetManager(this@WidgetConfigActivity).getGlanceIdBy(appWidgetId)
@@ -308,12 +311,14 @@ private fun ThresholdScreen(
     sensor: HassEntity,
     name: String,
     onBack: () -> Unit,
-    onSave: (Double, Double) -> Unit,
+    onSave: (Double, Double, Double) -> Unit,
 ) {
     val unit = sensor.stringAttr("unit_of_measurement") ?: ""
     var cold by remember { mutableStateOf(WIDGET_TEMP_COLD_BELOW_DEFAULT.toDisplay()) }
+    var warm by remember { mutableStateOf(WIDGET_TEMP_WARM_ABOVE_DEFAULT.toDisplay()) }
     var hot by remember { mutableStateOf(WIDGET_TEMP_HOT_ABOVE_DEFAULT.toDisplay()) }
     val coldValue = cold.trim().toDoubleOrNull()
+    val warmValue = warm.trim().toDoubleOrNull()
     val hotValue = hot.trim().toDoubleOrNull()
 
     Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
@@ -325,8 +330,8 @@ private fun ThresholdScreen(
             modifier = Modifier.padding(top = 4.dp),
         )
         Text(
-            text = "The widget turns blue below the first number, green between them, " +
-                "and orange above the second.",
+            text = "Blue below the first number, green up to the second, " +
+                "orange up to the third, red above it.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 12.dp),
@@ -334,15 +339,23 @@ private fun ThresholdScreen(
         OutlinedTextField(
             value = cold,
             onValueChange = { cold = it },
-            label = { Text("Too cold below ($unit)") },
+            label = { Text("Cold below ($unit)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
         )
         OutlinedTextField(
+            value = warm,
+            onValueChange = { warm = it },
+            label = { Text("Warm above ($unit)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        )
+        OutlinedTextField(
             value = hot,
             onValueChange = { hot = it },
-            label = { Text("Too warm above ($unit)") },
+            label = { Text("Hot above ($unit)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
@@ -351,11 +364,11 @@ private fun ThresholdScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TextButton(onClick = onBack) { Text("Back") }
             Button(
-                // Both must parse; the model tolerates a swapped pair, but a blank
-                // or non-numeric field would silently fall back to the defaults and
-                // look like the setting was ignored.
-                enabled = coldValue != null && hotValue != null,
-                onClick = { onSave(coldValue!!, hotValue!!) },
+                // All three must parse; the model sorts a set entered out of order,
+                // but a blank or non-numeric field would silently fall back to a
+                // default and look like the setting was ignored.
+                enabled = coldValue != null && warmValue != null && hotValue != null,
+                onClick = { onSave(coldValue!!, warmValue!!, hotValue!!) },
             ) { Text("Save") }
         }
     }

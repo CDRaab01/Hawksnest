@@ -25,11 +25,13 @@ import androidx.glance.layout.height
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
+import androidx.glance.unit.ColorProvider
 import com.hawksnest.R
 import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
 import com.hawksnest.core.logic.WIDGET_FULL_MIN_HEIGHT_DP
 import com.hawksnest.core.logic.WIDGET_NAME_MIN_WIDTH_DP
 import com.hawksnest.core.logic.WidgetKind
+import com.hawksnest.core.logic.TemperatureWidgetView
 import com.hawksnest.core.logic.WidgetSizeTier
 import com.hawksnest.core.logic.sizeTier
 import com.hawksnest.core.logic.temperatureWidgetView
@@ -86,11 +88,12 @@ class TemperatureWidget : GlanceAppWidget() {
 private fun TemperatureBody(prefs: Preferences, json: Json) {
     val snapshot = prefs.snapshot(json)
     val blocker = prefs.blocker()
-    val (coldBelow, hotAbove) = prefs.tempThresholds()
+    val (coldBelow, warmAbove, hotAbove) = prefs.tempThresholds()
     val view = temperatureWidgetView(
         snapshot = snapshot,
         nowMs = System.currentTimeMillis(),
         coldBelow = coldBelow,
+        warmAbove = warmAbove,
         hotAbove = hotAbove,
     )
     val retry = actionRunCallback<WidgetRefreshAction>(widgetParams(WidgetKind.TEMPERATURE))
@@ -98,7 +101,7 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
     val size = LocalSize.current
     val compact = sizeTier(size.height.value.toInt()) == WidgetSizeTier.COMPACT
 
-    WidgetPanel(compact = compact, accent = view.channel) {
+    WidgetPanel(compact = compact, accent = view.channel, alert = view.alert) {
         if (blocker != null) {
             BlockerBody(blocker, retry, R.drawable.ic_glyph_thermometer)
         } else {
@@ -119,7 +122,7 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
                         style = TextStyle(
                             // The colour IS the answer, so it belongs on the number
                             // rather than a chip beside it.
-                            color = view.channel?.let { channelColor(it) } ?: GlanceTheme.colors.onSurfaceVariant,
+                            color = bandColor(view),
                             fontSize = if (compact) 28.sp else 40.sp,
                             fontWeight = FontWeight.Bold,
                         ),
@@ -129,7 +132,7 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
                         Text(
                             view.unit,
                             style = TextStyle(
-                                color = view.channel?.let { channelColor(it) } ?: GlanceTheme.colors.onSurfaceVariant,
+                                color = bandColor(view),
                                 fontSize = if (compact) 13.sp else 16.sp,
                                 fontWeight = FontWeight.Medium,
                             ),
@@ -141,7 +144,7 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
                 Text(
                     view.label,
                     style = TextStyle(
-                        color = view.channel?.let { channelColor(it) } ?: GlanceTheme.colors.onSurfaceVariant,
+                        color = bandColor(view),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                     ),
@@ -173,6 +176,17 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
             }
         }
     }
+}
+
+/**
+ * The colour the reading wears: its channel, or the error red for the "too hot"
+ * band, which has no channel because PULSE has no red one.
+ */
+@Composable
+private fun bandColor(view: TemperatureWidgetView): ColorProvider = when {
+    view.alert -> GlanceTheme.colors.error
+    view.channel != null -> channelColor(view.channel)
+    else -> GlanceTheme.colors.onSurfaceVariant
 }
 
 /** The narrow bucket — the provider's own minimum width. */

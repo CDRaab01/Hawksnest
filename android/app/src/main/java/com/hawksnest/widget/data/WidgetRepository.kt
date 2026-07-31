@@ -86,24 +86,25 @@ class WidgetRepository @Inject constructor(
     /**
      * Point a freshly-created widget at an entity, then draw it.
      *
-     * [thresholds] is the temperature widget's (coldBelow, hotAbove) pair, in the
-     * sensor's own unit. Null for every other kind — and written AFTER the `clear()`
-     * so reconfiguring an existing widget replaces the pair rather than merging with
-     * whatever was there.
+     * [thresholds] is the temperature widget's (coldBelow, warmAbove, hotAbove)
+     * triple, in the sensor's own unit. Null for every other kind — and written
+     * AFTER the `clear()` so reconfiguring an existing widget replaces the set
+     * rather than merging with whatever was there.
      */
     suspend fun configure(
         kind: WidgetKind,
         glanceId: GlanceId,
         entityId: String,
         name: String,
-        thresholds: Pair<Double, Double>? = null,
+        thresholds: Triple<Double, Double, Double>? = null,
     ) {
         write(kind, glanceId) { prefs ->
             prefs.clear()
             prefs[WidgetKeys.ENTITY_ID] = entityId
             prefs[WidgetKeys.NAME] = name
-            thresholds?.let { (cold, hot) ->
+            thresholds?.let { (cold, warm, hot) ->
                 prefs[WidgetKeys.TEMP_COLD_BELOW] = cold
+                prefs[WidgetKeys.TEMP_WARM_ABOVE] = warm
                 prefs[WidgetKeys.TEMP_HOT_ABOVE] = hot
             }
         }

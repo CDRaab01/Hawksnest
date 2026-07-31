@@ -38,65 +38,85 @@ enum class WidgetKind { LIGHT, LOCK, ALARM, TEMPERATURE }
 /**
  * Which side of the comfortable range a reading falls on.
  *
- * Three bands, not five or a gradient: the widget answers one question from across
- * a room — "is it OK in there?" — and a hard flip between three states reads at a
- * glance where a blend does not.
+ * Four bands, not a gradient: the widget answers one question from across a room —
+ * "is it OK in there?" — and hard flips read at a glance where a blend does not.
+ *
+ * WARM and HOT are deliberately separate rather than one "too warm". They mean
+ * different things in a nursery: warm is a nudge to open a window, hot is a
+ * problem to deal with now. One orange band would have flattened that into a
+ * single "not ideal" that stops being urgent once you're used to seeing it.
  */
-enum class TempBand { COLD, GOOD, HOT }
+enum class TempBand { COLD, GOOD, WARM, HOT }
 
 /**
  * Default thresholds, in the sensor's own unit, chosen for the nursery this was
- * built for (typical guidance is roughly 68-72°F). They are only a starting point:
- * every widget instance carries its own pair, set when it is placed.
+ * built for (typical guidance is roughly 68-72°F, and 77°F is where it stops being
+ * a comfort question). They are only a starting point: every widget instance
+ * carries its own set, chosen when it is placed.
  *
  * NOTE these are Fahrenheit because that is what this household's sensors report.
  * The widget never converts — it renders whatever HA gives it, so a °C sensor with
  * °C thresholds works identically without a unit flag anywhere in the code.
  */
 const val WIDGET_TEMP_COLD_BELOW_DEFAULT = 68.0
-const val WIDGET_TEMP_HOT_ABOVE_DEFAULT = 72.0
+const val WIDGET_TEMP_WARM_ABOVE_DEFAULT = 72.0
+const val WIDGET_TEMP_HOT_ABOVE_DEFAULT = 77.0
 
 /**
- * Which band [value] falls in, given the two thresholds.
+ * Which band [value] falls in, given the three thresholds.
  *
- * Boundaries are inclusive of the good range: exactly [coldBelow] is GOOD, not
- * COLD. A threshold of "68" reads to a person as "68 is fine, 67 is not", and a
- * sensor sitting precisely on the number shouldn't flicker between colours.
+ * Boundaries belong to the *calmer* band: exactly [coldBelow] is GOOD, exactly
+ * [warmAbove] is GOOD, exactly [hotAbove] is WARM. A threshold of "77" reads to a
+ * person as "77 is warm, 77.1 is hot", and a sensor parked precisely on the number
+ * must not flicker between two colours.
  *
- * [hotAbove] below [coldBelow] would make an impossible range, so the two are
- * ordered defensively rather than trusting the config screen — a swapped pair
- * yields a narrow GOOD band instead of a widget that is always COLD.
+ * The three are sorted rather than trusted, so a set entered out of order still
+ * describes a usable ladder instead of a widget stuck in one colour. That matters
+ * more here than with two: three fields are three chances to fat-finger.
  */
-fun temperatureBand(value: Double, coldBelow: Double, hotAbove: Double): TempBand {
-    val low = minOf(coldBelow, hotAbove)
-    val high = maxOf(coldBelow, hotAbove)
+fun temperatureBand(
+    value: Double,
+    coldBelow: Double,
+    warmAbove: Double,
+    hotAbove: Double,
+): TempBand {
+    val (low, mid, high) = listOf(coldBelow, warmAbove, hotAbove).sorted()
     return when {
         value < low -> TempBand.COLD
-        value > high -> TempBand.HOT
-        else -> TempBand.GOOD
+        value <= mid -> TempBand.GOOD
+        value <= high -> TempBand.WARM
+        else -> TempBand.HOT
     }
 }
 
 /**
- * The PULSE channel a band wears. Reuses the existing four-channel palette rather
- * than inventing temperature colours, so the widget matches everything else on the
- * home screen and picks up theme changes for free.
+ * The PULSE channel a band wears — for the panel rim and, for everything but HOT,
+ * the reading itself. Reuses the existing palette so the widget matches the rest of
+ * the home screen and picks up theme changes for free.
  *
- * RECOVERY (green) for good and STREAK (orange) for hot are the obvious reads.
- * COLD takes EFFORT (blue) — the only cool channel in the palette.
+ * RECOVERY (green) for good and STREAK (orange) for warm are the obvious reads;
+ * COLD takes EFFORT (blue), the only cool channel there is. HOT has **no channel**:
+ * PULSE's four channels are blue/violet/orange/green and none of them is red, so
+ * hot borrows the app's *error* colour instead — which is the honest semantic
+ * anyway. See `temperatureIsAlert`.
  */
-fun temperatureChannel(band: TempBand): Channel = when (band) {
+fun temperatureChannel(band: TempBand): Channel? = when (band) {
     TempBand.COLD -> Channel.EFFORT
     TempBand.GOOD -> Channel.RECOVERY
-    TempBand.HOT -> Channel.STREAK
+    TempBand.WARM -> Channel.STREAK
+    TempBand.HOT -> null
 }
+
+/** True for the band that renders in the error red rather than a channel colour. */
+fun temperatureIsAlert(band: TempBand): Boolean = band == TempBand.HOT
 
 /** Short label under the reading, so the colour is never the only signal (colour
  *  blindness, and a glance in bright sun). */
 fun temperatureLabel(band: TempBand): String = when (band) {
     TempBand.COLD -> "Cold"
     TempBand.GOOD -> "Comfortable"
-    TempBand.HOT -> "Warm"
+    TempBand.WARM -> "Warm"
+    TempBand.HOT -> "Hot"
 }
 
 /**
@@ -510,9 +530,12 @@ data class TemperatureWidgetView(
     /** `°F` / `°C` as HA reports it; the widget never converts. */
     val unit: String,
     val band: TempBand?,
-    /** "Comfortable" / "Cold" / "Warm", so colour is never the only signal. */
+    /** "Cold" / "Comfortable" / "Warm" / "Hot", so colour is never the only signal. */
     val label: String,
+    /** Channel accent, or null for HOT (which uses the error red) and for no reading. */
     val channel: Channel?,
+    /** True when this should render in the error red rather than a channel colour. */
+    val alert: Boolean,
     /** "as of 22m ago" once the reading is old enough to be worth doubting, else null. */
     val staleness: String?,
 )
@@ -529,6 +552,7 @@ fun temperatureWidgetView(
     snapshot: WidgetSnapshot?,
     nowMs: Long,
     coldBelow: Double = WIDGET_TEMP_COLD_BELOW_DEFAULT,
+    warmAbove: Double = WIDGET_TEMP_WARM_ABOVE_DEFAULT,
     hotAbove: Double = WIDGET_TEMP_HOT_ABOVE_DEFAULT,
 ): TemperatureWidgetView {
     val name = snapshot?.name ?: "Temperature"
@@ -547,11 +571,12 @@ fun temperatureWidgetView(
             // itself, the second means the sensor is asleep or gone.
             label = if (snapshot == null) "Checking…" else "No reading",
             channel = null,
+            alert = false,
             staleness = null,
         )
     }
 
-    val band = temperatureBand(value, coldBelow, hotAbove)
+    val band = temperatureBand(value, coldBelow, warmAbove, hotAbove)
     return TemperatureWidgetView(
         name = name,
         reading = reading,
@@ -559,6 +584,7 @@ fun temperatureWidgetView(
         band = band,
         label = temperatureLabel(band),
         channel = temperatureChannel(band),
+        alert = temperatureIsAlert(band),
         staleness = stalenessLabel(snapshot.fetchedAtMs, nowMs),
     )
 }

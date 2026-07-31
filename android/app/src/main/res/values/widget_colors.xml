@@ -24,6 +24,8 @@
     <color name="widget_rim_effort">#732A5BFF</color>     <!-- PulseBlueDeep -->
     <color name="widget_rim_streak">#73C2410C</color>     <!-- PulseOrangeDeep -->
     <color name="widget_rim_recovery">#73047857</color>   <!-- PulseGreenDeep -->
+    <!-- Not a channel: the temperature widget's "too hot" band, wearing the error red. -->
+    <color name="widget_rim_alert">#73DC2626</color>      <!-- PulseRedDeep -->
 
     <!-- Soft channel washes at 12%: the header chip's fill, and the tinted resting button (a
          control that is live but not engaged — the lock's next action). Same Deep seeds as above. -->
