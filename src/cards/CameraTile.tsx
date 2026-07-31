@@ -7,6 +7,7 @@ import { useCameraOverlay, viewTransitionNameFor } from "../store/cameraOverlay"
 import { useHaBaseUrl } from "../store/entityStore";
 import { resolveName } from "../lib/resolve";
 import { snapshotUrlAt, isCameraLive, snapshotFreshnessMs } from "../lib/cameraUrl";
+import { isFrigateCamera } from "../lib/frigate";
 import { relativeTime } from "../lib/relativeTime";
 import type { CardProps } from "./types";
 
@@ -32,7 +33,9 @@ export function CameraTile({
 }) {
   const name = nameOverride ?? resolveName(entity, overrides);
   const aspect = density === "compact" ? "aspect-video" : "aspect-[4/3]";
-  const bucket = useSnapshotBucket();
+  // Frigate cameras also refresh every time the app is opened — see the buckets'
+  // doc comment. Ring stays on the shared beat (metered proxy, 300s snapshot policy).
+  const bucket = useSnapshotBucket(isFrigateCamera(entity));
   const baseUrl = useHaBaseUrl();
   const [failed, setFailed] = useState(false);
   // The last snapshot URL that actually decoded. We keep showing it while the next

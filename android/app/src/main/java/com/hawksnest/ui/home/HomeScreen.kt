@@ -30,12 +30,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,6 +56,7 @@ import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.alarmView
 import com.hawksnest.core.logic.graceExpired
 import com.hawksnest.core.logic.relativeTime
+import com.hawksnest.core.logic.snapshotBucket
 import com.hawksnest.ui.cameras.CameraLightbox
 import com.hawksnest.ui.cameras.DoorbellBanner
 import com.hawksnest.ui.cameras.CameraSnapshot
@@ -88,14 +92,47 @@ fun HomeScreen(
 ) {
     val ui by viewModel.uiState.collectAsState()
     val pending by viewModel.pending.collectAsState()
-    // One ticking bucket shared by every tile so all snapshots refresh on the same ~10s beat
-    // (matches the web SnapshotBucketProvider; Ring rate-limits the proxy, so fewer fetches help).
-    val bucket by produceState(0L) {
+    // Snapshot cache-busters, matching the web SnapshotBucketProvider 1:1.
+    //
+    // SEEDED FROM THE CLOCK, not 0. Starting at 0 meant every app launch requested
+    // `..._=0` — byte-identical to the previous launch's first request — so Coil could
+    // serve the opening frame straight from its disk cache. The tile then showed a
+    // genuinely old picture, not a merely-10s-stale one. The seed only has to DIFFER
+    // between sessions (it is a cache-buster, not an ordering key); increments stay
+    // monotonic within a session, so a backward clock jump still can't repeat a bucket.
+    //
+    // `opens` bumps on every ON_RESUME so Frigate tiles refetch the moment the app is
+    // opened rather than waiting up to 10s for the next beat. Ring rides `shared` only —
+    // its proxy is metered and battery cams republish every 300s, so an extra fetch on
+    // open buys the same image twice. `snapshotBucket()` picks per camera.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val bucketSeed = remember { System.currentTimeMillis() / 1000 }
+    var ticks by remember { mutableStateOf(0L) }
+    var opens by remember { mutableStateOf(0L) }
+    var resumed by remember { mutableStateOf(false) }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                // addObserver replays up to the current state, so this also fires for the
+                // initial composition — which IS an app open, and should refresh.
+                Lifecycle.Event.ON_RESUME -> { resumed = true; opens += 1 }
+                Lifecycle.Event.ON_PAUSE -> resumed = false
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    // Ticking stops while backgrounded — no point spending radio on tiles nobody sees.
+    LaunchedEffect(resumed) {
+        if (!resumed) return@LaunchedEffect
         while (true) {
             delay(10_000)
-            value += 1   // monotonic — a backward clock jump can't repeat a bucket
+            ticks += 1
         }
     }
+    val sharedBucket = bucketSeed + ticks
+    val onOpenBucket = bucketSeed + ticks + opens
     var lightbox by remember { mutableStateOf<CameraUi?>(null) }
     // Frigate event the tap wants the player to open ON, rather than live. Held
     // alongside the lightbox camera and handed to CameraPlayer once.
@@ -202,7 +239,8 @@ fun HomeScreen(
         HomeContent(
             ui = ui,
             pending = pending,
-            bucket = bucket,
+            sharedBucket = sharedBucket,
+            onOpenBucket = onOpenBucket,
             showDoorbell = showDoorbell,
             controlsEnabled = !inGrace,
             onOpenRooms = onOpenRooms,
@@ -234,7 +272,8 @@ fun HomeScreen(
 private fun HomeContent(
     ui: HomeUi,
     pending: Set<String>,
-    bucket: Long,
+    sharedBucket: Long,
+    onOpenBucket: Long,
     showDoorbell: Boolean,
     controlsEnabled: Boolean,
     onOpenRooms: () -> Unit,
@@ -289,7 +328,7 @@ private fun HomeContent(
                     rowCams.forEach { cam ->
                         CameraTile(
                             cam = cam,
-                            snapshotModel = bustCache(cam.snapshotUrl, bucket),
+                            snapshotModel = bustCache(cam.snapshotUrl, snapshotBucket(cam.isFrigate, sharedBucket, onOpenBucket)),
                             onClick = { onOpenLightbox(cam) },
                             modifier = Modifier.weight(1f),
                         )

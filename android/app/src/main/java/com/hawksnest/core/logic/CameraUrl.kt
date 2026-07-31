@@ -26,6 +26,20 @@ fun snapshotUrl(entity: HassEntity, baseUrl: String? = null): String? {
     return withBase(pic, baseUrl)
 }
 
+/**
+ * Which cache-buster a camera should use, given the two app-wide counters.
+ *
+ * `shared` ticks on the ~10s beat while the app is foregrounded; `onOpen` is that beat
+ * plus one tick per app-open. Frigate cameras take `onOpen` so a reopened app never
+ * shows the frame it was left on; Ring cameras stay on `shared`, because its proxy is
+ * metered and `hawksnest_ring_snapshot_policy` pins battery cameras to a 300s snapshot
+ * interval — refetching on open would spend a metered request for the same image.
+ *
+ * The 1:1 twin of `useSnapshotBucket` in `src/components/snapshotBucketContext.ts`.
+ */
+fun snapshotBucket(isFrigate: Boolean, shared: Long, onOpen: Long): Long =
+    if (isFrigate) onOpen else shared
+
 /** Snapshot URL with a coarse cache-buster bucket appended so an image view refetches a frame. */
 fun snapshotUrlAt(entity: HassEntity, bucket: Long, baseUrl: String? = null): String? {
     val base = snapshotUrl(entity, baseUrl) ?: return null

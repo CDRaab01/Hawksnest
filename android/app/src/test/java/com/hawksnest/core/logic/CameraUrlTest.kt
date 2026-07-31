@@ -76,3 +76,24 @@ class CameraUrlTest {
         assertFalse(isCameraLive(cam(picture = null)))
     }
 }
+
+class SnapshotBucketTest {
+    @Test
+    fun `frigate cameras use the on-open bucket`() {
+        // Refetches the moment the app is opened rather than waiting for the shared beat.
+        assertEquals(107L, snapshotBucket(isFrigate = true, shared = 105L, onOpen = 107L))
+    }
+
+    @Test
+    fun `ring cameras stay on the shared beat`() {
+        // Its proxy is metered and battery cams republish every 300s, so an extra fetch
+        // on open would buy the same image twice.
+        assertEquals(105L, snapshotBucket(isFrigate = false, shared = 105L, onOpen = 107L))
+    }
+
+    @Test
+    fun `both advance together when only the shared beat ticks`() {
+        assertEquals(106L, snapshotBucket(isFrigate = true, shared = 106L, onOpen = 106L))
+        assertEquals(106L, snapshotBucket(isFrigate = false, shared = 106L, onOpen = 106L))
+    }
+}
