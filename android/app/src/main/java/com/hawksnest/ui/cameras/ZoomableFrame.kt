@@ -1,6 +1,8 @@
 package com.hawksnest.ui.cameras
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -104,7 +106,7 @@ fun ZoomableFrame(
 @Composable
 fun FullscreenEffect(active: Boolean) {
     val view = LocalView.current
-    val activity = LocalContext.current as? Activity
+    val activity = LocalContext.current.findActivity()
 
     DisposableEffect(active, activity) {
         if (!active || activity == null) return@DisposableEffect onDispose {}
@@ -122,4 +124,20 @@ fun FullscreenEffect(active: Boolean) {
             controller.show(WindowInsetsCompat.Type.systemBars())
         }
     }
+}
+
+/**
+ * Walk the `ContextWrapper` chain to the Activity.
+ *
+ * `LocalContext.current as? Activity` is the obvious spelling and it is wrong often enough to
+ * matter: Compose hands out whatever context the composition was created under, which is
+ * frequently a `ContextThemeWrapper` around the activity rather than the activity itself. The cast
+ * then yields null and the effect does nothing at all — no rotation, no immersive mode, and no
+ * error to notice, because the null branch is the same one that legitimately handles "not hosted
+ * in an activity". That is exactly how fullscreen shipped without rotating.
+ */
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

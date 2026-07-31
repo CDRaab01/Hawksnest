@@ -15,6 +15,7 @@ import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
+import androidx.glance.action.clickable
 import androidx.glance.currentState
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Column
@@ -24,6 +25,7 @@ import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
+import androidx.glance.text.TextAlign
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.hawksnest.R
@@ -40,12 +42,15 @@ import com.hawksnest.ui.glance.PulseGlanceTheme
 import com.hawksnest.ui.glance.channelColor
 import com.hawksnest.widget.data.WidgetEntryPoint
 import com.hawksnest.widget.data.blocker
+import com.hawksnest.widget.data.entityId
 import com.hawksnest.widget.data.room
 import com.hawksnest.widget.data.snapshot
 import com.hawksnest.widget.data.tempThresholds
 import com.hawksnest.widget.ui.BlockerBody
 import com.hawksnest.widget.ui.WidgetHeader
 import com.hawksnest.widget.ui.WidgetPanel
+import com.hawksnest.widget.ui.openApp
+import com.hawksnest.widget.ui.openEntity
 import com.hawksnest.widget.ui.readAtLabel
 import kotlinx.serialization.json.Json
 
@@ -109,7 +114,15 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
         if (blocker != null) {
             BlockerBody(blocker, retry, R.drawable.ic_glyph_thermometer)
         } else {
-            Column(modifier = GlanceModifier.fillMaxWidth()) {
+            // The WHOLE panel opens the sensor's history chart, not just the title. This widget has
+            // no buttons, so there is no other gesture to collide with — and a reading with a
+            // hit-target only on its top-left corner is a worse version of being tappable at all.
+            //
+            // Read from the CONFIGURED entity, not the snapshot: the id is stored when the widget
+            // is set up, so the tap works on the very first frame, before any reading has landed.
+            // Falls back to opening the app rather than routing to a malformed `entity/` URL.
+            val open = prefs.entityId()?.let { openEntity(it) } ?: openApp()
+            Column(modifier = GlanceModifier.fillMaxWidth().clickable(open)) {
                 // The SAME header the light, lock and alarm widgets use — chip, glyph, name,
                 // accented status line. This widget used to hand-roll a plain name row, which is
                 // why it was visibly the odd one out on the home screen: no icon, no chip, a
@@ -130,16 +143,31 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
                         size.width.value.toInt(),
                         size.height.value.toInt(),
                     ),
+                    // Same destination as the panel — the header sits on top of it and would
+                    // otherwise be a hole in the middle of the tap target that went somewhere else.
+                    onClick = open,
                 )
+                // The reading is CENTRED, not left-aligned against the header.
+                //
+                // The header is a full-width row — glyph and name hard left, state hard right — so
+                // a left-aligned number underneath sat in the same column as the glyph and left a
+                // conspicuous void on the right. Centring gives the widget an axis: the header is
+                // the frame, the number is the subject. It also stops the layout shifting sideways
+                // as the reading changes width ("9.5" vs "100.5"), which a left-aligned number does
+                // on every degree.
                 Spacer(modifier = GlanceModifier.height(if (compact) 2.dp else 6.dp))
-                Row(verticalAlignment = Alignment.Bottom) {
+                Row(
+                    modifier = GlanceModifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
                     Text(
                         view.reading ?: "—",
                         style = TextStyle(
                             // The colour IS the answer, so it belongs on the number
                             // rather than a chip beside it.
                             color = bandColor(view),
-                            fontSize = if (compact) 28.sp else 40.sp,
+                            fontSize = if (compact) 30.sp else 44.sp,
                             fontWeight = FontWeight.Bold,
                         ),
                         maxLines = 1,
@@ -149,7 +177,7 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
                             view.unit,
                             style = TextStyle(
                                 color = bandColor(view),
-                                fontSize = if (compact) 13.sp else 16.sp,
+                                fontSize = if (compact) 14.sp else 17.sp,
                                 fontWeight = FontWeight.Medium,
                             ),
                             maxLines = 1,
@@ -165,9 +193,13 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
                 view.staleness?.let {
                     Text(
                         it,
+                        modifier = GlanceModifier.fillMaxWidth(),
                         style = TextStyle(
                             color = GlanceTheme.colors.onSurfaceVariant,
                             fontSize = 10.sp,
+                            // Centred to sit on the reading's axis rather than drifting back to
+                            // the left edge and reintroducing the lopsidedness.
+                            textAlign = TextAlign.Center,
                         ),
                         maxLines = 1,
                     )
@@ -176,9 +208,11 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
                     Spacer(modifier = GlanceModifier.defaultWeight())
                     Text(
                         readAtLabel(snapshot?.fetchedAtMs) ?: "",
+                        modifier = GlanceModifier.fillMaxWidth(),
                         style = TextStyle(
                             color = GlanceTheme.colors.onSurfaceVariant,
                             fontSize = 10.sp,
+                            textAlign = TextAlign.Center,
                         ),
                         maxLines = 1,
                     )
