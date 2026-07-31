@@ -254,6 +254,12 @@ fun CameraPlayer(
     var fullscreen by remember { mutableStateOf(false) }
     FullscreenEffect(fullscreen)
 
+    // Sound behaves like a video, not a phone call — see CameraAudio.kt. The rocker adjusts media
+    // volume the whole time a camera is open; focus is taken only once the owner unmutes, so
+    // merely opening a camera never interrupts what they were listening to.
+    CameraVolumeKeys()
+    CameraAudioFocus(active = !muted)
+
     val subAvailable: Boolean by produceState(false, cam.id) {
         value = runCatching { viewModel.canGo2rtc("${cameraName}_sub") }.getOrDefault(false)
     }
