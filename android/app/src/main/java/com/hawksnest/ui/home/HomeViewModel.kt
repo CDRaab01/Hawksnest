@@ -14,6 +14,7 @@ import com.hawksnest.core.logic.activeDoorbellPress
 import com.hawksnest.core.logic.alarmView
 import com.hawksnest.core.logic.groupByArea
 import com.hawksnest.core.logic.isCameraLive
+import com.hawksnest.core.logic.isFrigateCamera
 import com.hawksnest.core.logic.resolveCameras
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.core.logic.securityReadout
@@ -65,6 +66,14 @@ data class CameraUi(
     val motionId: String? = null,
     /** ring-mqtt siren switch (`switch.<base>_siren`) on siren-capable cameras, or null. */
     val sirenSwitchId: String? = null,
+    /**
+     * Whether Frigate records this camera. Drives the snapshot refresh policy: Frigate
+     * tiles refetch on every app open, Ring tiles only on the shared beat (its proxy is
+     * metered and battery cams republish every 300s, so an extra fetch buys the same
+     * image twice). See HomeScreen's bucket comment and the web twin in
+     * `snapshotBucketContext.ts`.
+     */
+    val isFrigate: Boolean = false,
 )
 
 data class HomeUi(
@@ -202,6 +211,9 @@ class HomeViewModel @Inject constructor(
                 dingId = lc.dingId,
                 motionId = lc.motionId,
                 sirenSwitchId = lc.sirenSwitchId,
+                // Judged from the LIVE entity, matching how CameraPlayer derives the recorded
+                // backend — ring-mqtt's `_snapshot` sibling carries none of Frigate's attributes.
+                isFrigate = isFrigateCamera(lc.liveEntity),
             )
         }
         val doorbell = activeDoorbellPress(logical, entities, System.currentTimeMillis())

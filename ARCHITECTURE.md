@@ -58,6 +58,18 @@ watchdog + "Connecting…" overlay for battery-camera wake, and the HLS tier res
 with a 15 s bound in `haSource`. Tile age badges use `snapshotFreshnessMs` (`timestamp` attr →
 `last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras.
 
+**Snapshot refresh is per-backend, driven by two counters, not one**
+(`components/snapshotBucketContext.ts` → `useSnapshotBucket(isFrigate)`, Kotlin twin
+`core/logic/CameraUrl.kt#snapshotBucket`). `shared` ticks on one app-wide ~10 s beat while the app
+is foregrounded, so tiles refresh together rather than on N timers and a backgrounded app stops
+polling. `onOpen` is that beat plus a tick on every app-open/foreground, and **only Frigate cameras
+ride it**: Ring's proxy is metered and `hawksnest_ring_snapshot_policy` pins battery cameras to a
+300 s snapshot interval, so refetching Ring on open spends a metered request to receive the same
+image, while a Frigate snapshot is local and current the instant it is asked for. Both counters are
+**seeded from the clock rather than 0** — starting at 0 made every session's first request
+byte-identical to the last one's, so the HTTP/Coil cache could serve an arbitrarily old opening
+frame. The seed only has to differ across sessions; increments stay monotonic within one.
+
 **Which backend holds a camera's recordings is a three-way derivation, not a boolean**
 (`lib/recordedBackend.ts` → `"ring" | "frigate" | "none"`, ported to `core/logic/RecordedBackend.kt`).
 It used to be `isRing = camera.eventSelectId !== null`, one flag standing in for three unrelated
