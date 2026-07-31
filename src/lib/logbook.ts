@@ -46,6 +46,35 @@ function messageFor(e: RawLogbookEntry): string {
  * no usable timestamp are dropped. The live source and the fixture source both
  * return this shape so the History screen is source-agnostic.
  */
+/**
+ * Most events a history feed will hold, newest first.
+ *
+ * Not a nicety — this instance records ~98,000 state rows a DAY (measured against the recorder's
+ * MariaDB), and the 30d range asked for a month of them in one unbounded `logbook/get_events`.
+ * The Android client then composed a row per event eagerly and died; nothing caught it, because
+ * an OutOfMemoryError is an `Error`, not the `Exception` the fetch guards against.
+ *
+ * 500 is far more than anyone scrolls and small enough to be free. The feed stays honest about
+ * the cut rather than pretending the day ended early — see `capLogbook`.
+ */
+export const LOGBOOK_MAX_EVENTS = 500;
+
+/** A capped feed plus whether anything was dropped, so the UI can say so. */
+export interface LogbookFeed {
+  events: LogEvent[];
+  truncated: boolean;
+}
+
+/**
+ * Keep the newest [limit] events. Separate from `normalizeLogbook` so normalization stays a pure
+ * shape change and the *policy* — how much history is worth holding — lives in one tested place
+ * shared by both platforms.
+ */
+export function capLogbook(events: LogEvent[], limit = LOGBOOK_MAX_EVENTS): LogbookFeed {
+  if (limit <= 0) return { events: [], truncated: events.length > 0 };
+  return { events: events.slice(0, limit), truncated: events.length > limit };
+}
+
 export function normalizeLogbook(raw: RawLogbookEntry[]): LogEvent[] {
   return raw
     .map((e): LogEvent => {

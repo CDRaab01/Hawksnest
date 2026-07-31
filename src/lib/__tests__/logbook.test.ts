@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { normalizeLogbook } from "../logbook";
+import {
+  LOGBOOK_MAX_EVENTS,
+  capLogbook,
+  normalizeLogbook,
+  type LogEvent,
+} from "../logbook";
 
 describe("normalizeLogbook", () => {
   it("converts epoch-second `when` to ms and sorts newest-first", () => {
@@ -28,5 +33,48 @@ describe("normalizeLogbook", () => {
 
   it("drops entries with no usable timestamp", () => {
     expect(normalizeLogbook([{ name: "no when" }])).toHaveLength(0);
+  });
+});
+
+describe("capLogbook", () => {
+  const ev = (when: number): LogEvent => ({
+    when,
+    name: "n",
+    message: "m",
+    entityId: null,
+    domain: null,
+    state: null,
+  });
+
+  it("passes a small feed through untouched and says nothing was dropped", () => {
+    const events = [ev(3), ev(2), ev(1)];
+    expect(capLogbook(events, 10)).toEqual({ events, truncated: false });
+  });
+
+  it("keeps the NEWEST events, not the oldest", () => {
+    // normalizeLogbook sorts newest-first, so the cap has to take from the front. Taking the
+    // tail would silently show a month-old window and look like history had stopped updating.
+    const events = [ev(5), ev(4), ev(3), ev(2), ev(1)];
+    const capped = capLogbook(events, 2);
+    expect(capped.events.map((e) => e.when)).toEqual([5, 4]);
+    expect(capped.truncated).toBe(true);
+  });
+
+  it("reports truncation only when something was actually dropped", () => {
+    const events = [ev(2), ev(1)];
+    expect(capLogbook(events, 2).truncated).toBe(false);
+    expect(capLogbook(events, 1).truncated).toBe(true);
+  });
+
+  it("survives a zero or negative limit without returning a partial lie", () => {
+    expect(capLogbook([ev(1)], 0)).toEqual({ events: [], truncated: true });
+    expect(capLogbook([], 0)).toEqual({ events: [], truncated: false });
+  });
+
+  it("defaults to a limit that a day of this instance's traffic would exceed", () => {
+    // ~98,000 recorder rows/day measured against the live MariaDB — the default has to be far
+    // below that or the cap is decorative.
+    expect(LOGBOOK_MAX_EVENTS).toBeLessThan(5000);
+    expect(LOGBOOK_MAX_EVENTS).toBeGreaterThan(0);
   });
 });

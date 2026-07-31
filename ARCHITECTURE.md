@@ -324,6 +324,15 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   mirroring the web) and the Devices sectioning model (`DeviceSections.kt`: per-room three-tier
   rhythm — FEATURED lock/climate/alarm cards, CONTROL rows with inline switches, READONLY rows).
 - `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
+- **The history feed is capped and lazy** (`lib/logbook.ts` ↔ `core/logic/Logbook.kt`,
+  `capLogbook`/`LOGBOOK_MAX_EVENTS`). This instance's recorder logs **~98,000 state rows a day**
+  (measured against the live MariaDB), and `logbook/get_events` was asked for up to 30 days of them
+  unbounded. Android then composed a row per event eagerly in a `Column(verticalScroll)` and the
+  app died — and nothing caught it, because an `OutOfMemoryError` is an `Error`, not the
+  `Exception` the fetch guards. Two independent fixes, both needed: the feed is capped to the 500
+  newest **after** the noise filter (so the kept events are useful ones), and the screen is a
+  `LazyColumn` so cost stops scaling with the window. The cap is honest — the screen says when it
+  truncated rather than letting the day appear to end early.
 - **Camera live ladder** (`ui/cameras/CameraPlayer.kt`): recorded VOD (when scrubbed) →
   **RTSP-direct** → **go2rtc-direct** → HA WebRTC → HLS → MJPEG → snapshot. The go2rtc-direct
   tier (`Go2rtcPlayer.kt`) negotiates recvonly WebRTC straight against the dedicated go2rtc over
@@ -357,6 +366,16 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` **only while unmuted**, so opening a camera never interrupts
   anything and unmuting ducks rather than stops it. The ExoPlayer tiers already defaulted to media
   attributes and requested no focus, so this covers every transport uniformly.
+  **Both effects resolve the Activity by walking the `ContextWrapper` chain, not
+  `LocalContext.current as? Activity`** — Compose usually hands out a `ContextThemeWrapper`, so the
+  cast returns null and the effect no-ops into the same branch that legitimately means "not in an
+  activity". That is how fullscreen shipped without ever rotating.
+- **Talk is a latch, and it is live-only** (`ui/cameras/TalkButton.kt`). A tap opens the mic and a
+  second tap closes it; hold-to-talk lost the mic whenever a finger moved. The live-only mount in
+  `CameraPlayer` is **load-bearing, not cosmetic**: unmounting the composable is what closes the
+  session, so it is the guarantee that a latched mic can never be open over recorded footage.
+  Anything that lifts this control somewhere surviving the live/recorded switch must replace that
+  guarantee with an explicit one.
 - **RTSP-direct** (`ui/cameras/RtspPlayer.kt`, `core/logic/ReolinkRtsp.kt`) — the top live tier and
   the **one place the two platforms' ladders legitimately differ**: browsers cannot play RTSP at
   any level, so web's ceiling is and stays WebRTC. This is not web lagging Android; it is a

@@ -6,7 +6,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -28,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -53,11 +52,16 @@ import org.webrtc.SessionDescription
 private enum class TalkState { IDLE, CONNECTING, TALKING, ERROR }
 
 /**
- * Push-to-talk for a Ring camera over the dedicated go2rtc (native `ring:` source — see
- * hawksnest-automation §7c). Hold the button to capture the mic and stream it to the camera's
- * back-channel; release to end. Live video keeps playing on its own, so this is a sendonly-audio
- * peer connection. Signaling rides go2rtc's WebSocket API; media is direct to go2rtc's :8555.
- * Mirrors the web `TalkButton`. [src] is the go2rtc stream name (= HA camera base).
+ * Talk to a Ring camera over the dedicated go2rtc (native `ring:` source — see
+ * hawksnest-automation §7c). **Tap to open the mic, tap again to close it** — a latch, not a hold
+ * (see the comment on the Row for why). Live video keeps playing on its own, so this is a
+ * sendonly-audio peer connection. Signaling rides go2rtc's WebSocket API; media is direct to
+ * go2rtc's :8555. Mirrors the web `TalkButton`. [src] is the go2rtc stream name (= HA camera base).
+ *
+ * **Live only.** The caller mounts this only while the camera is live, which is what guarantees a
+ * mic can never be open over recorded footage: scrubbing back unmounts the composable and the
+ * `DisposableEffect` closes the session. Do not lift this into a place that survives the live/
+ * recorded switch without replacing that guarantee with an explicit one.
  */
 @Composable
 fun TalkButton(
@@ -114,25 +118,29 @@ fun TalkButton(
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val label = when (state) {
-        TalkState.TALKING -> "Talking…"
+        TalkState.TALKING -> "Mic on"
         TalkState.CONNECTING -> "Connecting…"
         TalkState.ERROR -> "Talk failed"
-        TalkState.IDLE -> "Hold to talk"
+        TalkState.IDLE -> "Talk"
     }
 
+    // A LATCHING toggle, not press-and-hold.
+    //
+    // Hold-to-talk meant the mic died the instant a finger slipped, moved, or was interrupted —
+    // and it made the one control you might need urgently the one you had to keep still for. A
+    // tap opens the mic and a second tap closes it, which is what every call UI does and what
+    // "better control of the mic" means in practice.
+    //
+    // A latched mic has to be unmistakable, so an open mic is the only state that fills with the
+    // recovery channel and says "Mic on" outright. It also cannot outlive its context: this
+    // composable is only in the tree while the camera is LIVE, so scrubbing to recorded footage
+    // unmounts it and the DisposableEffect above closes the session. There is no path where the
+    // mic stays open over a recording.
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(6.dp))
             .background(bg)
-            .pointerInput(src) {
-                detectTapGestures(
-                    onPress = {
-                        startTalk()
-                        tryAwaitRelease()
-                        stopTalk()
-                    },
-                )
-            }
+            .clickable { if (active) stopTalk() else startTalk() }
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),

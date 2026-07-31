@@ -15,9 +15,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.hawksnest.core.logic.LOGBOOK_MAX_EVENTS
 import com.hawksnest.core.logic.LogEvent
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.SectionHeader
@@ -64,53 +66,82 @@ fun HistoryScreen(
     val feed by viewModel.feed.collectAsState()
     val pulse = HawksnestTheme.pulse
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(HawksnestTheme.spacing.lg),
+    // LAZY, not a scrolling Column.
+    //
+    // This screen used to be `Column(verticalScroll)` with a `forEach` per event, which composes
+    // every row up front. Against this instance that is not a performance nicety: the recorder
+    // logs ~98,000 state rows a DAY, so the 7d and 30d ranges asked Compose to build tens of
+    // thousands of rows in one pass and the app died. A LazyColumn composes only what is on
+    // screen, so the cost stops scaling with the window.
+    //
+    // The feed is also capped upstream (`capLogbook`) — laziness alone would still have held the
+    // whole month in memory and grouped it on every recomposition.
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(HawksnestTheme.spacing.lg),
         verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
     ) {
-        SectionHeader("Activity", channel = pulse.streak)
+        item { SectionHeader("Activity", channel = pulse.streak) }
 
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
-        ) {
-            RANGES.forEach { r ->
-                Chip(r.label, active = hours == r.hours, channel = pulse.streak) { viewModel.setHours(r.hours) }
+        item {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
+            ) {
+                RANGES.forEach { r ->
+                    Chip(r.label, active = hours == r.hours, channel = pulse.streak) { viewModel.setHours(r.hours) }
+                }
             }
         }
 
         when (val f = feed) {
-            is HistoryFeed.Loading -> HistorySkeleton()
-            is HistoryFeed.Error -> InfoCard("Couldn't load history.")
+            is HistoryFeed.Loading -> item { HistorySkeleton() }
+            is HistoryFeed.Error -> item { InfoCard("Couldn't load history.") }
             is HistoryFeed.Loaded -> {
                 val domains = presentDomains(f.events)
                 if (domains.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
-                    ) {
-                        Chip("All", active = domain == "all", channel = pulse.effort) { viewModel.setDomain("all") }
-                        domains.forEach { d ->
-                            Chip(prettyDomain(d), active = domain == d, channel = pulse.effort) { viewModel.setDomain(d) }
+                    item {
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
+                        ) {
+                            Chip("All", active = domain == "all", channel = pulse.effort) { viewModel.setDomain("all") }
+                            domains.forEach { d ->
+                                Chip(prettyDomain(d), active = domain == d, channel = pulse.effort) { viewModel.setDomain(d) }
+                            }
                         }
                     }
                 }
                 val shown = if (domain == "all") f.events else f.events.filter { it.domain == domain }
                 if (shown.isEmpty()) {
-                    InfoCard("No events in this window.")
+                    item { InfoCard("No events in this window.") }
                 } else {
                     groupByDay(shown).forEach { (label, events) ->
-                        Text(
-                            label.uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
-                        )
-                        PanelCard {
-                            events.forEach { ev -> EventRow(ev, pulse, onOpenEntity) }
+                        item(key = "day:$label") {
+                            Text(
+                                label.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
+                            )
+                        }
+                        // One item per DAY rather than per event: the day's rows share a PanelCard,
+                        // and splitting them would break the card into one panel per row. A day is
+                        // a bounded chunk, so this keeps the laziness that matters.
+                        item(key = "panel:$label") {
+                            PanelCard {
+                                events.forEach { ev -> EventRow(ev, pulse, onOpenEntity) }
+                            }
+                        }
+                    }
+                    if (f.truncated) {
+                        item {
+                            Text(
+                                "Showing the $LOGBOOK_MAX_EVENTS most recent events. " +
+                                    "Narrow the range to see further back.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
