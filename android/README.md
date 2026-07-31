@@ -59,11 +59,23 @@ should control when you drop it, and each opens the app when you tap its name.
 | **Hawksnest Light** | Tap to toggle. Dimmable lights also get −/+ buttons and a level bar. The steps are geared like a real dimmer — small near the bottom (1, 5, 10, 20…) where the eye notices, larger near the top (…65, 80, 100) where it doesn't. |
 | **Hawksnest Lock** | One tap to lock. **Two taps to unlock** — the first arms "Tap again to unlock", which lapses after five seconds. |
 | **Hawksnest Alarm** | Off / Home / Away. Arming is one tap; **disarming takes two**, the same way unlocking does. |
+| **Hawksnest Temperature** | A room's temperature, coloured blue / green / orange by two thresholds **you set when you place it**. Read-only — nothing to tap. |
 
-All three are **resizable in both directions** and arrive at three cells by one row. Squeezed to a
+All four are **resizable in both directions** and arrive at three cells by one row. Squeezed to a
 single row they switch to a compact layout — one line of text, controls filling the rest — rather
 than clipping. The lock and alarm give up their device *name* first and never the state or the time
 it was read.
+
+**Setting up a temperature widget:** drop it, pick a sensor (only entities Home Assistant marks as
+temperature are offered), then enter the two numbers — below the first is *Cold*, above the second
+is *Warm*, between them is *Comfortable*. The screen shows the sensor's current reading while you
+choose, and the numbers are in **that sensor's own unit** (°F here), because nothing converts. Each
+widget keeps its own pair, so a nursery and a garage can disagree. To change them later, long-press
+the widget and reconfigure.
+
+Unlike the lock and alarm, an **old temperature is still shown** — with "as of 22m ago" beside it.
+A room doesn't change the way a door does, so a stale reading is still worth something; a stale
+"Locked" is not.
 
 They wear the PULSE panel: lit from above, held by a hairline, and rimmed in the channel colour of
 whatever they're reporting — green edge for a locked door, orange for a jam, blue for an armed

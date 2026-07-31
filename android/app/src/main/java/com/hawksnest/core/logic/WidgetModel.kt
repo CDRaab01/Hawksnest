@@ -1,6 +1,7 @@
 package com.hawksnest.core.logic
 
 import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.ha.stringAttr
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.math.roundToInt
@@ -30,7 +31,86 @@ import kotlin.math.roundToInt
  */
 
 /** Which control a home-screen widget hosts. */
-enum class WidgetKind { LIGHT, LOCK, ALARM }
+enum class WidgetKind { LIGHT, LOCK, ALARM, TEMPERATURE }
+
+// --- temperature widget ------------------------------------------------------
+
+/**
+ * Which side of the comfortable range a reading falls on.
+ *
+ * Three bands, not five or a gradient: the widget answers one question from across
+ * a room — "is it OK in there?" — and a hard flip between three states reads at a
+ * glance where a blend does not.
+ */
+enum class TempBand { COLD, GOOD, HOT }
+
+/**
+ * Default thresholds, in the sensor's own unit, chosen for the nursery this was
+ * built for (typical guidance is roughly 68-72°F). They are only a starting point:
+ * every widget instance carries its own pair, set when it is placed.
+ *
+ * NOTE these are Fahrenheit because that is what this household's sensors report.
+ * The widget never converts — it renders whatever HA gives it, so a °C sensor with
+ * °C thresholds works identically without a unit flag anywhere in the code.
+ */
+const val WIDGET_TEMP_COLD_BELOW_DEFAULT = 68.0
+const val WIDGET_TEMP_HOT_ABOVE_DEFAULT = 72.0
+
+/**
+ * Which band [value] falls in, given the two thresholds.
+ *
+ * Boundaries are inclusive of the good range: exactly [coldBelow] is GOOD, not
+ * COLD. A threshold of "68" reads to a person as "68 is fine, 67 is not", and a
+ * sensor sitting precisely on the number shouldn't flicker between colours.
+ *
+ * [hotAbove] below [coldBelow] would make an impossible range, so the two are
+ * ordered defensively rather than trusting the config screen — a swapped pair
+ * yields a narrow GOOD band instead of a widget that is always COLD.
+ */
+fun temperatureBand(value: Double, coldBelow: Double, hotAbove: Double): TempBand {
+    val low = minOf(coldBelow, hotAbove)
+    val high = maxOf(coldBelow, hotAbove)
+    return when {
+        value < low -> TempBand.COLD
+        value > high -> TempBand.HOT
+        else -> TempBand.GOOD
+    }
+}
+
+/**
+ * The PULSE channel a band wears. Reuses the existing four-channel palette rather
+ * than inventing temperature colours, so the widget matches everything else on the
+ * home screen and picks up theme changes for free.
+ *
+ * RECOVERY (green) for good and STREAK (orange) for hot are the obvious reads.
+ * COLD takes EFFORT (blue) — the only cool channel in the palette.
+ */
+fun temperatureChannel(band: TempBand): Channel = when (band) {
+    TempBand.COLD -> Channel.EFFORT
+    TempBand.GOOD -> Channel.RECOVERY
+    TempBand.HOT -> Channel.STREAK
+}
+
+/** Short label under the reading, so the colour is never the only signal (colour
+ *  blindness, and a glance in bright sun). */
+fun temperatureLabel(band: TempBand): String = when (band) {
+    TempBand.COLD -> "Cold"
+    TempBand.GOOD -> "Comfortable"
+    TempBand.HOT -> "Warm"
+}
+
+/**
+ * The reading as displayed: one decimal at most, and never a bare ".0".
+ *
+ * HA sends temperatures as strings that may be "74.8", "74", or "unknown"; a
+ * non-numeric state returns null so the widget can say so rather than printing
+ * garbage.
+ */
+fun temperatureDisplay(state: String?): String? {
+    val v = state?.trim()?.toDoubleOrNull() ?: return null
+    val rounded = Math.round(v * 10.0) / 10.0
+    return if (rounded % 1.0 == 0.0) rounded.toInt().toString() else rounded.toString()
+}
 
 /**
  * How much room a widget has been given, and therefore how much it says.
@@ -125,6 +205,7 @@ fun widgetCandidateDomains(kind: WidgetKind): Set<String> = when (kind) {
     WidgetKind.LIGHT -> setOf("light")
     WidgetKind.LOCK -> setOf("lock")
     WidgetKind.ALARM -> setOf("alarm_control_panel")
+    WidgetKind.TEMPERATURE -> setOf("sensor")
 }
 
 /**
@@ -149,7 +230,11 @@ fun widgetCandidates(
         entity.entityId.substringBefore('.') in domains &&
             // Nothing worth pinning to a home screen; it would render "Unavailable" forever.
             entity.state != "unavailable" &&
-            isPrimaryEntity(entity.entityId, categories)
+            isPrimaryEntity(entity.entityId, categories) &&
+            // `sensor` is a huge domain — narrow it to actual thermometers, or the
+            // picker offers every battery level and fps counter in the house. The
+            // other kinds own their domain outright and need no extra filter.
+            (kind != WidgetKind.TEMPERATURE || entity.stringAttr("device_class") == "temperature")
     }
     // The household runs both the Ring integration and ring-mqtt, so a Ring light can appear
     // twice under one name. Same collapse the Devices list does.
@@ -300,6 +385,9 @@ fun widgetEchoSettled(kind: WidgetKind, before: String?, current: String): Boole
         WidgetKind.LOCK -> current !in LOCK_TRANSITIONAL
         WidgetKind.ALARM -> current !in ALARM_TRANSITIONAL
         WidgetKind.LIGHT -> true
+        // A temperature widget issues no commands, so nothing ever waits on its
+        // echo. Any change is "settled" by definition.
+        WidgetKind.TEMPERATURE -> true
     }
 }
 
@@ -411,6 +499,69 @@ data class LockWidgetView(
     /** When this reading was taken, printed beside the state so a persisted frame can't lie. */
     val readAtMs: Long?,
 )
+
+// ── Temperature ──────────────────────────────────────────────────────────────────────────────
+
+/** Everything the temperature widget draws, decided here so the Glance layer stays dumb. */
+data class TemperatureWidgetView(
+    val name: String,
+    /** The reading, already formatted — or null when there isn't a usable one. */
+    val reading: String?,
+    /** `°F` / `°C` as HA reports it; the widget never converts. */
+    val unit: String,
+    val band: TempBand?,
+    /** "Comfortable" / "Cold" / "Warm", so colour is never the only signal. */
+    val label: String,
+    val channel: Channel?,
+    /** "as of 22m ago" once the reading is old enough to be worth doubting, else null. */
+    val staleness: String?,
+)
+
+/**
+ * Unlike the lock and alarm, an expired temperature is still shown — with its age.
+ *
+ * The security widgets hide a stale reading because "Locked" when it isn't is a
+ * dangerous lie. A room's temperature does not change in the way a door does, so an
+ * hour-old 70° is still useful information as long as the widget says how old it is.
+ * That is the same call the light widget makes, and for the same reason.
+ */
+fun temperatureWidgetView(
+    snapshot: WidgetSnapshot?,
+    nowMs: Long,
+    coldBelow: Double = WIDGET_TEMP_COLD_BELOW_DEFAULT,
+    hotAbove: Double = WIDGET_TEMP_HOT_ABOVE_DEFAULT,
+): TemperatureWidgetView {
+    val name = snapshot?.name ?: "Temperature"
+    val unit = snapshot?.attributes?.get("unit_of_measurement")
+        ?.let { (it as? JsonPrimitive)?.content } ?: "°"
+    val reading = temperatureDisplay(snapshot?.state)
+    val value = snapshot?.state?.trim()?.toDoubleOrNull()
+
+    if (reading == null || value == null) {
+        return TemperatureWidgetView(
+            name = name,
+            reading = null,
+            unit = unit,
+            band = null,
+            // Distinguish "never fetched" from "HA says unknown" — the first resolves
+            // itself, the second means the sensor is asleep or gone.
+            label = if (snapshot == null) "Checking…" else "No reading",
+            channel = null,
+            staleness = null,
+        )
+    }
+
+    val band = temperatureBand(value, coldBelow, hotAbove)
+    return TemperatureWidgetView(
+        name = name,
+        reading = reading,
+        unit = unit,
+        band = band,
+        label = temperatureLabel(band),
+        channel = temperatureChannel(band),
+        staleness = stalenessLabel(snapshot.fetchedAtMs, nowMs),
+    )
+}
 
 /**
  * Unlocking is the destructive direction: in-app it costs a deliberate slide ([LockVaultView]'s

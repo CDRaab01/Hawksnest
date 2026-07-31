@@ -10,4 +10,6 @@
     <string name="widget_lock_description">Lock a door, or unlock it with a confirming second tap.</string>
     <string name="widget_alarm_label">Hawksnest Alarm</string>
     <string name="widget_alarm_description">Arm home, arm away, or disarm the alarm panel.</string>
+    <string name="widget_temperature_label">Hawksnest Temperature</string>
+    <string name="widget_temperature_description">A room\'s temperature, coloured by whether it\'s comfortable.</string>
 </resources>
