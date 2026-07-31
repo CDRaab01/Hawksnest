@@ -57,7 +57,8 @@ fun AppNavGraph(
     // so bring Home forward (from any tab) when a deep-link arrives — HomeScreen then opens
     // the camera and consumes the target. Only navigates if we're not already on Home.
     val pushCameraFlow = remember(pushNav) {
-        pushNav?.cameraTarget ?: kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+        pushNav?.cameraTarget
+            ?: kotlinx.coroutines.flow.MutableStateFlow<com.hawksnest.push.CameraTarget?>(null)
     }
     val pushCamera by pushCameraFlow.collectAsState()
     LaunchedEffect(pushCamera) {

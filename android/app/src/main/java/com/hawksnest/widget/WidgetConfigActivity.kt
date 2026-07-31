@@ -15,12 +15,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,6 +44,10 @@ import com.hawksnest.config.overrides
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.ha.stringAttr
+import com.hawksnest.core.logic.WIDGET_TEMP_COLD_BELOW_DEFAULT
+import com.hawksnest.core.logic.WIDGET_TEMP_HOT_ABOVE_DEFAULT
+import com.hawksnest.core.logic.WIDGET_TEMP_WARM_ABOVE_DEFAULT
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.blockerCopy
@@ -101,12 +111,30 @@ class WidgetConfigActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    PickerScreen(
-                        kind = kind,
-                        connectionManager = connectionManager,
-                        onPick = { entity -> save(kind, entity) },
-                        onOpenApp = { startActivity(Intent(this, MainActivity::class.java)) },
-                    )
+                    // A temperature widget needs a second step: the sensor alone
+                    // says nothing about what "comfortable" means in that room.
+                    var pendingSensor by remember { mutableStateOf<HassEntity?>(null) }
+                    val sensor = pendingSensor
+                    if (kind == WidgetKind.TEMPERATURE && sensor != null) {
+                        ThresholdScreen(
+                            sensor = sensor,
+                            name = resolveName(sensor, overrides),
+                            onBack = { pendingSensor = null },
+                            onSave = { cold, warm, hot ->
+                                save(kind, sensor, Triple(cold, warm, hot))
+                            },
+                        )
+                    } else {
+                        PickerScreen(
+                            kind = kind,
+                            connectionManager = connectionManager,
+                            onPick = { entity ->
+                                if (kind == WidgetKind.TEMPERATURE) pendingSensor = entity
+                                else save(kind, entity)
+                            },
+                            onOpenApp = { startActivity(Intent(this, MainActivity::class.java)) },
+                        )
+                    }
                 }
             }
         }
@@ -119,11 +147,17 @@ class WidgetConfigActivity : ComponentActivity() {
             provider.endsWith(LightWidgetReceiver::class.java.simpleName) -> WidgetKind.LIGHT
             provider.endsWith(LockWidgetReceiver::class.java.simpleName) -> WidgetKind.LOCK
             provider.endsWith(AlarmWidgetReceiver::class.java.simpleName) -> WidgetKind.ALARM
+            provider.endsWith(TemperatureWidgetReceiver::class.java.simpleName) ->
+                WidgetKind.TEMPERATURE
             else -> null
         }
     }
 
-    private fun save(kind: WidgetKind, entity: HassEntity) {
+    private fun save(
+        kind: WidgetKind,
+        entity: HassEntity,
+        thresholds: Triple<Double, Double, Double>? = null,
+    ) {
         lifecycleScope.launch {
             val glanceId = GlanceAppWidgetManager(this@WidgetConfigActivity).getGlanceIdBy(appWidgetId)
             WidgetEntryPoint.get(this@WidgetConfigActivity).repository().configure(
@@ -131,6 +165,7 @@ class WidgetConfigActivity : ComponentActivity() {
                 glanceId = glanceId,
                 entityId = entity.entityId,
                 name = resolveName(entity, overrides),
+                thresholds = thresholds,
             )
             setResult(Activity.RESULT_OK, resultIntent())
             finish()
@@ -195,6 +230,7 @@ private fun PickerScreen(
                 WidgetKind.LIGHT -> "Choose a light"
                 WidgetKind.LOCK -> "Choose a lock"
                 WidgetKind.ALARM -> "Choose an alarm panel"
+                WidgetKind.TEMPERATURE -> "Choose a temperature sensor"
             },
             style = MaterialTheme.typography.headlineSmall,
         )
@@ -260,6 +296,87 @@ private fun PickerScreen(
         }
     }
 }
+
+/**
+ * Where the temperature widget's two colour thresholds are set, once a sensor is picked.
+ *
+ * Prefilled with the sensor's CURRENT reading in the hint and the nursery defaults in
+ * the fields, because the useful question is "is this number OK?" and you can only
+ * answer it if you can see the number. Values are in the sensor's own unit — the
+ * widget never converts, so a °C household types °C here and everything downstream
+ * works unchanged.
+ */
+@Composable
+private fun ThresholdScreen(
+    sensor: HassEntity,
+    name: String,
+    onBack: () -> Unit,
+    onSave: (Double, Double, Double) -> Unit,
+) {
+    val unit = sensor.stringAttr("unit_of_measurement") ?: ""
+    var cold by remember { mutableStateOf(WIDGET_TEMP_COLD_BELOW_DEFAULT.toDisplay()) }
+    var warm by remember { mutableStateOf(WIDGET_TEMP_WARM_ABOVE_DEFAULT.toDisplay()) }
+    var hot by remember { mutableStateOf(WIDGET_TEMP_HOT_ABOVE_DEFAULT.toDisplay()) }
+    val coldValue = cold.trim().toDoubleOrNull()
+    val warmValue = warm.trim().toDoubleOrNull()
+    val hotValue = hot.trim().toDoubleOrNull()
+
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+        Text(name, style = MaterialTheme.typography.headlineSmall)
+        Text(
+            text = "Reads ${sensor.state}$unit right now.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Text(
+            text = "Blue below the first number, green up to the second, " +
+                "orange up to the third, red above it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 12.dp),
+        )
+        OutlinedTextField(
+            value = cold,
+            onValueChange = { cold = it },
+            label = { Text("Cold below ($unit)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        )
+        OutlinedTextField(
+            value = warm,
+            onValueChange = { warm = it },
+            label = { Text("Warm above ($unit)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        )
+        OutlinedTextField(
+            value = hot,
+            onValueChange = { hot = it },
+            label = { Text("Hot above ($unit)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextButton(onClick = onBack) { Text("Back") }
+            Button(
+                // All three must parse; the model sorts a set entered out of order,
+                // but a blank or non-numeric field would silently fall back to a
+                // default and look like the setting was ignored.
+                enabled = coldValue != null && warmValue != null && hotValue != null,
+                onClick = { onSave(coldValue!!, warmValue!!, hotValue!!) },
+            ) { Text("Save") }
+        }
+    }
+}
+
+/** Whole numbers without a trailing ".0", so the fields read like a person wrote them. */
+private fun Double.toDisplay(): String =
+    if (this % 1.0 == 0.0) toInt().toString() else toString()
 
 /**
  * How long the picker waits for the app's socket before falling back to REST. Long enough for a

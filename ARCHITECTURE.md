@@ -411,9 +411,27 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   On-device runtime (delivery with the app closed, battery, reconnect, the tap deep-link) is the
   one part unit tests can't cover — smoke-test it on the phone.
 - **Home-screen widgets** (`widget/`, Glance/RemoteViews) — a light/switch toggle with dim steps,
-  a lock, and the alarm panel's Off/Home/Away. Three `GlanceAppWidgetReceiver`s so the launcher
-  lists them separately; one shared `WidgetConfigActivity` (it learns which widget it is
-  configuring from the provider that launched it) picking an entity from `GET /api/states`.
+  a lock, the alarm panel's Off/Home/Away, and a read-only room temperature. Four
+  `GlanceAppWidgetReceiver`s so the launcher lists them separately; one shared
+  `WidgetConfigActivity` (it learns which widget it is configuring from the provider that launched
+  it) picking an entity from `GET /api/states`.
+  - **The temperature widget is the read-only one**, so none of the pending/confirm/echo machinery
+    below applies to it. It colours its reading by four bands — cold / comfortable / warm / hot —
+    split on **three thresholds stored per widget instance**, because a nursery and a garage
+    disagree about what comfortable means. Warm and hot are separate on purpose: in a nursery,
+    warm is a nudge and hot is a problem, and folding them into one orange "not ideal" would make
+    the urgent case stop reading as urgent. **Hot is the one band with no PULSE channel** — the
+    four channels are blue/violet/orange/green and none is red — so it wears the app's *error*
+    colour, on the number and on the panel rim (`widget_panel_alert`), which is the honest
+    semantic for the only state that means "deal with this now". Thresholds are entered in a second config step after the picker, in the
+    **sensor's own unit**: nothing converts, so a °C household types °C and the comparison, the
+    display and the stored pair all stay in that unit with no flag anywhere. It takes the *light's*
+    staleness stance, not the lock's — an old reading is still shown with its age, because a room's
+    temperature doesn't change the way a door does and "70° an hour ago" is still useful, whereas
+    "Locked" an hour ago is dangerous. The band also drives a word (`Comfortable`/`Cold`/`Warm`) so
+    colour is never the only signal. Its picker filters `sensor` by `device_class: temperature` —
+    without that, the huge `sensor` domain buries thermometers under every battery level and fps
+    counter in the house.
   - **They do not use the WebSocket stack, deliberately.** `HaSource` is live-socket-only — no
     on-demand fetch, no entity cache — and a widget is drawn by a broadcast into a process that
     may have just been created and will be killed again shortly. Standing up the socket (auth
@@ -605,6 +623,10 @@ change deploy files, that test is the spec**; update both together.
 - **New home-screen widget**: a `WidgetKind` + its pure view-model in `core/logic/WidgetModel.kt`,
   a `GlanceAppWidget`/`Receiver` pair in `widget/`, the `when` in `widget/WidgetKinds.kt`, an
   `appwidget-provider` XML, and a manifest receiver. The data layer is domain-agnostic already.
+  (The temperature widget is the worked example, and the exhaustive `when`s make the compiler
+  list every site you still owe.) Per-instance *settings* beyond the entity — like its two colour
+  thresholds — are extra `WidgetKeys` written by `WidgetRepository.configure`, plus a second step
+  in `WidgetConfigActivity` after the picker.
 - **HA protocol behavior**: extend `mock-ha/` first, write the failing E2E, then implement.
 - **Deploy changes**: `deploy/` + `deploy.test.ts` together.
 - **Automation-side features** (new sensors, Ring/Z-Wave config): wrong repo — that's

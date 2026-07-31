@@ -97,6 +97,38 @@ class PushRouteTest {
         )
     }
 
+    // The camera automation appends &event=<id> so a tap lands on the moment that
+    // triggered the alert rather than the live view.
+    @Test
+    fun `eventOf pulls the frigate event id from the click url`() {
+        val m = msg(click = "https://h:8443/?camera=camera.kitchen&event=1785450299.202571-j2epy2")
+        assertEquals("1785450299.202571-j2epy2", PushRoute.eventOf(m))
+        // ...and the camera must still resolve from the same URL.
+        assertEquals("camera.kitchen", PushRoute.cameraOf(m))
+    }
+
+    @Test
+    fun `eventOf handles the param appearing first`() {
+        assertEquals(
+            "abc-1",
+            PushRoute.eventOf(msg(click = "https://h/?event=abc-1&camera=camera.x")),
+        )
+    }
+
+    // Doorbell and alarm notifications carry no event — those taps open live.
+    @Test
+    fun `eventOf is null when absent`() {
+        assertNull(PushRoute.eventOf(msg(click = "https://h:8443/?camera=camera.front_door")))
+        assertNull(PushRoute.eventOf(msg(click = null)))
+    }
+
+    // An empty value must not become an empty-string event id, which would match
+    // no event and leave the player seeking nowhere.
+    @Test
+    fun `eventOf is null for an empty value`() {
+        assertNull(PushRoute.eventOf(msg(click = "https://h/?camera=camera.x&event=")))
+    }
+
     @Test
     fun `cameraOf is null when absent`() {
         assertNull(PushRoute.cameraOf(msg(click = null)))

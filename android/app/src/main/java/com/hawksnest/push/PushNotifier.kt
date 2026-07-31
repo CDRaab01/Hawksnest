@@ -110,7 +110,7 @@ class PushNotifier @Inject constructor(
                 },
             )
             .setPriority(if (msg.priority >= 4) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(contentIntent(PushRoute.cameraOf(msg)))
+            .setContentIntent(contentIntent(PushRoute.cameraOf(msg), PushRoute.eventOf(msg)))
         if (snapshot != null) {
             builder.setLargeIcon(snapshot)
                 .setStyle(
@@ -166,13 +166,19 @@ class PushNotifier @Inject constructor(
      * carries the camera id so Home opens its live view. Distinct request code per
      * camera so a doorbell PendingIntent doesn't overwrite an alarm one.
      */
-    private fun contentIntent(cameraId: String?): PendingIntent {
+    private fun contentIntent(cameraId: String?, eventId: String? = null): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         if (cameraId != null) intent.putExtra(EXTRA_CAMERA, cameraId)
+        if (eventId != null) intent.putExtra(EXTRA_EVENT, eventId)
         return PendingIntent.getActivity(
             context,
-            (cameraId ?: "home").hashCode(),
+            // The request code must vary with the EVENT too, not just the camera.
+            // FLAG_UPDATE_CURRENT only rewrites extras on a PendingIntent matching
+            // the same request code, and two alerts from one camera differ solely
+            // by event — sharing a code would make the second tap reopen the first
+            // alert's moment.
+            (listOfNotNull(cameraId ?: "home", eventId).joinToString(":")).hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -193,5 +199,9 @@ class PushNotifier @Inject constructor(
 
         /** Intent extra carrying the logical camera id a doorbell tap should open. */
         const val EXTRA_CAMERA = "com.hawksnest.push.EXTRA_CAMERA"
+
+        /** Intent extra carrying the Frigate event id a camera-alert tap should
+         *  seek to, so you land on the moment rather than the live view. */
+        const val EXTRA_EVENT = "com.hawksnest.push.EXTRA_EVENT"
     }
 }

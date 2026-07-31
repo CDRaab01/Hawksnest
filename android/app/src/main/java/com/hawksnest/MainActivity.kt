@@ -58,7 +58,11 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun handlePushIntent(intent: Intent?) {
-        intent?.getStringExtra(PushNotifier.EXTRA_CAMERA)?.let { pushNav.openCamera(it) }
+        intent?.getStringExtra(PushNotifier.EXTRA_CAMERA)?.let { cameraId ->
+            // The event is optional — doorbell/alarm taps carry none and just open
+            // the camera live, as before.
+            pushNav.openCamera(cameraId, intent.getStringExtra(PushNotifier.EXTRA_EVENT))
+        }
     }
 
     companion object {

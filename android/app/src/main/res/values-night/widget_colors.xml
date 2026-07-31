@@ -20,6 +20,8 @@
     <color name="widget_rim_effort">#734D7CFF</color>     <!-- PulseBlue -->
     <color name="widget_rim_streak">#73FF8A5C</color>     <!-- PulseOrange -->
     <color name="widget_rim_recovery">#7334D399</color>   <!-- PulseGreen -->
+    <!-- Not a channel: the temperature widget's "too hot" band, wearing the error red. -->
+    <color name="widget_rim_alert">#73FF5C5C</color>      <!-- PulseRed -->
 
     <!-- Soft channel washes at 15%: the header chip's fill and the tinted resting button. -->
     <color name="widget_soft_effort">#264D7CFF</color>    <!-- PulseBlue -->

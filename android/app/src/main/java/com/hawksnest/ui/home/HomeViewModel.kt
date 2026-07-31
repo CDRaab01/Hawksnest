@@ -96,8 +96,9 @@ class HomeViewModel @Inject constructor(
 
     private val state = connection.state
 
-    /** Camera id a tapped doorbell notification wants opened in the lightbox (or null). */
-    val pushCameraTarget: StateFlow<String?> = pushNav.cameraTarget
+    /** The camera (and, for a camera-object alert, the moment) a tapped
+     *  notification wants opened in the lightbox — or null. */
+    val pushCameraTarget: StateFlow<com.hawksnest.push.CameraTarget?> = pushNav.cameraTarget
 
     /** Clear the deep-link once HomeScreen has opened (or failed to find) the camera. */
     fun consumePushTarget() = pushNav.consume()

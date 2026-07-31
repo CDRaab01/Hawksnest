@@ -517,4 +517,114 @@ class WidgetModelTest {
         )
         assertEquals(listOf("alarm_control_panel.home"), candidates.map { it.entityId })
     }
+
+    // ── Temperature widget ────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `bands split on the three thresholds`() {
+        assertEquals(TempBand.COLD, temperatureBand(64.0, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.GOOD, temperatureBand(70.0, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.WARM, temperatureBand(74.8, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.HOT, temperatureBand(78.0, 68.0, 72.0, 77.0))
+    }
+
+    // Each boundary belongs to the CALMER band: a sensor parked exactly on 77 must
+    // not flicker between orange and red.
+    @Test
+    fun `every boundary belongs to the calmer band`() {
+        assertEquals(TempBand.GOOD, temperatureBand(68.0, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.GOOD, temperatureBand(72.0, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.WARM, temperatureBand(77.0, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.COLD, temperatureBand(67.9, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.WARM, temperatureBand(72.1, 68.0, 72.0, 77.0))
+        assertEquals(TempBand.HOT, temperatureBand(77.1, 68.0, 72.0, 77.0))
+    }
+
+    // Three fields are three chances to fat-finger the order.
+    @Test
+    fun `thresholds entered out of order still describe a usable ladder`() {
+        // Same three numbers, scrambled — the ladder must come out identical.
+        assertEquals(TempBand.COLD, temperatureBand(60.0, 77.0, 68.0, 72.0))
+        assertEquals(TempBand.GOOD, temperatureBand(70.0, 77.0, 68.0, 72.0))
+        assertEquals(TempBand.WARM, temperatureBand(75.0, 72.0, 77.0, 68.0))
+        assertEquals(TempBand.HOT, temperatureBand(80.0, 72.0, 77.0, 68.0))
+    }
+
+    @Test
+    fun `equal thresholds leave a single comfortable point rather than dividing by zero`() {
+        assertEquals(TempBand.GOOD, temperatureBand(70.0, 70.0, 70.0, 70.0))
+        assertEquals(TempBand.COLD, temperatureBand(69.9, 70.0, 70.0, 70.0))
+        assertEquals(TempBand.HOT, temperatureBand(70.1, 70.0, 70.0, 70.0))
+    }
+
+    // Colour is never the only signal — colour blindness, and a glance in bright sun.
+    @Test
+    fun `each band has its own words`() {
+        assertEquals(
+            listOf("Cold", "Comfortable", "Warm", "Hot"),
+            TempBand.entries.map { temperatureLabel(it) },
+        )
+    }
+
+    // PULSE's four channels are blue/violet/orange/green — none of them is red, so
+    // the hot band deliberately has NO channel and renders in the error colour.
+    @Test
+    fun `hot has no channel because PULSE has no red one`() {
+        assertEquals(Channel.EFFORT, temperatureChannel(TempBand.COLD))
+        assertEquals(Channel.RECOVERY, temperatureChannel(TempBand.GOOD))
+        assertEquals(Channel.STREAK, temperatureChannel(TempBand.WARM))
+        assertNull(temperatureChannel(TempBand.HOT))
+
+        assertTrue(temperatureIsAlert(TempBand.HOT))
+        assertFalse(temperatureIsAlert(TempBand.WARM))
+        assertFalse(temperatureIsAlert(TempBand.GOOD))
+        assertFalse(temperatureIsAlert(TempBand.COLD))
+    }
+
+    @Test
+    fun `the reading is trimmed to one decimal and never shows a bare point zero`() {
+        assertEquals("74.8", temperatureDisplay("74.8"))
+        assertEquals("74", temperatureDisplay("74.0"))
+        assertEquals("74", temperatureDisplay("74"))
+        assertEquals("74.8", temperatureDisplay("74.83"))
+        assertEquals("-3.5", temperatureDisplay("-3.5"))
+    }
+
+    // HA sends "unknown"/"unavailable" as ordinary states; printing them as a
+    // temperature would be worse than saying nothing.
+    @Test
+    fun `a non-numeric reading has no display value`() {
+        assertNull(temperatureDisplay("unknown"))
+        assertNull(temperatureDisplay("unavailable"))
+        assertNull(temperatureDisplay(""))
+        assertNull(temperatureDisplay(null))
+    }
+
+    // `sensor` is a huge domain — without the device_class filter the picker offers
+    // every battery level, humidity reading and fps counter in the house.
+    @Test
+    fun `the temperature picker offers thermometers only`() {
+        val candidates = widgetCandidates(
+            WidgetKind.TEMPERATURE,
+            listOf(
+                entity(
+                    "sensor.nursery_temperature_humidity_xs_sensor_air_temperature",
+                    state = "74.8", deviceClass = "temperature", unit = "°F",
+                ),
+                entity(
+                    "sensor.nursery_temperature_humidity_xs_sensor_humidity",
+                    state = "53.0", deviceClass = "humidity", unit = "%",
+                ),
+                entity(
+                    "sensor.nursery_temperature_humidity_xs_sensor_battery_level",
+                    state = "100.0", deviceClass = "battery", unit = "%",
+                ),
+                entity("sensor.big_room_camera_fps", state = "5"),
+            ),
+        )
+        assertEquals(
+            listOf("sensor.nursery_temperature_humidity_xs_sensor_air_temperature"),
+            candidates.map { it.entityId },
+        )
+    }
 }

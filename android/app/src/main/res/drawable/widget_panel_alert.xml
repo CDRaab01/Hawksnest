@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget panel with an ALERT-lit rim. See widget_panel.xml for the recipe.
+
+     The only panel not lit by a PULSE channel: the four channels are blue, violet,
+     orange and green, and none of them is red. This wears the app's error colour
+     instead, which is the right semantic for the one state that means "deal with
+     this now" rather than "here is a reading". -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:startColor="@color/widget_panel_top"
+        android:endColor="@color/widget_panel_bottom"
+        android:type="linear" />
+    <corners android:radius="20dp" />
+    <stroke android:width="1dp" android:color="@color/widget_rim_alert" />
+</shape>

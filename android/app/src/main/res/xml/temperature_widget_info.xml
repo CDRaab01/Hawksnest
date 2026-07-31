@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- See light_widget_info.xml for the sizing and refresh reasoning. This widget is
+     read-only, so it has no control row to fit and can sit happily in a single
+     launcher row — hence the same 40dp floor as the others.
+
+     minResizeHeight MUST stay below minHeight, or the launcher offers no vertical
+     resize at all (the mistake fixed in the light widget once already). -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="40dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:previewImage="@drawable/ic_glyph_thermometer"
+    android:description="@string/widget_temperature_description"
+    android:configure="com.hawksnest.widget.WidgetConfigActivity"
+    android:widgetCategory="home_screen" />

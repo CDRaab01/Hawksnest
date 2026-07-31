@@ -64,6 +64,50 @@ class CameraEventTest {
         assertNull(normalizeFrigateEvents(listOf(rawWithData(description = "   \n ")))[0].description)
     }
 
+    // Real text off the phone: descriptions generated before the Frigate prompt was
+    // fixed are multi-paragraph raw markdown, and nothing here renders markdown, so
+    // the asterisks and headings showed up literally on screen.
+    @Test
+    fun `a legacy markdown essay is flattened into one line of prose`() {
+        val essay = listOf(
+            "Based on the sequence of images, the person's behavior shows a clear",
+            "progression related to **cleaning or general household maintenance**.",
+            "",
+            "**Analysis of Actions and Movement:**",
+            "",
+            "1.  **Initial/Mid-Sequence (Frames 1-3):** The person is moving toward the",
+            "kitchen.",
+            "2.  **Late Sequence:** The movement slows slightly.",
+            "",
+            "## Conclusion on Intent",
+            "> The primary intent is to *complete a physical task*.",
+        ).joinToString("\n")
+        val ev = normalizeFrigateEvents(listOf(rawWithData(description = essay)))[0]
+        val d = ev.description!!
+
+        assertFalse(d.contains("*"))
+        assertFalse(d.contains("#"))
+        assertFalse(d.contains(">"))
+        assertFalse(d.contains("\n"))
+        assertTrue(d.contains("cleaning or general household maintenance"))
+        assertTrue(d.contains("Initial/Mid-Sequence (Frames 1-3):"))
+    }
+
+    @Test
+    fun `an already-plain sentence is left untouched`() {
+        val plain = "A person walks through the kitchen carrying towels."
+        assertEquals(
+            plain,
+            normalizeFrigateEvents(listOf(rawWithData(description = plain)))[0].description,
+        )
+    }
+
+    // Markup that is ALL syntax must collapse to absent, not to an empty string.
+    @Test
+    fun `description is null when it is nothing but markup`() {
+        assertNull(normalizeFrigateEvents(listOf(rawWithData(description = "**  **")))[0].description)
+    }
+
     @Test
     fun `description is trimmed`() {
         assertEquals(

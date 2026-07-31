@@ -106,12 +106,17 @@ private fun openConfig(): Action {
 fun WidgetPanel(
     compact: Boolean = false,
     accent: Channel? = null,
+    /** Light the rim in the error red instead of a channel. PULSE has no red
+     *  channel, and the one state that means "deal with this now" rather than
+     *  "here is a reading" should not have to borrow orange. Wins over [accent]. */
+    alert: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val panel = when (accent) {
-        Channel.EFFORT -> R.drawable.widget_panel_effort
-        Channel.STREAK -> R.drawable.widget_panel_streak
-        Channel.RECOVERY -> R.drawable.widget_panel_recovery
+    val panel = when {
+        alert -> R.drawable.widget_panel_alert
+        accent == Channel.EFFORT -> R.drawable.widget_panel_effort
+        accent == Channel.STREAK -> R.drawable.widget_panel_streak
+        accent == Channel.RECOVERY -> R.drawable.widget_panel_recovery
         else -> R.drawable.widget_panel
     }
     Column(

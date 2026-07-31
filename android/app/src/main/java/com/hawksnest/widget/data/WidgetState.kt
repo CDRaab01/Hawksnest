@@ -2,8 +2,12 @@ package com.hawksnest.widget.data
 
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.hawksnest.core.logic.WIDGET_TEMP_COLD_BELOW_DEFAULT
+import com.hawksnest.core.logic.WIDGET_TEMP_HOT_ABOVE_DEFAULT
+import com.hawksnest.core.logic.WIDGET_TEMP_WARM_ABOVE_DEFAULT
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetSnapshot
 import kotlinx.serialization.json.Json
@@ -43,7 +47,27 @@ internal object WidgetKeys {
 
     /** The last [WidgetBlocker], by name, or absent when the last fetch succeeded. */
     val BLOCKER = stringPreferencesKey("blocker")
+
+    /**
+     * The temperature widget's three colour thresholds, in the SENSOR'S OWN UNIT.
+     *
+     * Per widget instance, not global: a nursery and a garage want different
+     * answers to "is this OK?", and Glance already files these per `GlanceId`.
+     * Stored as doubles so a °C household can use 20.5 without a second format.
+     */
+    val TEMP_COLD_BELOW = doublePreferencesKey("temp_cold_below")
+    val TEMP_WARM_ABOVE = doublePreferencesKey("temp_warm_above")
+    val TEMP_HOT_ABOVE = doublePreferencesKey("temp_hot_above")
 }
+
+/** Thresholds for this widget, each falling back to its default independently — so a
+ *  widget placed before the "hot" band existed keeps its own cold/warm numbers and
+ *  simply gains a sensible hot one, rather than being reset to all three defaults. */
+internal fun Preferences.tempThresholds(): Triple<Double, Double, Double> = Triple(
+    this[WidgetKeys.TEMP_COLD_BELOW] ?: WIDGET_TEMP_COLD_BELOW_DEFAULT,
+    this[WidgetKeys.TEMP_WARM_ABOVE] ?: WIDGET_TEMP_WARM_ABOVE_DEFAULT,
+    this[WidgetKeys.TEMP_HOT_ABOVE] ?: WIDGET_TEMP_HOT_ABOVE_DEFAULT,
+)
 
 internal fun Preferences.entityId(): String? = this[WidgetKeys.ENTITY_ID]
 
