@@ -119,9 +119,13 @@ class WidgetConfigActivity : ComponentActivity() {
                         ThresholdScreen(
                             sensor = sensor,
                             name = resolveName(sensor, overrides),
+                            // HA's own area for this sensor, prefilled and editable. Resolved
+                            // HERE because this screen has the app's socket; the widget itself
+                            // speaks REST, which cannot read the area registry at all.
+                            suggestedRoom = connectionManager.state.areas.value[sensor.entityId],
                             onBack = { pendingSensor = null },
-                            onSave = { cold, warm, hot ->
-                                save(kind, sensor, Triple(cold, warm, hot))
+                            onSave = { cold, warm, hot, room ->
+                                save(kind, sensor, Triple(cold, warm, hot), room)
                             },
                         )
                     } else {
@@ -157,6 +161,7 @@ class WidgetConfigActivity : ComponentActivity() {
         kind: WidgetKind,
         entity: HassEntity,
         thresholds: Triple<Double, Double, Double>? = null,
+        room: String? = null,
     ) {
         lifecycleScope.launch {
             val glanceId = GlanceAppWidgetManager(this@WidgetConfigActivity).getGlanceIdBy(appWidgetId)
@@ -166,6 +171,9 @@ class WidgetConfigActivity : ComponentActivity() {
                 entityId = entity.entityId,
                 name = resolveName(entity, overrides),
                 thresholds = thresholds,
+                // Not derived from the entity at save time: for widgets other than temperature
+                // this is null, and the picker path has no room step.
+                room = room ?: connectionManager.state.areas.value[entity.entityId],
             )
             setResult(Activity.RESULT_OK, resultIntent())
             finish()
@@ -310,10 +318,14 @@ private fun PickerScreen(
 private fun ThresholdScreen(
     sensor: HassEntity,
     name: String,
+    suggestedRoom: String?,
     onBack: () -> Unit,
-    onSave: (Double, Double, Double) -> Unit,
+    onSave: (Double, Double, Double, String) -> Unit,
 ) {
     val unit = sensor.stringAttr("unit_of_measurement") ?: ""
+    // Prefilled from HA's area and editable, because the area registry is not always populated
+    // and "which room is this" is a question the owner can always answer even when HA cannot.
+    var room by remember { mutableStateOf(suggestedRoom.orEmpty()) }
     var cold by remember { mutableStateOf(WIDGET_TEMP_COLD_BELOW_DEFAULT.toDisplay()) }
     var warm by remember { mutableStateOf(WIDGET_TEMP_WARM_ABOVE_DEFAULT.toDisplay()) }
     var hot by remember { mutableStateOf(WIDGET_TEMP_HOT_ABOVE_DEFAULT.toDisplay()) }
@@ -329,12 +341,32 @@ private fun ThresholdScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
         )
+        OutlinedTextField(
+            value = room,
+            onValueChange = { room = it },
+            label = { Text("Room") },
+            placeholder = { Text("Nursery") },
+            supportingText = {
+                Text(
+                    if (suggestedRoom != null) {
+                        "From Home Assistant. This is what the widget will be called."
+                    } else {
+                        // Not an error: plenty of HA installs never assign areas. Say what it
+                        // costs so the empty field reads as a choice rather than a failure.
+                        "Home Assistant has no area for this sensor. Leave blank to use its " +
+                            "own name instead."
+                    },
+                )
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        )
         Text(
             text = "Blue below the first number, green up to the second, " +
                 "orange up to the third, red above it.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 12.dp),
+            modifier = Modifier.padding(top = 16.dp),
         )
         OutlinedTextField(
             value = cold,
@@ -368,7 +400,7 @@ private fun ThresholdScreen(
                 // but a blank or non-numeric field would silently fall back to a
                 // default and look like the setting was ignored.
                 enabled = coldValue != null && warmValue != null && hotValue != null,
-                onClick = { onSave(coldValue!!, warmValue!!, hotValue!!) },
+                onClick = { onSave(coldValue!!, warmValue!!, hotValue!!, room) },
             ) { Text("Save") }
         }
     }

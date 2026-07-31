@@ -33,15 +33,18 @@ import com.hawksnest.core.logic.WIDGET_NAME_MIN_WIDTH_DP
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.TemperatureWidgetView
 import com.hawksnest.core.logic.WidgetSizeTier
+import com.hawksnest.core.logic.compactNamePlacement
 import com.hawksnest.core.logic.sizeTier
 import com.hawksnest.core.logic.temperatureWidgetView
 import com.hawksnest.ui.glance.PulseGlanceTheme
 import com.hawksnest.ui.glance.channelColor
 import com.hawksnest.widget.data.WidgetEntryPoint
 import com.hawksnest.widget.data.blocker
+import com.hawksnest.widget.data.room
 import com.hawksnest.widget.data.snapshot
 import com.hawksnest.widget.data.tempThresholds
 import com.hawksnest.widget.ui.BlockerBody
+import com.hawksnest.widget.ui.WidgetHeader
 import com.hawksnest.widget.ui.WidgetPanel
 import com.hawksnest.widget.ui.readAtLabel
 import kotlinx.serialization.json.Json
@@ -95,6 +98,7 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
         coldBelow = coldBelow,
         warmAbove = warmAbove,
         hotAbove = hotAbove,
+        room = prefs.room(),
     )
     val retry = actionRunCallback<WidgetRefreshAction>(widgetParams(WidgetKind.TEMPERATURE))
 
@@ -106,14 +110,26 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
             BlockerBody(blocker, retry, R.drawable.ic_glyph_thermometer)
         } else {
             Column(modifier = GlanceModifier.fillMaxWidth()) {
-                Text(
-                    view.name,
-                    style = TextStyle(
-                        color = GlanceTheme.colors.onSurface,
-                        fontSize = if (compact) 11.sp else 12.sp,
-                        fontWeight = FontWeight.Medium,
+                // The SAME header the light, lock and alarm widgets use — chip, glyph, name,
+                // accented status line. This widget used to hand-roll a plain name row, which is
+                // why it was visibly the odd one out on the home screen: no icon, no chip, a
+                // different type scale. Nothing here is temperature-specific except the glyph and
+                // the band word, so there was never a reason to draw it separately.
+                //
+                // `note` is deliberately null: unlike a lock, this widget prints its own age only
+                // when the reading is genuinely old (`view.staleness`), and stamping every frame
+                // with a read time would train the eye to ignore the one that matters.
+                WidgetHeader(
+                    name = view.name,
+                    detail = view.label,
+                    icon = R.drawable.ic_glyph_thermometer,
+                    accent = view.channel,
+                    compact = compact,
+                    namePlacement = compactNamePlacement(
+                        WidgetKind.TEMPERATURE,
+                        size.width.value.toInt(),
+                        size.height.value.toInt(),
                     ),
-                    maxLines = 1,
                 )
                 Spacer(modifier = GlanceModifier.height(if (compact) 2.dp else 6.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
@@ -140,16 +156,10 @@ private fun TemperatureBody(prefs: Preferences, json: Json) {
                         )
                     }
                 }
-                // Words as well as colour: colour blindness, and a glance in sunlight.
-                Text(
-                    view.label,
-                    style = TextStyle(
-                        color = bandColor(view),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                    ),
-                    maxLines = 1,
-                )
+                // The band word is NOT repeated here — WidgetHeader already prints it, accented,
+                // as the status line. Words as well as colour is still satisfied (colour
+                // blindness, a glance in sunlight); it is simply said once.
+                //
                 // Only ever printed when the reading is genuinely old — an
                 // always-on timestamp would train the eye to ignore it.
                 view.staleness?.let {

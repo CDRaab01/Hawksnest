@@ -32,6 +32,16 @@ internal object WidgetKeys {
     /** Resolved display name, cached so the widget has a title before its first fetch lands. */
     val NAME = stringPreferencesKey("name")
 
+    /**
+     * The area the entity is in, resolved from HA's registries when the widget was configured.
+     *
+     * Stored rather than looked up because the widget process only speaks REST and HA exposes the
+     * area registry over the WebSocket only — see `temperatureTitle`. Absent for widgets placed
+     * before this existed, and for entities HA has not assigned to an area; both fall back to the
+     * entity name rather than showing a blank title.
+     */
+    val ROOM = stringPreferencesKey("room")
+
     val STATE = stringPreferencesKey("state")
     val ATTRIBUTES = stringPreferencesKey("attributes")
 
@@ -70,6 +80,9 @@ internal fun Preferences.tempThresholds(): Triple<Double, Double, Double> = Trip
 )
 
 internal fun Preferences.entityId(): String? = this[WidgetKeys.ENTITY_ID]
+
+/** The configured room, or null when HA had no area for the entity (or the widget predates it). */
+internal fun Preferences.room(): String? = this[WidgetKeys.ROOM]?.takeIf { it.isNotBlank() }
 
 internal fun Preferences.blocker(): WidgetBlocker? =
     this[WidgetKeys.BLOCKER]?.let { name -> WidgetBlocker.entries.firstOrNull { it.name == name } }
