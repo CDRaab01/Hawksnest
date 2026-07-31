@@ -5,6 +5,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /** Ports the web `logbook.test.ts` suite 1:1 (HA payload → normalized, newest-first events). */
 class LogbookTest {
@@ -48,5 +50,44 @@ class LogbookTest {
     @Test
     fun `drops entries with no usable timestamp`() {
         assertEquals(0, normalizeLogbook(entries("""[{"name": "no when"}]""")).size)
+    }
+
+    // ── The cap that stops a month of logbook taking the app down ─────────────────────────────
+
+    private fun ev(t: Long) = LogEvent(t, "n", "m", null, null, null)
+
+    @Test
+    fun `passes a small feed through untouched and says nothing was dropped`() {
+        val events = listOf(ev(3), ev(2), ev(1))
+        assertEquals(LogbookFeed(events, false), capLogbook(events, 10))
+    }
+
+    @Test
+    fun `keeps the NEWEST events, not the oldest`() {
+        // normalizeLogbook sorts newest-first, so the cap has to take from the front. Taking the
+        // tail would silently show a month-old window and look like history stopped updating.
+        val capped = capLogbook(listOf(ev(5), ev(4), ev(3), ev(2), ev(1)), 2)
+        assertEquals(listOf(5L, 4L), capped.events.map { it.timeMs })
+        assertTrue(capped.truncated)
+    }
+
+    @Test
+    fun `reports truncation only when something was actually dropped`() {
+        val events = listOf(ev(2), ev(1))
+        assertFalse(capLogbook(events, 2).truncated)
+        assertTrue(capLogbook(events, 1).truncated)
+    }
+
+    @Test
+    fun `survives a zero limit without returning a partial lie`() {
+        assertEquals(LogbookFeed(emptyList(), true), capLogbook(listOf(ev(1)), 0))
+        assertEquals(LogbookFeed(emptyList(), false), capLogbook(emptyList(), 0))
+    }
+
+    @Test
+    fun `default limit is far below a single day of this instance's traffic`() {
+        // ~98,000 recorder rows/day measured against the live MariaDB — the default has to be far
+        // below that or the cap is decorative.
+        assertTrue(LOGBOOK_MAX_EVENTS in 1 until 5000)
     }
 }

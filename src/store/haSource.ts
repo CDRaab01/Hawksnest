@@ -11,7 +11,7 @@ import {
 import { useEntityStore } from "./entityStore";
 import type { HistoryPoint, Source, WebRtcSignal } from "./source";
 import type { AutomationConfig } from "../lib/automations";
-import { normalizeLogbook, type LogEvent, type RawLogbookEntry } from "../lib/logbook";
+import { capLogbook, normalizeLogbook, type LogEvent, type RawLogbookEntry } from "../lib/logbook";
 import {
   normalizeFrigateEvents,
   parseFrigateWsEvents,
@@ -103,7 +103,10 @@ async function fetchLogbook(
     ...(entityIds && entityIds.length > 0 ? { entity_ids: entityIds } : {}),
   };
   const raw = await conn.sendMessagePromise<RawLogbookEntry[]>(msg);
-  return normalizeLogbook(raw ?? []);
+  // Capped here rather than in the screen: this instance records ~98,000 state rows a day, so the
+  // 30d range is a month of them in one response. The Android twin died rendering that (see
+  // `capLogbook`); web survived it but was doing the same unbounded work.
+  return capLogbook(normalizeLogbook(raw ?? [])).events;
 }
 
 function describeError(err: unknown): string {

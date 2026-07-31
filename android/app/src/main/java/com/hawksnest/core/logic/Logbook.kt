@@ -25,6 +25,33 @@ data class LogEvent(
     val state: String?,
 )
 
+/**
+ * Most events a history feed will hold, newest first.
+ *
+ * Not a nicety — this instance records ~98,000 state rows a DAY (measured against the recorder's
+ * MariaDB), and the 30d range asked for a month of them in one unbounded `logbook/get_events`.
+ * The screen then composed a row per event eagerly in a plain scrolling Column and died; nothing
+ * caught it, because an OutOfMemoryError is an `Error`, not the `Exception` the fetch guards
+ * against.
+ *
+ * 500 is far more than anyone scrolls and small enough to be free. The feed stays honest about
+ * the cut rather than pretending the day ended early — see [capLogbook].
+ */
+const val LOGBOOK_MAX_EVENTS = 500
+
+/** A capped feed plus whether anything was dropped, so the UI can say so. */
+data class LogbookFeed(val events: List<LogEvent>, val truncated: Boolean)
+
+/**
+ * Keep the newest [limit] events. Separate from [normalizeLogbook] so normalization stays a pure
+ * shape change and the *policy* — how much history is worth holding — lives in one tested place
+ * shared by both platforms.
+ */
+fun capLogbook(events: List<LogEvent>, limit: Int = LOGBOOK_MAX_EVENTS): LogbookFeed {
+    if (limit <= 0) return LogbookFeed(emptyList(), events.isNotEmpty())
+    return LogbookFeed(events.take(limit), events.size > limit)
+}
+
 private fun JsonObject.prim(key: String): JsonPrimitive? = this[key] as? JsonPrimitive
 private fun JsonObject.str(key: String): String? = prim(key)?.contentOrNull
 

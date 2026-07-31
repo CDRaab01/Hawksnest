@@ -462,6 +462,10 @@ fun CameraPlayer(
             MuteButton(muted = muted, onToggle = { muted = !muted })
             FullscreenButton(active = fullscreen, onToggle = { fullscreen = !fullscreen })
             SnapshotButton(snapshotUrl = cam.snapshotUrl, cameraName = cameraName)
+            // LIVE ONLY, and the gate is load-bearing rather than cosmetic: TalkButton latches the
+            // mic open until tapped again, and unmounting it is what closes the session. Offering
+            // it over recorded footage would be both meaningless (there is nothing to talk to) and
+            // the one way a mic could stay open with no live camera on screen.
             if (isRing && isLive) {
                 TalkButton(cameraName, viewModel)
             }

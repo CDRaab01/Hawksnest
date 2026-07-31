@@ -3,7 +3,9 @@ package com.hawksnest.ui.history
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hawksnest.core.ha.ConnectionManager
+import com.hawksnest.core.logic.LOGBOOK_MAX_EVENTS
 import com.hawksnest.core.logic.LogEvent
+import com.hawksnest.core.logic.capLogbook
 import com.hawksnest.core.logic.isPrimaryEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,7 +20,8 @@ import javax.inject.Inject
 sealed interface HistoryFeed {
     data object Loading : HistoryFeed
     data object Error : HistoryFeed
-    data class Loaded(val events: List<LogEvent>) : HistoryFeed
+    /** [truncated] when the window held more than [LOGBOOK_MAX_EVENTS] — the screen says so. */
+    data class Loaded(val events: List<LogEvent>, val truncated: Boolean = false) : HistoryFeed
 }
 
 /**
@@ -62,8 +65,13 @@ class HistoryViewModel @Inject constructor(
             val categories = connection.state.entityCategories.value
             val events = connection.fetchLogbook(start, end)
                 .filter { it.entityId == null || isPrimaryEntity(it.entityId!!, categories) }
-            HistoryFeed.Loaded(events)
+            // Capped AFTER the noise filter, so the 500 kept are 500 useful ones rather than
+            // 500 battery/last-activity updates that would have been thrown away anyway.
+            val feed = capLogbook(events)
+            HistoryFeed.Loaded(feed.events, feed.truncated)
         } catch (_: Exception) {
+            // Note this cannot catch an OutOfMemoryError — that is an Error, not an Exception, and
+            // is exactly how the unbounded version took the app down rather than showing this.
             HistoryFeed.Error
         }
     }
