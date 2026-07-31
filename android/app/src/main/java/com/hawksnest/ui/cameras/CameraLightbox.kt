@@ -36,6 +36,8 @@ fun CameraLightbox(
     cameras: List<CameraUi>,
     initial: CameraUi,
     onDismiss: () -> Unit,
+    /** Frigate event to open on, from a tapped camera alert. Null = open live. */
+    initialEventId: String? = null,
     viewModel: CameraPlayerViewModel = hiltViewModel(),
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -51,6 +53,10 @@ fun CameraLightbox(
                 cam = current,
                 cameras = cameras.ifEmpty { listOf(initial) },
                 onSelectCamera = { current = it },
+                // Only honour the deep-linked event on the camera the tap named —
+                // switching cameras inside the lightbox should land live, not on an
+                // unrelated camera's timeline at that timestamp.
+                initialEventId = initialEventId.takeIf { current.id == initial.id },
                 viewModel = viewModel,
                 modifier = Modifier
                     .fillMaxWidth()

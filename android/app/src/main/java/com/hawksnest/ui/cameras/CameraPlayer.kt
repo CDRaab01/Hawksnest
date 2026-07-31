@@ -78,6 +78,8 @@ fun CameraPlayer(
     cameras: List<CameraUi>,
     onSelectCamera: (CameraUi) -> Unit,
     viewModel: CameraPlayerViewModel,
+    /** Frigate event to open on, from a tapped camera alert. Null = open live. */
+    initialEventId: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val cameraName = cameraNameOf(cam.id)
@@ -180,6 +182,22 @@ fun CameraPlayer(
     val events: List<CameraEvent> = timeline?.events ?: fallbackEvents
     // null playhead = live; reset to live whenever the camera changes.
     var playhead by remember(cam.id) { mutableStateOf<Long?>(null) }
+
+    // Deep-linked from a tapped camera alert: seek to the moment that triggered it.
+    // Events arrive asynchronously, so this waits for the list and fires ONCE —
+    // keyed on the event so a later camera switch or refetch can't yank the
+    // playhead back, and guarded so an event that isn't in the window (aged out of
+    // retention, wrong camera) simply leaves the player live rather than seeking to
+    // a fabricated time.
+    var deepLinkSeeked by remember(cam.id, initialEventId) { mutableStateOf(false) }
+    LaunchedEffect(initialEventId, events, deepLinkSeeked) {
+        if (initialEventId == null || deepLinkSeeked || events.isEmpty()) return@LaunchedEffect
+        events.firstOrNull { it.id == initialEventId }?.let { ev ->
+            playhead = ev.startMs
+            deepLinkSeeked = true
+        }
+    }
+
     var paused by remember(cam.id) { mutableStateOf(false) }
     // True while a timeline drag is in flight — clip switches debounce against it.
     var scrubbing by remember(cam.id) { mutableStateOf(false) }

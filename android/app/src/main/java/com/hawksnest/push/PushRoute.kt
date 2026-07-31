@@ -51,11 +51,24 @@ object PushRoute {
      * (the id is `camera.<base>`, matching `CameraUi.id`); a tap deep-links straight
      * to that camera's live view. Absent/unparseable → null (fall back to Home).
      */
-    fun cameraOf(msg: NtfyMessage): String? {
+    fun cameraOf(msg: NtfyMessage): String? = queryParam(msg, "camera")
+
+    /**
+     * The Frigate event id a tap should land on, or null.
+     *
+     * The camera-object automation appends `&event=<id>` so a tap opens the moment
+     * that actually triggered the alert rather than the live view — by the time you
+     * look at your phone, whatever it saw has usually moved on. Doorbell and alarm
+     * notifications carry no event, so this is null for them and the tap still just
+     * opens the camera.
+     */
+    fun eventOf(msg: NtfyMessage): String? = queryParam(msg, "event")
+
+    /** Read a query value out of the `click` URL without android.net.Uri, so this
+     *  stays pure and JVM-testable. Stops at the next `&`. */
+    private fun queryParam(msg: NtfyMessage, name: String): String? {
         val click = msg.click ?: return null
-        // Grab the `camera` query value without needing android.net.Uri (keeps this
-        // pure/JVM-testable). Matches `?camera=x` or `&camera=x`, stops at the next `&`.
-        val raw = Regex("[?&]camera=([^&\\s]+)").find(click)?.groupValues?.get(1) ?: return null
+        val raw = Regex("[?&]$name=([^&\\s]+)").find(click)?.groupValues?.get(1) ?: return null
         val decoded = runCatching { URLDecoder.decode(raw.replace("+", "%20"), "UTF-8") }
             .getOrDefault(raw)
         return decoded.takeIf { it.isNotBlank() }

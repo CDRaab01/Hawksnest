@@ -7,6 +7,15 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * What a tapped notification wants opened: a camera, and optionally the exact
+ * moment that triggered the alert.
+ *
+ * [eventId] is a Frigate event id carried in the notification's `click` URL. Null
+ * for a doorbell/alarm tap, which has no single moment to land on.
+ */
+data class CameraTarget(val cameraId: String, val eventId: String? = null)
+
+/**
  * A tiny app-scoped bus for "a tapped notification wants to open camera X".
  *
  * A notification tap can't just carry a nav route because a specific camera opens
@@ -18,12 +27,12 @@ import javax.inject.Singleton
  */
 @Singleton
 class PushNav @Inject constructor() {
-    private val _cameraTarget = MutableStateFlow<String?>(null)
-    /** Logical camera id (`camera.<base>`) a tap wants opened, or null. */
-    val cameraTarget: StateFlow<String?> = _cameraTarget.asStateFlow()
+    private val _cameraTarget = MutableStateFlow<CameraTarget?>(null)
+    /** The camera (and optional moment) a tap wants opened, or null. */
+    val cameraTarget: StateFlow<CameraTarget?> = _cameraTarget.asStateFlow()
 
-    fun openCamera(cameraId: String) {
-        _cameraTarget.value = cameraId
+    fun openCamera(cameraId: String, eventId: String? = null) {
+        _cameraTarget.value = CameraTarget(cameraId, eventId)
     }
 
     fun consume() {

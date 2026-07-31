@@ -97,8 +97,11 @@ fun HomeScreen(
         }
     }
     var lightbox by remember { mutableStateOf<CameraUi?>(null) }
+    // Frigate event the tap wants the player to open ON, rather than live. Held
+    // alongside the lightbox camera and handed to CameraPlayer once.
+    var lightboxEventId by remember { mutableStateOf<String?>(null) }
 
-    // Deep-link from a tapped doorbell notification: open that camera's lightbox once the
+    // Deep-link from a tapped notification: open that camera's lightbox once the
     // camera list has loaded. Consume it either way so it fires exactly once (a not-yet-known
     // camera just lands on Home rather than looping).
     val pushCamera by viewModel.pushCameraTarget.collectAsState()
@@ -107,7 +110,11 @@ fun HomeScreen(
         // Wait for the camera list before acting; once we can, open the match (if any)
         // and consume so it fires exactly once (unknown camera → just lands on Home).
         if (target != null && ui.cameras.isNotEmpty()) {
-            ui.cameras.firstOrNull { it.id == target }?.let { lightbox = it }
+            ui.cameras.firstOrNull { it.id == target.cameraId }?.let {
+                lightbox = it
+                // Null for doorbell/alarm taps — those open live, as before.
+                lightboxEventId = target.eventId
+            }
             viewModel.consumePushTarget()
         }
     }
@@ -210,7 +217,11 @@ fun HomeScreen(
         CameraLightbox(
             cameras = ui.cameras,
             initial = cam,
-            onDismiss = { lightbox = null },
+            initialEventId = lightboxEventId,
+            onDismiss = {
+                lightbox = null
+                lightboxEventId = null
+            },
         )
     }
 }
