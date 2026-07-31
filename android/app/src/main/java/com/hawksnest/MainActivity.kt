@@ -36,6 +36,9 @@ class MainActivity : FragmentActivity() {
         // A widget whose problem the owner can only fix in Settings (no token, token rejected)
         // opens straight there rather than dropping them on Home to find it.
         val start = intent?.getStringExtra(EXTRA_START_ROUTE) ?: Screen.Home.route
+        // A temperature widget tap opens that sensor's history chart. Carried as a bare entity id
+        // rather than a route because it is navigated TO rather than started AT — see AppNavGraph.
+        val openEntity = intent?.getStringExtra(EXTRA_OPEN_ENTITY)
         setContent {
             // Dark-first OLED instrument panel; follows the system day/night setting for now.
             HawksnestTheme {
@@ -43,7 +46,11 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    AppNavGraph(startDestination = start, pushNav = pushNav)
+                    AppNavGraph(
+                        startDestination = start,
+                        openEntityId = openEntity,
+                        pushNav = pushNav,
+                    )
                 }
             }
         }
@@ -68,5 +75,8 @@ class MainActivity : FragmentActivity() {
     companion object {
         /** Nav route to open on launch, set by the home-screen widgets' error states. */
         const val EXTRA_START_ROUTE = "com.hawksnest.START_ROUTE"
+
+        /** Entity id whose detail + history chart to open, set by the temperature widget's tap. */
+        const val EXTRA_OPEN_ENTITY = "com.hawksnest.OPEN_ENTITY"
     }
 }

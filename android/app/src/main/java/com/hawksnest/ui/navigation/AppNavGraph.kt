@@ -11,7 +11,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -45,10 +48,30 @@ private val bottomBarRoutes = TopLevelDestination.entries.map { it.route }.toSet
 @Composable
 fun AppNavGraph(
     startDestination: String = Screen.Home.route,
+    /**
+     * An entity to open on top of the start destination — a temperature widget tap, which lands on
+     * that sensor's history chart.
+     *
+     * Deliberately NOT passed as [startDestination]. `Screen.Entity.route` carries an argument, and
+     * NavHost resolves a start destination by exact route match, so a filled-in `entity/sensor.foo`
+     * would not find the `entity/{entityId}` node. Navigating instead is both correct and better:
+     * Home stays underneath, so back returns to the app rather than straight out to the launcher.
+     */
+    openEntityId: String? = null,
     pushNav: com.hawksnest.push.PushNav? = null,
     feedback: ControlFeedbackViewModel = hiltViewModel(),
 ) {
     val navController = rememberNavController()
+
+    // One-shot: `rememberSaveable` survives the recomposition and configuration changes that would
+    // otherwise re-run this and stack a second copy of the same screen.
+    var deepLinkConsumed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(openEntityId) {
+        if (openEntityId != null && !deepLinkConsumed) {
+            deepLinkConsumed = true
+            navController.navigate(Screen.Entity.createRoute(openEntityId))
+        }
+    }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val showBottomBar = currentRoute in bottomBarRoutes

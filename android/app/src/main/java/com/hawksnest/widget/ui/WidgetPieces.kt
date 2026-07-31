@@ -68,6 +68,26 @@ private val CONTROL_HEIGHT = 52.dp
 /** Opens the app. Every widget offers this on its title, so a tap always leads somewhere. */
 fun openApp(): Action = actionStartActivity<MainActivity>()
 
+/**
+ * Opens the app on one entity's detail screen — the live card plus its state-history chart with
+ * the 6h/24h/7d/30d toggle.
+ *
+ * This is what a *read-only* widget's tap should do. The control widgets have somewhere obvious to
+ * go and something to do on the widget itself; a temperature widget's only follow-up question is
+ * "and what has it been doing?", which is precisely the screen that already answers it. Landing on
+ * Home instead made the reading a dead end.
+ */
+@Composable
+fun openEntity(entityId: String): Action = actionStartActivity(
+    Intent(LocalContext.current, MainActivity::class.java)
+        .putExtra(MainActivity.EXTRA_OPEN_ENTITY, entityId)
+        // CLEAR_TOP matters here. MainActivity is `standard` launch mode, so when the app is
+        // already running, a NEW_TASK intent just brings the existing task forward and the extra
+        // is never delivered — the tap would appear to do nothing. CLEAR_TOP re-delivers it
+        // through onCreate, so the widget behaves the same whether the app was open or not.
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+)
+
 /** Opens the app on Settings — where the credential problems a widget can hit are actually fixed. */
 @Composable
 private fun openSettings(): Action = actionStartActivity(
@@ -159,9 +179,15 @@ fun WidgetHeader(
     compact: Boolean = false,
     /** Where the compact tier puts the name, if anywhere — see `compactNamePlacement`. */
     namePlacement: CompactName = CompactName.INLINE,
+    /**
+     * Where a tap on the title goes. Defaults to the app, which is right for the control widgets —
+     * their interesting action is the button below. The read-only temperature widget overrides it
+     * to open that sensor's history chart, the only follow-up question its reading raises.
+     */
+    onClick: Action = openApp(),
 ) {
     Row(
-        modifier = GlanceModifier.fillMaxWidth().clickable(openApp()),
+        modifier = GlanceModifier.fillMaxWidth().clickable(onClick),
         verticalAlignment = Alignment.Vertical.CenterVertically,
     ) {
         val accentColor = accent?.let { channelColor(it) } ?: GlanceTheme.colors.onSurfaceVariant

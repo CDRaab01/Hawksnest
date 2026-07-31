@@ -35,7 +35,9 @@ import androidx.core.content.getSystemService
  */
 @Composable
 fun CameraVolumeKeys() {
-    val activity = LocalContext.current as? Activity
+    // Not `as? Activity` — see findActivity in ZoomableFrame.kt. Compose's LocalContext is often a
+    // ContextThemeWrapper, and the failed cast silently no-ops instead of erroring.
+    val activity = LocalContext.current.findActivity()
     DisposableEffect(activity) {
         if (activity == null) return@DisposableEffect onDispose {}
         val previous = activity.volumeControlStream
