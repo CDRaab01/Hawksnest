@@ -79,10 +79,19 @@ export const baseEntities: HaStateObj[] = [
   },
 ];
 
-/** Option strings for the ring event selector — a kind word + parseable time,
- *  like ring-mqtt's, so the app can plot the events at their real times. */
+/**
+ * Option strings for the ring event selector — a kind word + parseable time, like ring-mqtt's,
+ * so the app can plot the events at their real times.
+ *
+ * The newest one is deliberately inside the timeline's opening window (`DEFAULT_SPAN_MS`, 1h
+ * centred on the playhead → roughly the last 30 minutes). E2E specs click an event chip to reach
+ * recorded playback, and a chip outside the opening view is off-screen and unclickable until the
+ * timeline is panned — so a too-old newest event turns every recorded-playback spec into a test
+ * of timeline navigation. The older two stay spread out so the "step through events" paths still
+ * have somewhere to step to.
+ */
 export const ringEventOptions = (): string[] => [
-  `Motion ${ago(60)}`,
+  `Motion ${ago(10)}`,
   `Motion ${ago(150)}`,
   `Ding ${ago(300)}`,
 ];

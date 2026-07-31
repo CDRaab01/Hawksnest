@@ -15,6 +15,24 @@ export const HOUR_MS = 3_600_000;
 export const MIN_SPAN_MS = 10 * MINUTE_MS;
 /** The default Ring window span. No longer a zoom ceiling — see `maxSpanMs`. */
 export const MAX_SPAN_MS = 24 * HOUR_MS;
+/**
+ * Opening zoom — the span shown before the user touches anything.
+ *
+ * Was 8h, on the theory that "the day reads at a glance". It does not: these are 24/7 continuous
+ * cameras, so at 8h across a phone-width track (~360px) one pixel is ~80 seconds and every event
+ * block is sub-pixel. Adjacent events merge into one solid bar, and the strip degenerates into
+ * "something was recorded today" — which the footage lane already says, and which is true of every
+ * day. The information is all in the *gaps*, and the gaps were the thing being averaged away.
+ *
+ * At 1h a pixel is ~10s, so a 30s event is a distinct ~3px block with visible space around it.
+ * That is the zoom at which the strip starts answering "when did things happen", which is the
+ * only question it exists to answer.
+ *
+ * Lives here rather than in the two Timeline24h components because it was duplicated in both and
+ * is exactly the kind of constant that drifts — web and Android disagreeing on opening zoom would
+ * be invisible in review and obvious on the phone.
+ */
+export const DEFAULT_SPAN_MS = HOUR_MS;
 
 /** The fixed data window the viewport lives inside (epoch ms). */
 export interface TimeWindow {

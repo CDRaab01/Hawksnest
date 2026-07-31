@@ -3,7 +3,7 @@ import type { CameraEvent } from "../../lib/cameraEvents";
 import type { FootageSpan } from "../../lib/ringFootage";
 import { clockTime } from "../../lib/relativeTime";
 import {
-  HOUR_MS,
+  DEFAULT_SPAN_MS,
   type TimeWindow,
   type Viewport,
   pan,
@@ -15,8 +15,6 @@ import {
   zoom,
 } from "../../lib/timelineViewport";
 
-/** Opening zoom: ~8h visible so the day reads at a glance (Ring-like), clamped into [10min, 24h]. */
-const DEFAULT_SPAN_MS = 8 * HOUR_MS;
 /** Movement under this many px counts as a tap (seek), not a pan. */
 const TAP_SLOP_PX = 6;
 
@@ -96,6 +94,10 @@ export function Timeline24h({
   const [width, setWidth] = useState(0);
   const [vp, setVp] = useState<Viewport | null>(null);
   const drag = useRef<{ startX: number; startVp: Viewport; moved: boolean } | null>(null);
+  // Live pointer x-positions by id, and the previous two-finger separation. Only the x axis
+  // matters: the strip is one-dimensional, so a vertical pinch should not zoom it.
+  const pointers = useRef(new Map<number, number>());
+  const pinchDist = useRef<number | null>(null);
   // rAF-throttled scrub emission: at most one onScrub per frame, cancelled on release/unmount.
   const scrubRaf = useRef<number | null>(null);
   const pendingScrubMs = useRef(0);
@@ -165,10 +167,35 @@ export function Timeline24h({
     // Let an event chip handle its own tap.
     if ((e.target as HTMLElement).closest("[data-chip]")) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
+    pointers.current.set(e.pointerId, e.clientX);
+    // A second finger turns the gesture into a pinch — abandon the pan so the strip doesn't
+    // lurch sideways as the fingers spread, and so releasing doesn't commit a bogus seek.
+    if (pointers.current.size >= 2) {
+      drag.current = null;
+      pinchDist.current = null;
+      return;
+    }
     drag.current = { startX: e.clientX, startVp: vp, moved: false };
   }
 
   function onPointerMove(e: React.PointerEvent) {
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, e.clientX);
+
+    // Pinch to zoom — the phone's only way to zoom, since there is no wheel there. Android's
+    // Timeline24h has had this since it shipped; web claimed it in a comment and never had it.
+    if (pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()];
+      const dist = Math.abs(a - b);
+      const prev = pinchDist.current;
+      pinchDist.current = dist;
+      if (prev && prev > 0 && dist > 0) {
+        setVp((cur) =>
+          cur ? zoom(cur, dist / prev, width, paddedWindow(startMs, endMs, cur, width)) : cur,
+        );
+      }
+      return;
+    }
+
     const d = drag.current;
     if (!d) return;
     const dx = e.clientX - d.startX;
@@ -186,7 +213,10 @@ export function Timeline24h({
   }
 
   function onPointerUp(e: React.PointerEvent) {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinchDist.current = null;
     const d = drag.current;
+    // Lifting the first of two pinching fingers must not commit a seek — there was no pan.
     if (!d) return;
     drag.current = null;
     e.currentTarget.releasePointerCapture?.(e.pointerId);

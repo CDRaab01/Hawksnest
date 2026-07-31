@@ -44,6 +44,7 @@ import { useEntityStore } from "../../store/entityStore";
 import { Move } from "lucide-react";
 import { Timeline24h } from "./Timeline24h";
 import { TransportBar } from "./TransportBar";
+import { ZoomableFrame } from "./ZoomableFrame";
 
 const DAY_MS = 24 * 3600_000;
 
@@ -608,6 +609,9 @@ export function CameraPlayer({
           </span>
       </div>
 
+      {/* Wraps the WHOLE player rather than each source: live, recorded and the placeholder all
+          zoom identically, and there is one gesture implementation instead of three. */}
+      <ZoomableFrame>
       {isLive ? (
         <LivePlayer
           entity={camera.liveEntity}
@@ -655,6 +659,7 @@ export function CameraPlayer({
           }}
         />
       )}
+      </ZoomableFrame>
 
       {/* Live only: moving the lens while watching recorded footage would re-aim
           the camera with no visible feedback. Unmounting on the way out is what

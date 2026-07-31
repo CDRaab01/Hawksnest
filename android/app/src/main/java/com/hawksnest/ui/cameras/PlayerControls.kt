@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.VolumeOff
@@ -63,6 +65,31 @@ fun MoveButton(active: Boolean, onToggle: () -> Unit, modifier: Modifier = Modif
             )
         },
         label = "Move",
+        active = active,
+        onClick = onToggle,
+        modifier = modifier,
+    )
+}
+
+/**
+ * Fullscreen toggle. A 16:9 frame on a tall phone uses about a third of the screen, so this is
+ * the difference between glancing at a camera and actually looking at one.
+ *
+ * Deliberately a chrome button rather than a gesture: a double-tap already means "reset zoom"
+ * (see [ZoomableFrame]) and overloading it would make both feel unreliable.
+ */
+@Composable
+fun FullscreenButton(active: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    ChromeButton(
+        icon = { fg ->
+            Icon(
+                if (active) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(16.dp),
+            )
+        },
+        label = if (active) "Exit" else "Full",
         active = active,
         onClick = onToggle,
         modifier = modifier,

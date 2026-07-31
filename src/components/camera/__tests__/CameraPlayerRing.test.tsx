@@ -301,7 +301,11 @@ describe("CameraPlayer (24/7 continuous footage)", () => {
     );
   }
 
-  /** Tap the track left of centre → a quiet moment ~3.2h ago, well clear of the single event. */
+  /**
+   * Tap the track left of centre → a past moment, clear of the single event. How far in the past
+   * depends on the opening zoom, so callers must not assume a particular offset — set the fixture
+   * up so the assertion holds anywhere left of the playhead.
+   */
   async function tapQuietMoment(user: ReturnType<typeof userEvent.setup>) {
     await screen.findByText(/1 moments/);
     const track = screen.getByRole("slider");
@@ -347,7 +351,15 @@ describe("CameraPlayer (24/7 continuous footage)", () => {
 
   it("still reports an honest gap when the camera has no footage for that moment", async () => {
     const user = userEvent.setup();
-    serve([stitched({ startMs: NOW - 30 * 60_000, endMs: NOW })]);
+    // Footage exists, but only for an hour in the middle of the night — far outside the
+    // opening view, so wherever the tap lands is a genuine gap.
+    //
+    // This used to be "the last 30 minutes", which only produced a gap because the timeline
+    // opened at an 8h zoom and so a tap left of centre was hours ago. Changing the opening
+    // zoom to 1h silently moved the tap inside the covered range and the test failed for a
+    // reason that had nothing to do with gap reporting. The fixture now states the condition
+    // it means instead of relying on the zoom level.
+    serve([stitched({ startMs: NOW - 20 * 3600_000, endMs: NOW - 19 * 3600_000 })]);
     renderPlayer();
     await tapQuietMoment(user);
 

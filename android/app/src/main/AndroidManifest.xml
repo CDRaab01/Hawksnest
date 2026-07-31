@@ -30,9 +30,16 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.Hawksnest">
+        <!-- configChanges: handle rotation in-process instead of letting Android recreate the
+             activity. Required by the camera player's fullscreen toggle, which rotates to
+             landscape — an activity restart there tears down the live stream and costs a 2-4s
+             WebRTC renegotiation every time. It also fixes the same stutter on ordinary manual
+             rotation. Compose handles configuration changes natively, so nothing else needs to
+             react to this. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:theme="@style/Theme.Hawksnest">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

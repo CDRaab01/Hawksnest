@@ -1,5 +1,6 @@
 package com.hawksnest.ui.cameras
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.NO_ZOOM
 import com.hawksnest.core.logic.RecordedBackend
 import com.hawksnest.core.logic.RecordedSource
 import com.hawksnest.core.logic.RingFootage
@@ -243,6 +245,15 @@ fun CameraPlayer(
     val ptz by remember(cameraName) { viewModel.ptzControls(cameraName) }
         .collectAsState(initial = null)
     var showPtz by remember(cam.id) { mutableStateOf(false) }
+
+    // Pinch-zoom over the picture. Keyed on cam.id so switching cameras starts unzoomed —
+    // a magnified corner carried over to a different room is disorienting and reads as a bug.
+    var zoom by remember(cam.id) { mutableStateOf(NO_ZOOM) }
+    // Fullscreen is NOT keyed on cam.id: switching cameras while fullscreen should stay
+    // fullscreen, which is what the camera switcher in the overlay is for.
+    var fullscreen by remember { mutableStateOf(false) }
+    FullscreenEffect(fullscreen)
+
     val subAvailable: Boolean by produceState(false, cam.id) {
         value = runCatching { viewModel.canGo2rtc("${cameraName}_sub") }.getOrDefault(false)
     }
@@ -414,6 +425,11 @@ fun CameraPlayer(
         }
     } ?: events
 
+    // In fullscreen the picture IS the screen: the chrome, timeline, description and transport
+    // are all hidden, so the system back gesture has to be the way out or the user is stuck with
+    // only the small overlay button. Registered before the layout so it wins over navigation.
+    BackHandler(enabled = fullscreen) { fullscreen = false }
+
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // ONE FlowRow that wraps only when it has to.
         //
@@ -426,7 +442,7 @@ fun CameraPlayer(
         // one line when the set fits and extra lines only when it doesn't — and
         // the set genuinely varies (Move only for PTZ, Low/High only with a sub
         // stream, Talk only for Ring, Siren only where one exists).
-        FlowRow(
+        if (!fullscreen) FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -438,6 +454,7 @@ fun CameraPlayer(
                 QualityToggle(low = qualityLow, onChange = { qualityLow = it })
             }
             MuteButton(muted = muted, onToggle = { muted = !muted })
+            FullscreenButton(active = fullscreen, onToggle = { fullscreen = !fullscreen })
             SnapshotButton(snapshotUrl = cam.snapshotUrl, cameraName = cameraName)
             if (isRing && isLive) {
                 TalkButton(cameraName, viewModel)
@@ -468,9 +485,22 @@ fun CameraPlayer(
         // Everything above HLS is continuous; HLS is segmented, which is what "jumpy" live video
         // actually is — so a camera with a better tier available should never reach it.
         // Web's ladder is the same minus the RTSP tier, which browsers cannot play at all.
-        val frame = Modifier
-            .fillMaxWidth()
-            .aspectRatio(16f / 9f)
+        //
+        // ZoomableFrame wraps the WHOLE ladder rather than any one tier: all seven already share
+        // this one `frame` modifier, so pinch-zoom applies to every one of them identically and
+        // cannot drift. Fullscreen swaps the fixed 16:9 box for the whole screen — the `when`
+        // stays in the same composition slot either way, so the player is NOT torn down and
+        // re-created (which on the WebRTC tiers is a 2-4s renegotiation).
+        ZoomableFrame(
+            zoom = zoom,
+            onZoomChange = { zoom = it },
+            modifier = if (fullscreen) {
+                Modifier.fillMaxSize()
+            } else {
+                Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+            },
+        ) { zoomed ->
+        val frame = zoomed.fillMaxSize()
         when {
             !isLive && recordingUrl != null ->
                 VideoPlayer(
@@ -578,40 +608,56 @@ fun CameraPlayer(
             else -> RefreshingSnapshot(url = cam.snapshotUrl, modifier = frame)
         }
 
-        // Live only: moving the lens while watching recorded footage would re-aim
-        // the camera with no visible feedback. Leaving composition is also what
-        // guarantees an in-flight move is stopped (see PtzPad).
-        ptz?.takeIf { isLive && showPtz }?.let { PtzPanel(it, viewModel) }
+            // The only on-screen way out of fullscreen (back also works). Inside the frame so it
+            // sits over the picture, and NOT inside the graphicsLayer content — it must stay put
+            // and stay the same size while the picture underneath is magnified and panned.
+            if (fullscreen) {
+                FullscreenButton(
+                    active = true,
+                    onToggle = { fullscreen = false },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp),
+                )
+            }
+        }
 
-        Timeline24h(
-            events = displayEvents,
-            startMs = startMs,
-            endMs = endMs,
-            playhead = playhead,
-            onSeek = ::seek,
-            footage = footageLane,
-            onScrub = { ms ->
-                scrubbing = true
-                playhead = ms.coerceIn(startMs, endMs)
-            },
-            onLive = ::goLive,
-        )
+        if (!fullscreen) {
+            // Live only: moving the lens while watching recorded footage would re-aim
+            // the camera with no visible feedback. Leaving composition is also what
+            // guarantees an in-flight move is stopped (see PtzPad).
+            ptz?.takeIf { isLive && showPtz }?.let { PtzPanel(it, viewModel) }
 
-        // Between the timeline and the transport on purpose: tapping a chip
-        // already seeks, so the description follows the playhead with no new
-        // interaction to learn.
-        EventDescription(describedEvent)
+            Timeline24h(
+                events = displayEvents,
+                startMs = startMs,
+                endMs = endMs,
+                playhead = playhead,
+                onSeek = ::seek,
+                footage = footageLane,
+                onScrub = { ms ->
+                    scrubbing = true
+                    playhead = ms.coerceIn(startMs, endMs)
+                },
+                onLive = ::goLive,
+            )
 
-        TransportBar(
-            isLive = isLive,
-            isPaused = paused,
-            canPrev = prev != null,
-            canNext = next != null || !isLive,
-            onPrev = { prev?.let { seek(it.startMs) } },
-            onNext = { if (next != null) seek(next.startMs) else goLive() },
-            onTogglePlay = { paused = !paused },
-            onLive = ::goLive,
-        )
+            // Between the timeline and the transport on purpose: tapping a chip
+            // already seeks, so the description follows the playhead with no new
+            // interaction to learn.
+            EventDescription(describedEvent)
+
+            TransportBar(
+                isLive = isLive,
+                isPaused = paused,
+                canPrev = prev != null,
+                canNext = next != null || !isLive,
+                onPrev = { prev?.let { seek(it.startMs) } },
+                onNext = { if (next != null) seek(next.startMs) else goLive() },
+                onTogglePlay = { paused = !paused },
+                onLive = ::goLive,
+            )
+        }
     }
 }
 
