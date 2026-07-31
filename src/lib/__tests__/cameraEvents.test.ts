@@ -91,6 +91,47 @@ describe("cameraEvents", () => {
       expect(ev.description).toBe("hello");
     });
 
+    // Real text off the phone: descriptions generated before the Frigate prompt was
+    // fixed are multi-paragraph raw markdown, and nothing here renders markdown, so
+    // the asterisks and headings showed up literally on screen.
+    it("flattens a legacy markdown essay into one line of prose", () => {
+      const essay = [
+        "Based on the sequence of images, the person's behavior shows a clear",
+        "progression related to **cleaning or general household maintenance**.",
+        "",
+        "**Analysis of Actions and Movement:**",
+        "",
+        "1.  **Initial/Mid-Sequence (Frames 1-3):** The person is moving toward the",
+        "kitchen.",
+        "2.  **Late Sequence:** The movement slows slightly.",
+        "",
+        "## Conclusion on Intent",
+        "> The primary intent is to *complete a physical task*.",
+      ].join("\n");
+      const [ev] = normalizeFrigateEvents([{ ...base, data: { description: essay } }]);
+
+      expect(ev.description).not.toMatch(/[*#>]/);
+      expect(ev.description).not.toMatch(/\n/);
+      expect(ev.description).toContain("cleaning or general household maintenance");
+      expect(ev.description).toContain("Analysis of Actions and Movement:");
+      // List markers go, their content stays.
+      expect(ev.description).toContain("Initial/Mid-Sequence (Frames 1-3):");
+      expect(ev.description).not.toMatch(/\s1\.\s/);
+    });
+
+    it("leaves an already-plain sentence untouched", () => {
+      const plain = "A person walks through the kitchen carrying towels.";
+      const [ev] = normalizeFrigateEvents([{ ...base, data: { description: plain } }]);
+      expect(ev.description).toBe(plain);
+    });
+
+    // Markup that is ALL syntax must collapse to absent, not to an empty string.
+    it("is null when the description is nothing but markup", () => {
+      expect(
+        normalizeFrigateEvents([{ ...base, data: { description: "**  **" } }])[0].description,
+      ).toBeNull();
+    });
+
     // The WS result arrives as a JSON *string*; the description must survive that hop.
     it("survives the JSON-string-wrapped websocket result", () => {
       const wire = JSON.stringify([{ ...base, data: { description: "Carrying a box." } }]);

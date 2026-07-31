@@ -49,6 +49,31 @@ data class CameraEvent(
 
 private fun JsonObject.prim(key: String): JsonPrimitive? = this[key] as? JsonPrimitive
 
+/**
+ * Flatten a GenAI description into one line of plain prose.
+ *
+ * Frigate's *prompt* is where verbosity is actually fixed (the seed now asks for a
+ * single sentence), but descriptions generated before that still sit in Frigate's
+ * database and keep arriving while those events are retained. They are
+ * multi-paragraph raw markdown — `**bold**`, `##` headings, `1.` lists — which
+ * nothing here renders, so the asterisks show up literally on screen.
+ *
+ * Cleaning at the mapping layer means every consumer gets the same clean string,
+ * and the two-line clamp actually clamps instead of being defeated by newlines.
+ * 1:1 port of `cleanDescription` in `src/lib/cameraEvents.ts`.
+ */
+fun cleanDescription(raw: String?): String? {
+    if (raw.isNullOrBlank()) return null
+    val text = raw
+        .replace(Regex("[*_`]{1,3}"), "")
+        .replace(Regex("(?m)^\\s{0,3}#{1,6}\\s*"), "")
+        .replace(Regex("(?m)^\\s{0,3}>\\s?"), "")
+        .replace(Regex("(?m)^\\s{0,3}(?:\\d+\\.|[-+•])\\s+"), "")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+    return text.ifEmpty { null }
+}
+
 /** Frigate sends times as epoch *seconds* (float). Normalize to ms; null when absent/invalid. */
 private fun secondsToMs(p: JsonPrimitive?): Long? = p?.doubleOrNull?.let { (it * 1000).roundToLong() }
 
@@ -117,8 +142,8 @@ fun normalizeFrigateEvents(raw: List<JsonObject>, base: String = FRIGATE_BASE): 
             hasSnapshot = hasSnapshot,
             thumbnailUrl = if (hasSnapshot) eventSnapshotUrl(id, base) else null,
             snapshotUrl = if (hasSnapshot) eventSnapshotUrl(id, base) else null,
-            // Normalize empty/whitespace to null so the UI has exactly one "absent" case.
-            description = (e["data"] as? JsonObject)
-                ?.prim("description")?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
+            // Normalize empty/whitespace to null so the UI has exactly one "absent"
+            // case, and flatten legacy markdown essays to one line (see cleanDescription).
+            description = cleanDescription((e["data"] as? JsonObject)?.prim("description")?.contentOrNull),
         )
     }.sortedBy { it.startMs }

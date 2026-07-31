@@ -63,6 +63,36 @@ export interface RawFrigateEvent {
   data?: { description?: string | null };
 }
 
+/**
+ * Flatten a GenAI description into one line of plain prose.
+ *
+ * Frigate's *prompt* is where verbosity is actually fixed (the seed now asks for a
+ * single sentence), but descriptions generated before that still sit in Frigate's
+ * database and will keep arriving for as long as those events are retained. They
+ * are multi-paragraph, and they arrive as raw markdown — `**bold**`, `##`
+ * headings, `1.` lists — which nothing in this app renders, so the asterisks show
+ * up literally on screen.
+ *
+ * So: strip the markup, collapse the structure to spaces. Cleaning here rather
+ * than in the view means every consumer gets the same clean string, and the
+ * two-line clamp actually clamps instead of being defeated by newlines.
+ */
+export function cleanDescription(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const text = raw
+    // Fenced/inline code and emphasis markers: keep the words, drop the syntax.
+    .replace(/[*_`]{1,3}/g, "")
+    // Headings and blockquotes at the start of a line.
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    // Ordered and unordered list markers.
+    .replace(/^\s{0,3}(?:\d+\.|[-+•])\s+/gm, "")
+    // Any run of whitespace — including the paragraph breaks — becomes one space.
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || null;
+}
+
 /** Frigate sends times as epoch *seconds* (float). Normalize to ms. */
 function secondsToMs(secs: number | undefined | null): number | null {
   if (typeof secs !== "number" || !Number.isFinite(secs)) return null;
@@ -151,8 +181,9 @@ export function normalizeFrigateEvents(
         hasSnapshot,
         thumbnailUrl: hasSnapshot ? eventSnapshotUrl(e.id, base) : null,
         snapshotUrl: hasSnapshot ? eventSnapshotUrl(e.id, base) : null,
-        // Normalize empty/whitespace to null so the UI has exactly one "absent" case.
-        description: e.data?.description?.trim() || null,
+        // Normalize empty/whitespace to null so the UI has exactly one "absent"
+        // case, and flatten legacy markdown essays to one line (see cleanDescription).
+        description: cleanDescription(e.data?.description),
       };
     })
     .filter((e): e is CameraEvent => e !== null)
