@@ -627,4 +627,69 @@ class WidgetModelTest {
             candidates.map { it.entityId },
         )
     }
+
+    // ── The room, and what the widget calls itself ────────────────────────────────────────────
+
+    @Test
+    fun `the room wins over the sensor's own name`() {
+        // The whole point of the change. The shipped widget titled itself
+        // "Temperature Humidity XS Sensor …" — a model number, ellipsised — because a sensor is
+        // named for what it IS, unlike a lamp or a lock which are named for where they are.
+        assertEquals(
+            "Nursery",
+            temperatureTitle("Nursery", "Temperature Humidity XS Sensor Air Temperature"),
+        )
+    }
+
+    @Test
+    fun `falls back to the sensor name when HA has no area`() {
+        // Plenty of HA installs never assign areas. A wrong room would be worse than an ugly one.
+        assertEquals("Attic Probe", temperatureTitle(null, "Attic Probe"))
+        assertEquals("Attic Probe", temperatureTitle("   ", "Attic Probe"))
+    }
+
+    @Test
+    fun `falls back again rather than rendering an empty title`() {
+        assertEquals("Temperature", temperatureTitle(null, null))
+        assertEquals("Temperature", temperatureTitle("", " "))
+    }
+
+    @Test
+    fun `the view titles itself with the room`() {
+        val view = temperatureWidgetView(
+            snapshot = snapshot(
+                "72.4",
+                entityId = "sensor.nursery_temperature_humidity_xs_sensor_air_temperature",
+                name = "Temperature Humidity XS Sensor Air Temperature",
+                attributes = buildJsonObject { put("unit_of_measurement", "°F") },
+            ),
+            nowMs = now,
+            room = "Nursery",
+        )
+        assertEquals("Nursery", view.name)
+        assertEquals("72.4", view.reading)
+        assertEquals("Warm", view.label)
+    }
+
+    @Test
+    fun `a widget configured before rooms existed still titles itself`() {
+        // Stored prefs from an older install have no ROOM key, so `room` arrives null.
+        val view = temperatureWidgetView(
+            snapshot = snapshot("70.0", name = "Attic Probe"),
+            nowMs = now,
+            room = null,
+        )
+        assertEquals("Attic Probe", view.name)
+    }
+
+    @Test
+    fun `a temperature widget keeps its room on screen even when narrow`() {
+        // A room temperature with no room is not a smaller widget, it is a useless one — so
+        // temperature follows LIGHT rather than the security widgets, which hide the name to
+        // protect the state line.
+        assertEquals(
+            CompactName.INLINE,
+            compactNamePlacement(WidgetKind.TEMPERATURE, 110, WIDGET_COMPACT_BUCKET_DP),
+        )
+    }
 }

@@ -97,11 +97,14 @@ class WidgetRepository @Inject constructor(
         entityId: String,
         name: String,
         thresholds: Triple<Double, Double, Double>? = null,
+        /** The entity's HA area, resolved here because the widget process cannot see it. */
+        room: String? = null,
     ) {
         write(kind, glanceId) { prefs ->
             prefs.clear()
             prefs[WidgetKeys.ENTITY_ID] = entityId
             prefs[WidgetKeys.NAME] = name
+            room?.trim()?.takeIf { it.isNotEmpty() }?.let { prefs[WidgetKeys.ROOM] = it }
             thresholds?.let { (cold, warm, hot) ->
                 prefs[WidgetKeys.TEMP_COLD_BELOW] = cold
                 prefs[WidgetKeys.TEMP_WARM_ABOVE] = warm

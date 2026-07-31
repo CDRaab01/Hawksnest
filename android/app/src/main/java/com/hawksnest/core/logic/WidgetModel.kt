@@ -206,7 +206,12 @@ enum class CompactName {
 fun compactNamePlacement(kind: WidgetKind, widthDp: Int, heightDp: Int): CompactName = when {
     // A light's state line is short ("On · 60%") and carries no timestamp, so its name has always
     // shared the line at any width — and a lamp shown wrong is a cosmetic error, not a security one.
-    kind == WidgetKind.LIGHT -> CompactName.INLINE
+    //
+    // Temperature joins it for the same reasons and one stronger one: its name is the ROOM, and a
+    // room temperature with no room is not a smaller version of the widget, it is a useless one.
+    // Its status is one word ("Warm") and untimestamped, so there is room to share the line even
+    // narrow; a long room name ellipsizes into whatever is left, which still beats hiding it.
+    kind == WidgetKind.LIGHT || kind == WidgetKind.TEMPERATURE -> CompactName.INLINE
     widthDp >= WIDGET_NAME_MIN_WIDTH_DP -> CompactName.INLINE
     heightDp >= WIDGET_COMPACT_TALL_BUCKET_DP -> CompactName.STACKED
     else -> CompactName.HIDDEN
@@ -522,6 +527,30 @@ data class LockWidgetView(
 
 // ── Temperature ──────────────────────────────────────────────────────────────────────────────
 
+/**
+ * What the temperature widget calls itself.
+ *
+ * A room, when one is known — because that is the question this widget answers ("how is the
+ * nursery?"), and because temperature sensors are the one device class whose friendly name is
+ * almost never useful. Lights and locks are named for where they are ("Nursery Lamp", "Garage
+ * Door Lock"); a sensor is named for what it *is*, so the shipped widget read
+ * "Temperature Humidity XS Sensor …" — the model number, ellipsised, telling the owner nothing.
+ *
+ * The room comes from Home Assistant's area registry, resolved when the widget is configured
+ * (see `WidgetConfigActivity`). It has to be resolved and stored *there* rather than looked up at
+ * draw time: the registries are WebSocket-only commands, and widgets deliberately speak REST so
+ * they can render in a process that may have just been created (`WidgetHaClient`). The config
+ * screen is an ordinary activity with the app's socket, so it is the one place that can see areas
+ * at all.
+ *
+ * Falls back to the sensor's own name rather than inventing one — a bad title is better than a
+ * confidently wrong room.
+ */
+fun temperatureTitle(room: String?, sensorName: String?): String =
+    room?.trim()?.takeIf { it.isNotEmpty() }
+        ?: sensorName?.trim()?.takeIf { it.isNotEmpty() }
+        ?: "Temperature"
+
 /** Everything the temperature widget draws, decided here so the Glance layer stays dumb. */
 data class TemperatureWidgetView(
     val name: String,
@@ -554,8 +583,10 @@ fun temperatureWidgetView(
     coldBelow: Double = WIDGET_TEMP_COLD_BELOW_DEFAULT,
     warmAbove: Double = WIDGET_TEMP_WARM_ABOVE_DEFAULT,
     hotAbove: Double = WIDGET_TEMP_HOT_ABOVE_DEFAULT,
+    /** The area this sensor is in, resolved at configuration time. See [temperatureTitle]. */
+    room: String? = null,
 ): TemperatureWidgetView {
-    val name = snapshot?.name ?: "Temperature"
+    val name = temperatureTitle(room, snapshot?.name)
     val unit = snapshot?.attributes?.get("unit_of_measurement")
         ?.let { (it as? JsonPrimitive)?.content } ?: "°"
     val reading = temperatureDisplay(snapshot?.state)

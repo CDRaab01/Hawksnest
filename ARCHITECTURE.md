@@ -345,6 +345,18 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   `camera/stream` wakes a battery camera's pipeline, which is what the lazy-HLS rule exists to
   prevent. Both WebRTC tiers are continuous RTP; HLS below them is segmented, which is what
   "jumpy live video" actually is.
+- **Camera sound is MEDIA, not a call** (`WebRtcCore`, `ui/cameras/CameraAudio.kt`). libwebrtc's
+  default audio device module builds its `AudioTrack` with `USAGE_VOICE_COMMUNICATION` +
+  `CONTENT_TYPE_SPEECH`, so opening a camera interrupted other audio, bound playback to the
+  **in-call** volume slider and could route to the earpiece. Muting could never have fixed it: the
+  mute gate disables the *received track*, while the ADM starts its `AudioTrack` as soon as the
+  audio transceiver negotiates. The factory therefore supplies an ADM with `USAGE_MEDIA` +
+  `CONTENT_TYPE_MOVIE`. Playout only — `TalkButton` captures the mic through the same factory and
+  is unaffected. On top of that the player pins `volumeControlStream` to `STREAM_MUSIC` while a
+  camera is open (the default resolved to the *ringer* on a silent camera) and takes
+  `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` **only while unmuted**, so opening a camera never interrupts
+  anything and unmuting ducks rather than stops it. The ExoPlayer tiers already defaulted to media
+  attributes and requested no focus, so this covers every transport uniformly.
 - **RTSP-direct** (`ui/cameras/RtspPlayer.kt`, `core/logic/ReolinkRtsp.kt`) — the top live tier and
   the **one place the two platforms' ladders legitimately differ**: browsers cannot play RTSP at
   any level, so web's ceiling is and stays WebRTC. This is not web lagging Android; it is a
@@ -433,6 +445,16 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   `GlanceAppWidgetReceiver`s so the launcher lists them separately; one shared
   `WidgetConfigActivity` (it learns which widget it is configuring from the provider that launched
   it) picking an entity from `GET /api/states`.
+  - **The temperature widget names itself after the ROOM**, not the sensor. Lamps and locks are
+    named for where they are ("Nursery Lamp"); a sensor is named for what it is, so this widget
+    shipped titled "Temperature Humidity XS Sensor …". The room comes from HA's **area registry,
+    resolved at configuration time and stored with the widget** — it cannot be looked up at draw
+    time, because the registries are WebSocket-only and the widget process deliberately speaks REST
+    (below). The config screen is an ordinary activity with the app's socket, so it is the only
+    place that can see areas at all; the field is prefilled from HA and editable, since plenty of
+    installs never assign areas. Falls back to the sensor's own name (`temperatureTitle`) rather
+    than inventing one. It draws the **shared `WidgetHeader`** like every other widget — it used to
+    hand-roll a plain name row, which is precisely why it looked like the odd one out.
   - **The temperature widget is the read-only one**, so none of the pending/confirm/echo machinery
     below applies to it. It colours its reading by four bands — cold / comfortable / warm / hot —
     split on **three thresholds stored per widget instance**, because a nursery and a garage
