@@ -14,7 +14,9 @@ import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.logic.WIDGET_CONFIRM_WINDOW_MS
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
-import com.hawksnest.core.logic.predictLight
+import com.hawksnest.core.logic.LedColor
+import com.hawksnest.core.logic.ScenePadKey
+import com.hawksnest.core.logic.predictOptimistic
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.core.logic.toSnapshot
 import com.hawksnest.core.logic.widgetIsOptimistic
@@ -91,7 +93,8 @@ class WidgetRepository @Inject constructor(
      * [thresholds] is the temperature widget's (coldBelow, warmAbove, hotAbove)
      * triple, in the sensor's own unit. Null for every other kind — and written
      * AFTER the `clear()` so reconfiguring an existing widget replaces the set
-     * rather than merging with whatever was there.
+     * rather than merging with whatever was there. [scenePad] carries the same
+     * kind of thing for the scene pad, and the same rule applies.
      */
     suspend fun configure(
         kind: WidgetKind,
@@ -101,6 +104,7 @@ class WidgetRepository @Inject constructor(
         thresholds: Triple<Double, Double, Double>? = null,
         /** The entity's HA area, resolved here because the widget process cannot see it. */
         room: String? = null,
+        scenePad: ScenePadConfig? = null,
     ) {
         write(kind, glanceId) { prefs ->
             prefs.clear()
@@ -112,6 +116,7 @@ class WidgetRepository @Inject constructor(
                 prefs[WidgetKeys.TEMP_WARM_ABOVE] = warm
                 prefs[WidgetKeys.TEMP_HOT_ABOVE] = hot
             }
+            scenePad?.let { prefs.putScenePad(it) }
         }
         refresh(kind, glanceId)
     }
@@ -140,8 +145,9 @@ class WidgetRepository @Inject constructor(
         glanceId: GlanceId,
         service: String,
         extra: Map<String, Any?> = emptyMap(),
+        target: ActionTarget = ActionTarget.PRIMARY,
     ) {
-        scope.launch { act(kind, glanceId, service, extra) }
+        scope.launch { act(kind, glanceId, service, extra, target) }
     }
 
     suspend fun act(
@@ -149,11 +155,17 @@ class WidgetRepository @Inject constructor(
         glanceId: GlanceId,
         service: String,
         extra: Map<String, Any?> = emptyMap(),
+        /** Which of the widget's entities this command is for — see [ActionTarget]. */
+        target: ActionTarget = ActionTarget.PRIMARY,
     ) {
         val current = prefs(glanceId)
         val entityId = current.entityId()
         if (entityId == null) {
             write(kind, glanceId) { it.putBlocker(WidgetBlocker.NOT_CONFIGURED) }
+            return
+        }
+        if (target == ActionTarget.COMPANION) {
+            actOnCompanion(kind, glanceId, current.companionEntityId(), service, extra)
             return
         }
         val snapshot = current.snapshot(json)
@@ -164,7 +176,7 @@ class WidgetRepository @Inject constructor(
             prefs.clearConfirm()
             if (widgetIsOptimistic(kind) && snapshot != null) {
                 // Draw the result now; the confirming read below corrects it if HA disagrees.
-                prefs.putSnapshot(predictLight(snapshot, service, extra, startedAt), json)
+                prefs.putSnapshot(predictOptimistic(snapshot, service, extra, startedAt), json)
             } else {
                 prefs[WidgetKeys.PENDING_SINCE] = startedAt
             }
@@ -205,6 +217,36 @@ class WidgetRepository @Inject constructor(
                     prefs.putBlocker(WidgetBlocker.NO_RESPONSE)
                 }
             }
+        }
+    }
+
+    /**
+     * Send a command to the widget's *other* entity — the scene pad's relay.
+     *
+     * Deliberately none of the machinery the primary path has. There is no optimistic draw,
+     * because the widget holds no reading for this entity to correct; no `PENDING_SINCE`, because
+     * a spinner started here would wait on an echo from an entity nothing ever reads and would
+     * only ever be cleared by its own expiry; and no confirming fetch, because the fetch would
+     * re-read the primary entity and tell us nothing about this one.
+     *
+     * So it is fire-and-forget, and the only thing that comes back is a failure worth showing.
+     */
+    private suspend fun actOnCompanion(
+        kind: WidgetKind,
+        glanceId: GlanceId,
+        companionId: String?,
+        service: String,
+        extra: Map<String, Any?>,
+    ) {
+        if (companionId.isNullOrBlank()) {
+            write(kind, glanceId) { it.putBlocker(WidgetBlocker.NOT_CONFIGURED) }
+            return
+        }
+        val sent = client.callService(domainOf(companionId), service, companionId, extra)
+        if (sent is HaCall.Failed) {
+            // No `maskState` even for a security kind: the reading on screen belongs to the
+            // primary entity and is untouched by this call's failure.
+            write(kind, glanceId) { it.putBlocker(sent.blocker) }
         }
     }
 

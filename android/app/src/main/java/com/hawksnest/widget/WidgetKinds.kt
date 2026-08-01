@@ -14,6 +14,7 @@ internal fun glanceWidget(kind: WidgetKind): GlanceAppWidget = when (kind) {
     WidgetKind.ALARM -> AlarmWidget()
     WidgetKind.TEMPERATURE -> TemperatureWidget()
     WidgetKind.SWITCH -> SwitchWidget()
+    WidgetKind.SCENE_PAD -> ScenePadWidget()
 }
 
 internal fun glanceWidgetClass(kind: WidgetKind): Class<out GlanceAppWidget> = when (kind) {
@@ -22,4 +23,5 @@ internal fun glanceWidgetClass(kind: WidgetKind): Class<out GlanceAppWidget> = w
     WidgetKind.ALARM -> AlarmWidget::class.java
     WidgetKind.TEMPERATURE -> TemperatureWidget::class.java
     WidgetKind.SWITCH -> SwitchWidget::class.java
+    WidgetKind.SCENE_PAD -> ScenePadWidget::class.java
 }

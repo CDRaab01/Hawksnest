@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sized to hold a wall plate rather than a control: a relay key across the top and a 2×2 grid
+  beneath it need real height before any of the five is worth aiming a thumb at, so this is the
+  largest default in the suite at 3×4 cells.
+
+  **minResizeHeight must be below minHeight**, or the launcher offers no vertical resize at all —
+  the rule light_widget_info.xml records the hard way. 120dp is the point below which the two grid
+  rows stop clearing the touch floor; the pad simply drops its header first (see
+  `scenePadShowsHeader` in core/logic/ScenePadModel.kt) and keeps the plate whole.
+
+  updatePeriodMillis is the platform floor of 30 minutes and is not this widget's freshness
+  mechanism; every render and every action triggers a read, and WidgetLiveBridge pushes changes
+  while the app is running. See ARCHITECTURE.md.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="150dp"
+    android:minHeight="150dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="4"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="120dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:previewImage="@drawable/ic_widget_scene_pad"
+    android:description="@string/widget_scene_pad_description"
+    android:configure="com.hawksnest.widget.WidgetConfigActivity"
+    android:widgetCategory="home_screen" />

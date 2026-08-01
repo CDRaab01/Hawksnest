@@ -340,7 +340,7 @@ class WidgetModelTest {
 
     @Test
     fun `predicting an on with a level sets both state and brightness`() {
-        val predicted = predictLight(
+        val predicted = predictOptimistic(
             snapshot("off", entityId = "light.kitchen"),
             service = "turn_on",
             extra = mapOf("brightness_pct" to 40),
@@ -353,8 +353,8 @@ class WidgetModelTest {
 
     @Test
     fun `predicting a toggle flips the state`() {
-        assertEquals("off", predictLight(snapshot("on"), "toggle", emptyMap(), now).state)
-        assertEquals("on", predictLight(snapshot("off"), "toggle", emptyMap(), now).state)
+        assertEquals("off", predictOptimistic(snapshot("on"), "toggle", emptyMap(), now).state)
+        assertEquals("on", predictOptimistic(snapshot("off"), "toggle", emptyMap(), now).state)
     }
 
     // ── Blockers ──────────────────────────────────────────────────────────────────────────────

@@ -17,10 +17,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -30,6 +37,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -45,7 +53,12 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.stringAttr
+import com.hawksnest.core.ha.stringListAttr
+import com.hawksnest.core.logic.LedColor
+import com.hawksnest.core.logic.SCENE_PAD_KEYS
+import com.hawksnest.core.logic.ScenePadKey
 import com.hawksnest.core.logic.WIDGET_TEMP_COLD_BELOW_DEFAULT
+import com.hawksnest.core.logic.ZEN32_DEFAULT_LEDS
 import com.hawksnest.core.logic.WIDGET_TEMP_HOT_ABOVE_DEFAULT
 import com.hawksnest.core.logic.WIDGET_TEMP_WARM_ABOVE_DEFAULT
 import com.hawksnest.core.logic.WidgetBlocker
@@ -55,6 +68,7 @@ import com.hawksnest.core.logic.resolveName
 import com.hawksnest.core.logic.widgetCandidates
 import com.hawksnest.ui.theme.HawksnestTheme
 import com.hawksnest.widget.data.HaCall
+import com.hawksnest.widget.data.ScenePadConfig
 import com.hawksnest.widget.data.WidgetEntryPoint
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
@@ -115,7 +129,15 @@ class WidgetConfigActivity : ComponentActivity() {
                     // says nothing about what "comfortable" means in that room.
                     var pendingSensor by remember { mutableStateOf<HassEntity?>(null) }
                     val sensor = pendingSensor
-                    if (kind == WidgetKind.TEMPERATURE && sensor != null) {
+                    if (kind == WidgetKind.SCENE_PAD && sensor != null) {
+                        ScenePadScreen(
+                            select = sensor,
+                            name = resolveName(sensor, overrides),
+                            relayCandidates = relayCandidates(),
+                            onBack = { pendingSensor = null },
+                            onSave = { config -> save(kind, sensor, scenePad = config) },
+                        )
+                    } else if (kind == WidgetKind.TEMPERATURE && sensor != null) {
                         ThresholdScreen(
                             sensor = sensor,
                             name = resolveName(sensor, overrides),
@@ -133,8 +155,13 @@ class WidgetConfigActivity : ComponentActivity() {
                             kind = kind,
                             connectionManager = connectionManager,
                             onPick = { entity ->
-                                if (kind == WidgetKind.TEMPERATURE) pendingSensor = entity
-                                else save(kind, entity)
+                                // The two kinds with a second step. Both reuse `pendingSensor`
+                                // as "the entity chosen on step one, waiting on step two".
+                                if (kind == WidgetKind.TEMPERATURE || kind == WidgetKind.SCENE_PAD) {
+                                    pendingSensor = entity
+                                } else {
+                                    save(kind, entity)
+                                }
                             },
                             onOpenApp = { startActivity(Intent(this, MainActivity::class.java)) },
                         )
@@ -154,8 +181,28 @@ class WidgetConfigActivity : ComponentActivity() {
             provider.endsWith(TemperatureWidgetReceiver::class.java.simpleName) ->
                 WidgetKind.TEMPERATURE
             provider.endsWith(SwitchWidgetReceiver::class.java.simpleName) -> WidgetKind.SWITCH
+            provider.endsWith(ScenePadWidgetReceiver::class.java.simpleName) -> WidgetKind.SCENE_PAD
             else -> null
         }
+    }
+
+    /**
+     * What the scene pad's relay step can offer: the same relays the switch widget's picker finds.
+     *
+     * Read off the live socket if there is one, and otherwise left empty rather than fetched over
+     * REST — the relay is the pad's optional second entity, and a blank list on step two costs the
+     * owner one setting, where blocking step two on a network round trip would cost them the whole
+     * widget.
+     */
+    private fun relayCandidates(): List<HassEntity> {
+        val ha = connectionManager.state
+        val entities = ha.entities.value.values.toList().ifEmpty { return emptyList() }
+        return widgetCandidates(
+            kind = WidgetKind.SWITCH,
+            entities = entities,
+            categories = ha.entityCategories.value,
+            platforms = ha.entityPlatforms.value,
+        ).sortedBy { resolveName(it, overrides).lowercase() }
     }
 
     private fun save(
@@ -163,6 +210,7 @@ class WidgetConfigActivity : ComponentActivity() {
         entity: HassEntity,
         thresholds: Triple<Double, Double, Double>? = null,
         room: String? = null,
+        scenePad: ScenePadConfig? = null,
     ) {
         lifecycleScope.launch {
             val glanceId = GlanceAppWidgetManager(this@WidgetConfigActivity).getGlanceIdBy(appWidgetId)
@@ -175,6 +223,7 @@ class WidgetConfigActivity : ComponentActivity() {
                 // Not derived from the entity at save time: for widgets other than temperature
                 // this is null, and the picker path has no room step.
                 room = room ?: connectionManager.state.areas.value[entity.entityId],
+                scenePad = scenePad,
             )
             setResult(Activity.RESULT_OK, resultIntent())
             finish()
@@ -241,6 +290,7 @@ private fun PickerScreen(
                 WidgetKind.ALARM -> "Choose an alarm panel"
                 WidgetKind.TEMPERATURE -> "Choose a temperature sensor"
                 WidgetKind.SWITCH -> "Choose a switch"
+                WidgetKind.SCENE_PAD -> "Choose a preset selector"
             },
             style = MaterialTheme.typography.headlineSmall,
         )
@@ -406,6 +456,146 @@ private fun ThresholdScreen(
             ) { Text("Save") }
         }
     }
+}
+
+/**
+ * The scene pad's second step: which preset each key fires, what colour its LED is, and which
+ * entity the big relay key drives.
+ *
+ * ## Why the presets are not simply the select's options
+ *
+ * The tempting shortcut is to take the four keys from the entity's own `options` list. It does not
+ * work: a WLED preset selector carries every preset in the device (twelve, on the household this
+ * was built for), and which four the wall keys fire is decided by a Home Assistant automation the
+ * widget cannot read. So the owner picks them here — from the live `options`, so the choices are
+ * always real and never typed.
+ *
+ * Prefilled with the first four options rather than with any particular preset name, deliberately:
+ * the widget layer contains no device-specific entity ids or preset names anywhere, and a default
+ * that happened to be right for one household would be four wrong guesses for every other. The
+ * LED colours *are* prefilled with a real plate's ([ZEN32_DEFAULT_LEDS]) — a colour is cosmetic
+ * and costs nothing when it is wrong, where a preset fires the wrong scene.
+ */
+@Composable
+private fun ScenePadScreen(
+    select: HassEntity,
+    name: String,
+    relayCandidates: List<HassEntity>,
+    onBack: () -> Unit,
+    onSave: (ScenePadConfig) -> Unit,
+) {
+    val options = select.stringListAttr("options")
+    var relay by remember { mutableStateOf<HassEntity?>(null) }
+    val presets = remember {
+        mutableStateMapOf<ScenePadKey, String>().apply {
+            SCENE_PAD_KEYS.forEachIndexed { index, key -> options.getOrNull(index)?.let { put(key, it) } }
+        }
+    }
+    val leds = remember { mutableStateMapOf<ScenePadKey, LedColor>().apply { putAll(ZEN32_DEFAULT_LEDS) } }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
+    ) {
+        Text(name, style = MaterialTheme.typography.headlineSmall)
+        Text(
+            text = if (options.isEmpty()) {
+                "This entity offers no options, so the keys have nothing to fire. Go back and " +
+                    "pick the selector the wall keys actually change."
+            } else {
+                "The big key at the top drives the relay. The four below it fire a preset each, " +
+                    "top-left first — the same order as the plate."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+
+        SettingRow(label = "Relay (big key)") {
+            ChoiceMenu(
+                current = relay?.let { resolveName(it, overrides) }
+                    // Not an error state: a pad with no relay simply draws that key dead. Plenty
+                    // of installs will want the four scenes and nothing else.
+                    ?: if (relayCandidates.isEmpty()) "Unavailable offline" else "None",
+                options = relayCandidates.map { resolveName(it, overrides) },
+                onPick = { index -> relay = relayCandidates[index] },
+            )
+            LedMenu(current = leds.getValue(ScenePadKey.RELAY)) { leds[ScenePadKey.RELAY] = it }
+        }
+
+        SCENE_PAD_KEYS.forEachIndexed { index, key ->
+            SettingRow(label = "Key ${index + 1}") {
+                ChoiceMenu(
+                    current = presets[key] ?: "None",
+                    options = options,
+                    onPick = { picked -> presets[key] = options[picked] },
+                )
+                LedMenu(current = leds.getValue(key)) { leds[key] = it }
+            }
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(top = 24.dp),
+        ) {
+            TextButton(onClick = onBack) { Text("Back") }
+            Button(
+                onClick = {
+                    onSave(
+                        ScenePadConfig(
+                            relayEntityId = relay?.entityId,
+                            presets = presets.toMap(),
+                            leds = leds.toMap(),
+                        )
+                    )
+                }
+            ) { Text("Save") }
+        }
+    }
+}
+
+/** One labelled line of the scene-pad form: the setting on the left, its controls on the right. */
+@Composable
+private fun SettingRow(label: String, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) { content() }
+    }
+}
+
+/** A plain dropdown. Reads its current value, offers a list, reports the index picked. */
+@Composable
+private fun ChoiceMenu(current: String, options: List<String>, onPick: (Int) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }, enabled = options.isNotEmpty()) {
+            Text(current)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEachIndexed { index, option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onPick(index)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** The LED colour dropdown — the device's own seven, in the device's own order. */
+@Composable
+private fun LedMenu(current: LedColor, onPick: (LedColor) -> Unit) {
+    ChoiceMenu(
+        current = current.name.lowercase().replaceFirstChar { it.uppercaseChar() },
+        options = LedColor.entries.map { it.name.lowercase().replaceFirstChar { c -> c.uppercaseChar() } },
+        onPick = { index -> onPick(LedColor.entries[index]) },
+    )
 }
 
 /** Whole numbers without a trailing ".0", so the fields read like a person wrote them. */
