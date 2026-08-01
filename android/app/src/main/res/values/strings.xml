@@ -12,4 +12,6 @@
     <string name="widget_alarm_description">Arm home, arm away, or disarm the alarm panel.</string>
     <string name="widget_temperature_label">Hawksnest Temperature</string>
     <string name="widget_temperature_description">A room\'s temperature, coloured by whether it\'s comfortable.</string>
+    <string name="widget_switch_label">Hawksnest Switch</string>
+    <string name="widget_switch_description">A paddle for one on/off switch — on top, off below.</string>
 </resources>

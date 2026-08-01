@@ -6,13 +6,14 @@ import com.hawksnest.core.logic.WidgetKind
 /**
  * The one place that knows which `GlanceAppWidget` a [WidgetKind] means. Both the repository
  * (which redraws a widget after a change) and the live bridge (which enumerates the widgets on the
- * home screen) need this mapping; adding a fourth widget should mean editing one `when`.
+ * home screen) need this mapping; adding a widget should mean editing one `when`.
  */
 internal fun glanceWidget(kind: WidgetKind): GlanceAppWidget = when (kind) {
     WidgetKind.LIGHT -> LightWidget()
     WidgetKind.LOCK -> LockWidget()
     WidgetKind.ALARM -> AlarmWidget()
     WidgetKind.TEMPERATURE -> TemperatureWidget()
+    WidgetKind.SWITCH -> SwitchWidget()
 }
 
 internal fun glanceWidgetClass(kind: WidgetKind): Class<out GlanceAppWidget> = when (kind) {
@@ -20,4 +21,5 @@ internal fun glanceWidgetClass(kind: WidgetKind): Class<out GlanceAppWidget> = w
     WidgetKind.LOCK -> LockWidget::class.java
     WidgetKind.ALARM -> AlarmWidget::class.java
     WidgetKind.TEMPERATURE -> TemperatureWidget::class.java
+    WidgetKind.SWITCH -> SwitchWidget::class.java
 }

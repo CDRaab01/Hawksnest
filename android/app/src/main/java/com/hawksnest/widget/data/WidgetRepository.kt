@@ -17,6 +17,8 @@ import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.predictLight
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.core.logic.toSnapshot
+import com.hawksnest.core.logic.widgetIsOptimistic
+import com.hawksnest.core.logic.widgetKeepsStaleReading
 import com.hawksnest.di.ApplicationScope
 import com.hawksnest.widget.glanceWidget
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -160,7 +162,7 @@ class WidgetRepository @Inject constructor(
 
         write(kind, glanceId) { prefs ->
             prefs.clearConfirm()
-            if (kind == WidgetKind.LIGHT && snapshot != null) {
+            if (widgetIsOptimistic(kind) && snapshot != null) {
                 // Draw the result now; the confirming read below corrects it if HA disagrees.
                 prefs.putSnapshot(predictLight(snapshot, service, extra, startedAt), json)
             } else {
@@ -175,13 +177,13 @@ class WidgetRepository @Inject constructor(
             write(kind, glanceId) { prefs ->
                 prefs.clearPending()
                 prefs.putBlocker(sent.blocker)
-                if (kind != WidgetKind.LIGHT) prefs.maskState()
+                if (!widgetKeepsStaleReading(kind)) prefs.maskState()
             }
             return
         }
 
-        if (kind == WidgetKind.LIGHT) {
-            // HA applies a light immediately; one read a beat later reconciles the optimistic draw.
+        if (widgetIsOptimistic(kind)) {
+            // HA applies these immediately; one read a beat later reconciles the optimistic draw.
             delay(LIGHT_CONFIRM_DELAY_MS)
             fetch(kind, glanceId, entityId)
             return
@@ -239,8 +241,10 @@ class WidgetRepository @Inject constructor(
                 write(kind, glanceId) { prefs ->
                     prefs.putBlocker(result.blocker)
                     // Same rule as the app's `maskSecurityStates`: a lock we can't reach stops
-                    // claiming to be locked. A light may keep its last reading — it shows its age.
-                    if (kind != WidgetKind.LIGHT) prefs.maskState()
+                    // claiming to be locked. Everything else may keep its last reading — it shows
+                    // its age. This used to read `kind != LIGHT`, which masked a TEMPERATURE
+                    // widget against its own documented contract; see [widgetKeepsStaleReading].
+                    if (!widgetKeepsStaleReading(kind)) prefs.maskState()
                 }
                 null
             }

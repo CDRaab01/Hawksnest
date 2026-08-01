@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Taller than the light widget by default, because the paddle is the point: at 2x3 both halves get
+  a real touch target and the thing reads as a wall plate rather than a button with a label.
+
+  **minResizeHeight must be below minHeight**, or the launcher offers no vertical resize at all —
+  the rule light_widget_info.xml records the hard way. 40dp here lets it squeeze to a single row,
+  where the layout drops to its compact tier (one full-height toggle) rather than clipping; see
+  `sizeTier` in core/logic/WidgetModel.kt.
+
+  updatePeriodMillis is the platform floor of 30 minutes and is not this widget's freshness
+  mechanism; every render and every action triggers a read, and WidgetLiveBridge pushes changes
+  while the app is running. See ARCHITECTURE.md.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="3"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="40dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:previewImage="@drawable/ic_widget_switch"
+    android:description="@string/widget_switch_description"
+    android:configure="com.hawksnest.widget.WidgetConfigActivity"
+    android:widgetCategory="home_screen" />

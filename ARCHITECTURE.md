@@ -471,8 +471,8 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   automations that publish to it) lives in the `hawksnest-automation` repo (`docs/ntfy-push.md`).
   On-device runtime (delivery with the app closed, battery, reconnect, the tap deep-link) is the
   one part unit tests can't cover — smoke-test it on the phone.
-- **Home-screen widgets** (`widget/`, Glance/RemoteViews) — a light/switch toggle with dim steps,
-  a lock, the alarm panel's Off/Home/Away, and a read-only room temperature. Four
+- **Home-screen widgets** (`widget/`, Glance/RemoteViews) — a light toggle with dim steps, an
+  on/off paddle, a lock, the alarm panel's Off/Home/Away, and a read-only room temperature. Five
   `GlanceAppWidgetReceiver`s so the launcher lists them separately; one shared
   `WidgetConfigActivity` (it learns which widget it is configuring from the provider that launched
   it) picking an entity from `GET /api/states`.
@@ -524,10 +524,18 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     and alarm readings carry a 60 s expiry (`securityStateFresh`); past it the widget renders
     "Checking…" and refetches rather than repeating itself. This extends invariant 2's mask: on
     any failed fetch the stored security reading is dropped (`maskState`), the same rule
-    `maskSecurityStates` applies in-app when the socket drops. Lights are exempt — a lamp drawn
-    wrong is cosmetic — so they render from cache with their age shown once past 15 minutes.
-    Persisted pending and confirm markers expire the same way, so a process killed mid-poll can't
-    strand a spinner.
+    `maskSecurityStates` applies in-app when the socket drops. Everything else is exempt — a lamp
+    or a thermometer drawn wrong is cosmetic — so it renders from cache with its age shown once
+    past 15 minutes. Persisted pending and confirm markers expire the same way, so a process killed
+    mid-poll can't strand a spinner.
+    **Which kinds those are is two named predicates, not a condition repeated per call site.**
+    `widgetIsOptimistic` (draw the command now, reconcile after) and `widgetKeepsStaleReading` (may
+    show a reading HA can't confirm) live beside the view-models and are unit-tested. They replaced
+    four copies of `kind == WidgetKind.LIGHT` in `WidgetRepository`, which had quietly got the
+    temperature widget wrong: its own view-model is built to show an expired reading with its age,
+    but the repository blanked it on any failed fetch, because the condition named a kind instead
+    of the rule. A condition spelled as a list of kinds acquires a bug every time a kind is added;
+    one spelled as the rule does not.
   - **The expiry alone isn't enough, because a drawn widget is pixels.** Nothing redraws the home
     screen when a value ages out, so a frame that said "Locked" when it was true can still be
     there an hour later. Rather than schedule redraws forever (a permanent background poll, for a
@@ -545,10 +553,30 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     like a physical dimmer's gearing. A read-only `LinearProgressIndicator` under the name shows
     the level; it is deliberately not tappable, because a ~250dp-wide widget split into enough
     zones to beat the step buttons would have ~20dp targets.
-  - **The picker offers `light` only, not `switch`.** It briefly took both, on the theory that
-    relay-style lights land in `switch` — but here `switch.*` is overwhelmingly ring-mqtt camera
-    plumbing (live/event streams, motion toggles, sirens), which buried the real lights. The app
-    keeps the domains apart too (`Cards.kt`).
+  - **The switch widget is a paddle, and exists because the domain lies.** `light.*` does not mean
+    dimmable: Z-Wave exposes the Inovelli VZW30-SN — an on/off switch — as a Multilevel Switch, so
+    HA reports `supported_color_modes: ["brightness"]` and the light widget dutifully offers dim
+    steps to hardware with no dimmer. `switchWidgetView` therefore **never consults
+    `supported_color_modes` or `brightness`**: the kind is the promise, and the owner picking a
+    switch widget is a better signal than the entity's own description of itself. `turn_on` is sent
+    bare so HA restores the device's last level, which is what pressing the top of the physical
+    paddle does. It draws **two stacked halves — On above, Off below — each always present and
+    always tappable in the direction it names**, rather than the light's single self-describing
+    toggle: a paddle has no "what will this tap do?" problem, so the state can be carried by which
+    half is filled, and a half that moved or vanished as the state changed would be worse than a
+    wasted tap. Compact has no room for two 48dp targets, so it collapses to one full-height
+    toggle. Two size buckets, not the light's four — `compactNamePlacement` is INLINE for SWITCH at
+    every width, since "On"/"Off" never need abbreviating, so a width bucket would be a layout
+    nothing could select.
+  - **The light picker offers `light` only; the switch picker takes both domains back.** The light
+    briefly took both, on the theory that relay-style lights land in `switch` — but here `switch.*`
+    is overwhelmingly ring-mqtt camera plumbing (live/event streams, motion toggles, sirens), which
+    buried the real lights. The app keeps the domains apart too (`Cards.kt`). The switch widget
+    needs both, because a relay lands in either depending on the integration, and takes the domain
+    back safely by filtering on the entity's **platform** (`ring`/`mqtt`, the constants
+    `dedupeRingMqtt` already uses) rather than a name-suffix denylist — that drops the whole
+    integration instead of guessing at names, and with no registry it degrades to unfiltered rather
+    than to wrong.
   - **`WidgetConfigActivity` is the one part of this feature that is not REST-only**, and
     deliberately: it is an ordinary activity in the app process, so it can use `ConnectionManager`
     and with it HA's **entity registry** — which REST cannot see. That buys the picker the full
@@ -694,10 +722,15 @@ change deploy files, that test is the spec**; update both together.
 - **New home-screen widget**: a `WidgetKind` + its pure view-model in `core/logic/WidgetModel.kt`,
   a `GlanceAppWidget`/`Receiver` pair in `widget/`, the `when` in `widget/WidgetKinds.kt`, an
   `appwidget-provider` XML, and a manifest receiver. The data layer is domain-agnostic already.
-  (The temperature widget is the worked example, and the exhaustive `when`s make the compiler
-  list every site you still owe.) Per-instance *settings* beyond the entity — like its two colour
-  thresholds — are extra `WidgetKeys` written by `WidgetRepository.configure`, plus a second step
-  in `WidgetConfigActivity` after the picker.
+  (Two worked examples: the **temperature** widget for one that carries extra per-instance
+  settings, the **switch** widget for the smallest possible kind. The exhaustive `when`s make the
+  compiler list every site you still owe.) Per-instance *settings* beyond the entity — like
+  temperature's colour thresholds — are extra `WidgetKeys` written by `WidgetRepository.configure`,
+  plus a second step in `WidgetConfigActivity` after the picker.
+  Two things the compiler will *not* catch: `minResizeHeight` must be strictly below `minHeight`
+  or the launcher offers no vertical resize, and behaviour that varies by kind belongs in a named
+  predicate in `WidgetModel.kt` (`widgetIsOptimistic`, `widgetKeepsStaleReading`), never a
+  `kind == …` test written inline at the call site.
 - **HA protocol behavior**: extend `mock-ha/` first, write the failing E2E, then implement.
 - **Deploy changes**: `deploy/` + `deploy.test.ts` together.
 - **Automation-side features** (new sensors, Ring/Z-Wave config): wrong repo — that's

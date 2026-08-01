@@ -31,7 +31,35 @@ import kotlin.math.roundToInt
  */
 
 /** Which control a home-screen widget hosts. */
-enum class WidgetKind { LIGHT, LOCK, ALARM, TEMPERATURE }
+enum class WidgetKind { LIGHT, LOCK, ALARM, TEMPERATURE, SWITCH }
+
+/**
+ * Kinds that draw a command the instant it is sent and reconcile a beat later, rather than
+ * holding a spinner until HA echoes back.
+ *
+ * The rule is the cost of being briefly wrong. A lamp or a paddle drawn wrong for the second it
+ * takes a confirming read is a cosmetic error; a lock or an alarm drawn wrong is not, which is the
+ * same line `RockerSwitch` and `LockVault` draw in-app.
+ */
+fun widgetIsOptimistic(kind: WidgetKind): Boolean = when (kind) {
+    WidgetKind.LIGHT, WidgetKind.SWITCH -> true
+    WidgetKind.LOCK, WidgetKind.ALARM, WidgetKind.TEMPERATURE -> false
+}
+
+/**
+ * Kinds that may keep showing a reading HA can no longer confirm, with its age attached.
+ *
+ * The widget-side counterpart of the app's `maskSecurityStates`. Only the lock and the alarm must
+ * drop a reading they can't vouch for; everything else keeps it, because [stalenessLabel] already
+ * makes the frame tell the truth about itself.
+ *
+ * This existed as `kind != WidgetKind.LIGHT` scattered through the repository, which quietly got
+ * TEMPERATURE wrong — [temperatureWidgetView]'s own contract is that an expired reading is still
+ * shown with its age, but the repository masked it on any failed fetch. Naming the rule once fixes
+ * that and stops the condition growing an `||` for every kind added after.
+ */
+fun widgetKeepsStaleReading(kind: WidgetKind): Boolean =
+    kind != WidgetKind.LOCK && kind != WidgetKind.ALARM
 
 // --- temperature widget ------------------------------------------------------
 
@@ -211,7 +239,10 @@ fun compactNamePlacement(kind: WidgetKind, widthDp: Int, heightDp: Int): Compact
     // room temperature with no room is not a smaller version of the widget, it is a useless one.
     // Its status is one word ("Warm") and untimestamped, so there is room to share the line even
     // narrow; a long room name ellipsizes into whatever is left, which still beats hiding it.
-    kind == WidgetKind.LIGHT || kind == WidgetKind.TEMPERATURE -> CompactName.INLINE
+    // A paddle joins them: "On"/"Off" is the shortest state line there is, it carries no
+    // timestamp, and a switch drawn wrong is the same cosmetic error a lamp is.
+    kind == WidgetKind.LIGHT || kind == WidgetKind.TEMPERATURE ||
+        kind == WidgetKind.SWITCH -> CompactName.INLINE
     widthDp >= WIDGET_NAME_MIN_WIDTH_DP -> CompactName.INLINE
     heightDp >= WIDGET_COMPACT_TALL_BUCKET_DP -> CompactName.STACKED
     else -> CompactName.HIDDEN
@@ -231,6 +262,11 @@ fun widgetCandidateDomains(kind: WidgetKind): Set<String> = when (kind) {
     WidgetKind.LOCK -> setOf("lock")
     WidgetKind.ALARM -> setOf("alarm_control_panel")
     WidgetKind.TEMPERATURE -> setOf("sensor")
+    // The switch widget takes BOTH, because a relay paddle lands in either depending on how the
+    // integration models it — a Z-Wave on/off switch that reports Multilevel arrives as `light.*`,
+    // a plain relay as `switch.*`. Taking `switch` back is only safe because [widgetCandidates]
+    // drops the ring-mqtt camera plumbing that got it removed from the light picker.
+    WidgetKind.SWITCH -> setOf("light", "switch")
 }
 
 /**
@@ -259,7 +295,17 @@ fun widgetCandidates(
             // `sensor` is a huge domain — narrow it to actual thermometers, or the
             // picker offers every battery level and fps counter in the house. The
             // other kinds own their domain outright and need no extra filter.
-            (kind != WidgetKind.TEMPERATURE || entity.stringAttr("device_class") == "temperature")
+            (kind != WidgetKind.TEMPERATURE || entity.stringAttr("device_class") == "temperature") &&
+            // The switch widget reaches into `switch.*`, which on this house is overwhelmingly
+            // ring-mqtt camera plumbing — the exact reason the light picker gave that domain up.
+            // Filtering on the entity's PLATFORM rather than a name-suffix denylist is what makes
+            // taking it back safe: it drops the whole integration rather than guessing at names,
+            // and with no registry it degrades to unfiltered instead of to wrong.
+            (
+                kind != WidgetKind.SWITCH ||
+                    entity.entityId.substringBefore('.') != "switch" ||
+                    platforms[entity.entityId] !in setOf(RING_PLATFORM, MQTT_PLATFORM)
+                )
     }
     // The household runs both the Ring integration and ring-mqtt, so a Ring light can appear
     // twice under one name. Same collapse the Devices list does.
@@ -410,10 +456,73 @@ fun widgetEchoSettled(kind: WidgetKind, before: String?, current: String): Boole
         WidgetKind.LOCK -> current !in LOCK_TRANSITIONAL
         WidgetKind.ALARM -> current !in ALARM_TRANSITIONAL
         WidgetKind.LIGHT -> true
+        // A paddle has no transitional states — a relay is open or closed.
+        WidgetKind.SWITCH -> true
         // A temperature widget issues no commands, so nothing ever waits on its
         // echo. Any change is "settled" by definition.
         WidgetKind.TEMPERATURE -> true
     }
+}
+
+// ── Switch ───────────────────────────────────────────────────────────────────────────────────
+
+data class SwitchWidgetView(
+    val name: String,
+    val on: Boolean,
+    /** "On", "Off", "Unavailable", "Checking…". Never a percentage — see [switchWidgetView]. */
+    val stateLabel: String,
+    /** False for `unavailable`/`unknown` and before the first fetch — controls are disabled. */
+    val controllable: Boolean,
+    val pending: Boolean,
+    val staleness: String?,
+)
+
+/**
+ * A paddle that is on/off only, whatever HA says about it.
+ *
+ * This exists because the light widget gets one device badly wrong. The Inovelli VZW30-SN is an
+ * on/off switch, but Z-Wave exposes it as a Multilevel Switch, so HA reports
+ * `supported_color_modes: ["brightness"]` and a `brightness` attribute — [isDimmableLight]
+ * therefore returns true and the light widget offers dim steps to hardware with no dimmer.
+ *
+ * So this view-model **never consults either attribute**. The kind is the promise: place a switch
+ * widget and you get a paddle, whatever the entity claims about itself. That is also why the
+ * picker accepts `light.*` as well as `switch.*` — the domain does not tell you what the hardware
+ * is, and the owner does.
+ *
+ * Turning on sends a bare `turn_on` with no brightness, so HA restores the device's own last
+ * level. That is exactly what pressing the top of the physical paddle does.
+ */
+fun switchWidgetView(
+    snapshot: WidgetSnapshot?,
+    nowMs: Long,
+    pendingSinceMs: Long? = null,
+): SwitchWidgetView {
+    val pending = widgetPending(pendingSinceMs, nowMs)
+    if (snapshot == null) {
+        return SwitchWidgetView(
+            name = "Switch",
+            on = false,
+            stateLabel = "Checking…",
+            controllable = false,
+            pending = pending,
+            staleness = null,
+        )
+    }
+    val on = snapshot.state == "on"
+    val settled = snapshot.state == "on" || snapshot.state == "off"
+    return SwitchWidgetView(
+        name = snapshot.name,
+        on = on,
+        stateLabel = when {
+            !settled -> snapshot.state.replaceFirstChar { it.uppercaseChar() }
+            on -> "On"
+            else -> "Off"
+        },
+        controllable = settled,
+        pending = pending,
+        staleness = stalenessLabel(snapshot.fetchedAtMs, nowMs),
+    )
 }
 
 // ── Light ────────────────────────────────────────────────────────────────────────────────────
