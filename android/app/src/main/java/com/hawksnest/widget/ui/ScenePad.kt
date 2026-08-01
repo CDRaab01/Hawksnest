@@ -30,14 +30,23 @@ import com.hawksnest.core.logic.ScenePadKeyView
  * last time this layer was touched, and nothing here is reachable from any widget but this one.
  */
 
-/** The gap between keys — a wall plate's seam, not a layout gutter. */
+/**
+ * The gap between keys — a wall plate's seam, not a layout gutter.
+ *
+ * Two sizes because the pad has to survive being squeezed onto a couple of launcher cells: at that
+ * size a 5dp seam between five keys is a visible fraction of the plate, and the whole thing reads
+ * as a grid of loose tiles rather than one switch.
+ */
 val SCENE_KEY_GAP = 5.dp
+val SCENE_KEY_GAP_SMALL = 3.dp
 
 /** How far the LED sits in from the key's top-left corner, as it does on the hardware. */
 private val LED_INSET = 7.dp
+private val LED_INSET_SMALL = 4.dp
 
 /** The lamp itself. Small on purpose: on the real plate it is a pinhole, not an indicator light. */
 private val LED_SIZE = 7.dp
+private val LED_SIZE_SMALL = 5.dp
 
 /**
  * Each LED colour as a day/night pair.
@@ -105,6 +114,8 @@ fun ScenePadKeyFace(
     action: Action?,
     description: String,
     modifier: GlanceModifier = GlanceModifier,
+    /** Tighter inset and a smaller lamp, for a pad squeezed onto a couple of launcher cells. */
+    small: Boolean = false,
 ) {
     // Box applies `contentAlignment` to every child — there is no per-child align in Glance — so a
     // key holding anything besides the LED would need that other content to fill the box and
@@ -113,13 +124,13 @@ fun ScenePadKeyFace(
         modifier = modifier
             .background(ImageProvider(R.drawable.widget_button_face))
             .let { if (action != null) it.clickable(action) else it }
-            .padding(LED_INSET),
+            .padding(if (small) LED_INSET_SMALL else LED_INSET),
         contentAlignment = Alignment.TopStart,
     ) {
         Image(
             provider = ImageProvider(R.drawable.ic_led_dot),
             contentDescription = description,
-            modifier = GlanceModifier.size(LED_SIZE),
+            modifier = GlanceModifier.size(if (small) LED_SIZE_SMALL else LED_SIZE),
             colorFilter = ColorFilter.tint(ledColor(view.led, view.active)),
         )
     }

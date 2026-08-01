@@ -15,6 +15,11 @@ import com.hawksnest.ui.navigation.AppNavGraph
 import com.hawksnest.ui.navigation.Screen
 import com.hawksnest.ui.theme.HawksnestTheme
 import dagger.hilt.android.AndroidEntryPoint
+import androidx.lifecycle.lifecycleScope
+import com.hawksnest.push.NtfyPushService
+import com.hawksnest.push.PushSettings
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -25,10 +30,20 @@ import javax.inject.Inject
 class MainActivity : FragmentActivity() {
 
     @Inject lateinit var pushNav: PushNav
+    @Inject lateinit var pushSettings: PushSettings
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Push may have been refused at process start: Android 12+ forbids starting a foreground
+        // service from the background, and this process is often created by a widget tap rather
+        // than by the launcher. `HawksnestApp.onCreate` runs once per process, so without a retry
+        // from somewhere Android does allow, push would stay down for the life of that process —
+        // including after the owner opens the app. Here is that somewhere. Starting an already
+        // running listener is a no-op it handles itself.
+        lifecycleScope.launch {
+            if (pushSettings.enabled.first()) NtfyPushService.start(this@MainActivity)
+        }
         // A doorbell notification carries a camera id to open. Route it through PushNav
         // (the nav shell brings Home forward and opens that camera's lightbox) rather
         // than a start destination — a specific camera opens in an overlay, not a route.

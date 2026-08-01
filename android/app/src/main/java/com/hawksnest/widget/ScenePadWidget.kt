@@ -1,6 +1,7 @@
 package com.hawksnest.widget
 
 import android.content.Context
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
@@ -41,9 +42,11 @@ import com.hawksnest.widget.data.scenePresets
 import com.hawksnest.widget.data.snapshot
 import com.hawksnest.widget.ui.BlockerBody
 import com.hawksnest.widget.ui.SCENE_KEY_GAP
+import com.hawksnest.widget.ui.SCENE_KEY_GAP_SMALL
 import com.hawksnest.widget.ui.ScenePadKeyFace
 import com.hawksnest.widget.ui.WidgetHeader
 import com.hawksnest.widget.ui.WidgetPanel
+import com.hawksnest.widget.ui.openWidgetConfig
 import kotlinx.serialization.json.Json
 
 /**
@@ -107,20 +110,28 @@ private fun ScenePadBody(prefs: Preferences, json: Json) {
         pendingSinceMs = prefs.pendingSince(),
     )
     val retry = actionRunCallback<WidgetRefreshAction>(widgetParams(WidgetKind.SCENE_PAD))
+    val showHeader = scenePadShowsHeader(LocalSize.current.height.value.toInt())
+    // Below the header threshold the plate is the whole widget, so the panel gives up half its
+    // padding to it. 12dp of inset around a 150dp pad is most of a key.
+    val gap = if (showHeader) SCENE_KEY_GAP else SCENE_KEY_GAP_SMALL
 
-    WidgetPanel {
+    WidgetPanel(compact = !showHeader) {
         if (snapshot == null) {
             BlockerBody(blocker ?: WidgetBlocker.NOT_CONFIGURED, retry, R.drawable.ic_glyph_power)
         } else {
-            if (scenePadShowsHeader(LocalSize.current.height.value.toInt())) {
+            if (showHeader) {
                 WidgetHeader(
                     name = view.name,
                     detail = view.presetLabel,
                     icon = R.drawable.ic_glyph_power,
                     pending = view.pending,
                     note = blocker?.let { blockerCopy(it).headline } ?: view.staleness,
+                    // The one widget whose title reopens its own setup rather than the app.
+                    // It carries ten settings and Android gives no other way back to them, so
+                    // "open Hawksnest" would be a dead end where the settings are the point.
+                    onClick = openWidgetConfig(),
                 )
-                Spacer(modifier = GlanceModifier.height(8.dp))
+                Spacer(modifier = GlanceModifier.height(6.dp))
             }
             // Relay above, grid below, split evenly — which lands within a couple of percent of
             // the real plate's proportions (the relay is a shade under half of it). The grid needs
@@ -144,14 +155,15 @@ private fun ScenePadBody(prefs: Preferences, json: Json) {
                         target = ActionTarget.COMPANION,
                     )
                 ).takeIf { view.relayEnabled },
-                description = "Relay",
+                description = "Power",
                 modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
+                small = !showHeader,
             )
-            Spacer(modifier = GlanceModifier.height(SCENE_KEY_GAP))
+            Spacer(modifier = GlanceModifier.height(gap))
             Column(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
-                KeyRow(view.keys.getOrNull(0), view.keys.getOrNull(1))
-                Spacer(modifier = GlanceModifier.height(SCENE_KEY_GAP))
-                KeyRow(view.keys.getOrNull(2), view.keys.getOrNull(3))
+                KeyRow(view.keys.getOrNull(0), view.keys.getOrNull(1), gap, !showHeader)
+                Spacer(modifier = GlanceModifier.height(gap))
+                KeyRow(view.keys.getOrNull(2), view.keys.getOrNull(3), gap, !showHeader)
             }
         }
     }
@@ -162,16 +174,18 @@ private fun ScenePadBody(prefs: Preferences, json: Json) {
 private fun androidx.glance.layout.ColumnScope.KeyRow(
     left: ScenePadKeyView?,
     right: ScenePadKeyView?,
+    gap: Dp,
+    small: Boolean,
 ) {
     Row(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
-        SmallKey(left)
-        Spacer(modifier = GlanceModifier.width(SCENE_KEY_GAP))
-        SmallKey(right)
+        SmallKey(left, small)
+        Spacer(modifier = GlanceModifier.width(gap))
+        SmallKey(right, small)
     }
 }
 
 @Composable
-private fun androidx.glance.layout.RowScope.SmallKey(view: ScenePadKeyView?) {
+private fun androidx.glance.layout.RowScope.SmallKey(view: ScenePadKeyView?, small: Boolean) {
     if (view == null) return
     ScenePadKeyFace(
         view = view,
@@ -186,6 +200,7 @@ private fun androidx.glance.layout.RowScope.SmallKey(view: ScenePadKeyView?) {
         // silence when the slot is empty, so a half-configured pad is still navigable.
         description = view.preset ?: "Key ${view.key.ordinal}",
         modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
+        small = small,
     )
 }
 

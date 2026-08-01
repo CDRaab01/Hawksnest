@@ -553,6 +553,25 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     like a physical dimmer's gearing. A read-only `LinearProgressIndicator` under the name shows
     the level; it is deliberately not tappable, because a ~250dp-wide widget split into enough
     zones to beat the step buttons would have ~20dp targets.
+  - **A widget tap creates a process, and that is a constraint on the whole app, not on `widget/`.**
+    `Application.onCreate` runs on every process creation, so anything it does has to be legal from
+    the background. It was starting the ntfy foreground service unconditionally, which Android 12+
+    refuses with a `ForegroundServiceStartNotAllowedException` — thrown from a bare `CoroutineScope`
+    and therefore **fatal**. The result was that tapping any widget with the app closed killed the
+    process before the widget's own service call went out: the widget looked dead and the light
+    never moved. `NtfyPushService.start` now swallows that refusal (it is an `IllegalStateException`
+    subclass, so no API guard is needed) and `MainActivity` retries from the foreground, since
+    `Application.onCreate` will not run again in that process. **Anything added to app startup must
+    be safe to run in a process the launcher created for a widget broadcast.**
+  - **A widget's control must never take its direction from the widget's own reading.** The switch
+    widget's compact tier used to collapse to a single toggle labelled with whichever direction the
+    switch was not already in. That is the ordinary way to draw a toggle and it is wrong here:
+    nothing redraws the home screen when someone flips the physical switch, so the reading behind
+    that decision can be arbitrarily old — and when it is, the one control on offer points the
+    wrong way and the state literally cannot be changed from the phone. Both directions are now
+    drawn at every size (side by side when there is no height to stack), which is correct however
+    stale the widget is, and the confirming read after any tap repairs the reading as a side
+    effect.
   - **The switch widget is a paddle, and exists because the domain lies.** `light.*` does not mean
     dimmable: Z-Wave exposes the Inovelli VZW30-SN — an on/off switch — as a Multilevel Switch, so
     HA reports `supported_color_modes: ["brightness"]` and the light widget dutifully offers dim
