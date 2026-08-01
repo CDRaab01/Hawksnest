@@ -3,6 +3,7 @@ package com.hawksnest.widget
 import android.content.Context
 import androidx.glance.GlanceId
 import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.updateAll
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.logic.WidgetKind
@@ -42,6 +43,7 @@ class WidgetLiveBridge @Inject constructor(
     fun start() {
         if (started) return
         started = true
+        scope.launch { recoverExistingWidgets() }
         scope.launch {
             // A StateFlow is already conflated, so the trailing delay is the whole throttle: a
             // firehose of entity deltas becomes one pass every few seconds over the newest map.
@@ -49,6 +51,22 @@ class WidgetLiveBridge @Inject constructor(
                 sync(entities)
                 delay(SYNC_INTERVAL_MS)
             }
+        }
+    }
+
+    /**
+     * Force every existing widget to rebuild against the current code, once, on app start.
+     *
+     * A Glance widget instance caches the shape of its own layout. When an app update changes that
+     * shape enough, an instance placed by the old version can wedge — it can't reconcile the new
+     * tree against its cache and sits on the loading spinner, while a freshly-added widget builds
+     * clean. `updateAll` pushes a fresh RemoteViews for every instance, which replaces the stale
+     * cache and un-sticks it. Harmless when nothing is wrong — it is the same rebuild a normal
+     * refresh does — so it runs unconditionally rather than trying to detect the wedge.
+     */
+    private suspend fun recoverExistingWidgets() {
+        WidgetKind.entries.forEach { kind ->
+            runCatching { glanceWidget(kind).updateAll(context) }
         }
     }
 
