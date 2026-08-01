@@ -1,0 +1,17 @@
+<!--
+  One scene-pad LED. A plain filled circle with nothing baked in but its shape, because the colour
+  is chosen at draw time per key: `ColorFilter.tint` on an Image is the only mechanism in Glance
+  that yields a runtime colour. A `<shape>` fill resolves when the drawable is inflated, and
+  `GlanceModifier.background(ImageProvider(...))` cannot be tinted at all.
+
+  Deliberately not `ic_glyph_*`: this is not an icon, it is a light.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="8dp"
+    android:height="8dp"
+    android:viewportWidth="8"
+    android:viewportHeight="8">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M4,0.5a3.5,3.5 0 1,0 0,7a3.5,3.5 0 1,0 0,-7z" />
+</vector>

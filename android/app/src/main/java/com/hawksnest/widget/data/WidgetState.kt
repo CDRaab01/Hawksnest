@@ -5,7 +5,11 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.hawksnest.core.logic.LedColor
+import com.hawksnest.core.logic.SCENE_PAD_KEYS
+import com.hawksnest.core.logic.ScenePadKey
 import com.hawksnest.core.logic.WIDGET_TEMP_COLD_BELOW_DEFAULT
+import com.hawksnest.core.logic.ZEN32_DEFAULT_LEDS
 import com.hawksnest.core.logic.WIDGET_TEMP_HOT_ABOVE_DEFAULT
 import com.hawksnest.core.logic.WIDGET_TEMP_WARM_ABOVE_DEFAULT
 import com.hawksnest.core.logic.WidgetBlocker
@@ -68,6 +72,70 @@ internal object WidgetKeys {
     val TEMP_COLD_BELOW = doublePreferencesKey("temp_cold_below")
     val TEMP_WARM_ABOVE = doublePreferencesKey("temp_warm_above")
     val TEMP_HOT_ABOVE = doublePreferencesKey("temp_hot_above")
+
+    /**
+     * The scene pad's second entity: the wall controller's own relay.
+     *
+     * Write-only — commands go to it, nothing is ever read back, and it has no [STATE] of its own
+     * here. Naming it "companion" rather than "relay" because the slot is the general one: a
+     * widget's primary entity is the one it *draws*, and this is the one it can also *drive*.
+     */
+    val COMPANION_ENTITY_ID = stringPreferencesKey("companion_entity_id")
+
+    /**
+     * The scene pad's per-key configuration, keyed by [ScenePadKey] name.
+     *
+     * Stored as individual keys rather than one serialised blob so that a widget placed before a
+     * field existed simply falls back on that field, exactly as the temperature thresholds do —
+     * rather than failing to parse and losing the lot.
+     */
+    fun scenePreset(key: ScenePadKey) = stringPreferencesKey("scene_preset_${key.name}")
+    fun sceneLed(key: ScenePadKey) = stringPreferencesKey("scene_led_${key.name}")
+}
+
+/**
+ * Which of a widget's entities a command is aimed at.
+ *
+ * Almost every widget has one entity and this is never mentioned. The scene pad has two — the
+ * preset selector it draws and the relay it also drives — and the difference matters far more than
+ * "which id to use": a command to the companion must skip the optimistic draw, the pending marker
+ * and the confirming read, all of which are about the entity on screen. See
+ * `WidgetRepository.actOnCompanion`.
+ */
+enum class ActionTarget { PRIMARY, COMPANION }
+
+/** The scene pad's per-instance configuration, as the config screen collects it. */
+data class ScenePadConfig(
+    val relayEntityId: String?,
+    val presets: Map<ScenePadKey, String>,
+    val leds: Map<ScenePadKey, LedColor>,
+)
+
+internal fun Preferences.companionEntityId(): String? =
+    this[WidgetKeys.COMPANION_ENTITY_ID]?.takeIf { it.isNotBlank() }
+
+/** The preset each small key selects. Absent keys mean the owner left that slot empty. */
+internal fun Preferences.scenePresets(): Map<ScenePadKey, String> =
+    SCENE_PAD_KEYS.mapNotNull { key ->
+        this[WidgetKeys.scenePreset(key)]?.takeIf { it.isNotBlank() }?.let { key to it }
+    }.toMap()
+
+/**
+ * Each key's LED colour, falling back to the measured ZEN32 default per key rather than as a set —
+ * so a widget stored before a key gained a colour keeps the four it has.
+ */
+internal fun Preferences.sceneLeds(): Map<ScenePadKey, LedColor> =
+    ScenePadKey.entries.associateWith { key ->
+        this[WidgetKeys.sceneLed(key)]
+            ?.let { name -> LedColor.entries.firstOrNull { it.name == name } }
+            ?: ZEN32_DEFAULT_LEDS.getValue(key)
+    }
+
+internal fun MutablePreferences.putScenePad(config: ScenePadConfig) {
+    config.relayEntityId?.trim()?.takeIf { it.isNotEmpty() }
+        ?.let { this[WidgetKeys.COMPANION_ENTITY_ID] = it }
+    config.presets.forEach { (key, preset) -> this[WidgetKeys.scenePreset(key)] = preset }
+    config.leds.forEach { (key, led) -> this[WidgetKeys.sceneLed(key)] = led.name }
 }
 
 /** Thresholds for this widget, each falling back to its default independently — so a

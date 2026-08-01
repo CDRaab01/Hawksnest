@@ -1,0 +1,48 @@
+<!--
+  Widget-picker preview glyph: the ZEN32 faceplate as the widget draws it — big relay key on top,
+  four keys in a 2×2 grid below, an LED pinhole in every upper-left corner.
+
+  The LEDs are drawn in the plate's real default colours rather than tinted as one, which is why
+  this vector carries no `android:tint`: the whole point of the widget is that the picker entry
+  looks like the thing on the wall.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="72dp"
+    android:height="72dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- The plate. -->
+    <path
+        android:fillColor="#FF8A9099"
+        android:fillAlpha="0.28"
+        android:pathData="M5,1h14c0.55,0 1,0.45 1,1v20c0,0.55 -0.45,1 -1,1H5c-0.55,0 -1,-0.45 -1,-1V2c0,-0.55 0.45,-1 1,-1z" />
+
+    <!-- Relay key, top. -->
+    <path
+        android:fillColor="#FFB9BEC7"
+        android:fillAlpha="0.55"
+        android:pathData="M6,3h12c0.4,0 0.7,0.3 0.7,0.7v7.6c0,0.4 -0.3,0.7 -0.7,0.7H6c-0.4,0 -0.7,-0.3 -0.7,-0.7V3.7c0,-0.4 0.3,-0.7 0.7,-0.7z" />
+    <path android:fillColor="#FF1B8A3A" android:pathData="M7.3,4.6m-0.75,0a0.75,0.75 0 1,0 1.5,0a0.75,0.75 0 1,0 -1.5,0z" />
+
+    <!-- Keys 1-4, 2x2 below, LEDs yellow / red / blue / magenta. -->
+    <path
+        android:fillColor="#FFB9BEC7"
+        android:fillAlpha="0.55"
+        android:pathData="M6,13.2h5.4c0.4,0 0.7,0.3 0.7,0.7v3.4c0,0.4 -0.3,0.7 -0.7,0.7H6c-0.4,0 -0.7,-0.3 -0.7,-0.7v-3.4c0,-0.4 0.3,-0.7 0.7,-0.7z" />
+    <path android:fillColor="#FFB8860B" android:pathData="M7.3,14.6m-0.7,0a0.7,0.7 0 1,0 1.4,0a0.7,0.7 0 1,0 -1.4,0z" />
+    <path
+        android:fillColor="#FFB9BEC7"
+        android:fillAlpha="0.55"
+        android:pathData="M12.6,13.2H18c0.4,0 0.7,0.3 0.7,0.7v3.4c0,0.4 -0.3,0.7 -0.7,0.7h-5.4c-0.4,0 -0.7,-0.3 -0.7,-0.7v-3.4c0,-0.4 0.3,-0.7 0.7,-0.7z" />
+    <path android:fillColor="#FFC62828" android:pathData="M13.9,14.6m-0.7,0a0.7,0.7 0 1,0 1.4,0a0.7,0.7 0 1,0 -1.4,0z" />
+    <path
+        android:fillColor="#FFB9BEC7"
+        android:fillAlpha="0.55"
+        android:pathData="M6,19.1h5.4c0.4,0 0.7,0.3 0.7,0.7v1.5c0,0.4 -0.3,0.7 -0.7,0.7H6c-0.4,0 -0.7,-0.3 -0.7,-0.7v-1.5c0,-0.4 0.3,-0.7 0.7,-0.7z" />
+    <path android:fillColor="#FF1E63D6" android:pathData="M7.3,20.2m-0.7,0a0.7,0.7 0 1,0 1.4,0a0.7,0.7 0 1,0 -1.4,0z" />
+    <path
+        android:fillColor="#FFB9BEC7"
+        android:fillAlpha="0.55"
+        android:pathData="M12.6,19.1H18c0.4,0 0.7,0.3 0.7,0.7v1.5c0,0.4 -0.3,0.7 -0.7,0.7h-5.4c-0.4,0 -0.7,-0.3 -0.7,-0.7v-1.5c0,-0.4 0.3,-0.7 0.7,-0.7z" />
+    <path android:fillColor="#FFB0219B" android:pathData="M13.9,20.2m-0.7,0a0.7,0.7 0 1,0 1.4,0a0.7,0.7 0 1,0 -1.4,0z" />
+</vector>

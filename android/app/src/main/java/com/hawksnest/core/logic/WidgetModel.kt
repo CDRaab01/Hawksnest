@@ -31,7 +31,7 @@ import kotlin.math.roundToInt
  */
 
 /** Which control a home-screen widget hosts. */
-enum class WidgetKind { LIGHT, LOCK, ALARM, TEMPERATURE, SWITCH }
+enum class WidgetKind { LIGHT, LOCK, ALARM, TEMPERATURE, SWITCH, SCENE_PAD }
 
 /**
  * Kinds that draw a command the instant it is sent and reconcile a beat later, rather than
@@ -42,7 +42,7 @@ enum class WidgetKind { LIGHT, LOCK, ALARM, TEMPERATURE, SWITCH }
  * same line `RockerSwitch` and `LockVault` draw in-app.
  */
 fun widgetIsOptimistic(kind: WidgetKind): Boolean = when (kind) {
-    WidgetKind.LIGHT, WidgetKind.SWITCH -> true
+    WidgetKind.LIGHT, WidgetKind.SWITCH, WidgetKind.SCENE_PAD -> true
     WidgetKind.LOCK, WidgetKind.ALARM, WidgetKind.TEMPERATURE -> false
 }
 
@@ -267,6 +267,10 @@ fun widgetCandidateDomains(kind: WidgetKind): Set<String> = when (kind) {
     // a plain relay as `switch.*`. Taking `switch` back is only safe because [widgetCandidates]
     // drops the ring-mqtt camera plumbing that got it removed from the light picker.
     WidgetKind.SWITCH -> setOf("light", "switch")
+    // The pad is configured against the entity whose STATE it draws — the preset selector. The
+    // relay it also drives is a second, write-only entity chosen on the next step, and is not
+    // what this picker is looking for.
+    WidgetKind.SCENE_PAD -> setOf("select")
 }
 
 /**
@@ -461,6 +465,8 @@ fun widgetEchoSettled(kind: WidgetKind, before: String?, current: String): Boole
         // A temperature widget issues no commands, so nothing ever waits on its
         // echo. Any change is "settled" by definition.
         WidgetKind.TEMPERATURE -> true
+        // A select lands on the chosen option in one step; there is no "selecting".
+        WidgetKind.SCENE_PAD -> true
     }
 }
 
@@ -580,17 +586,27 @@ fun lightWidgetView(
 }
 
 /**
- * What a light will look like the instant a command lands, so the widget can draw the result
- * rather than a spinner. Lights get this and locks don't for the same reason `RockerSwitch` is
- * optimistic and `LockVault` is not: a lamp that briefly reads wrong is a cosmetic error, and a
- * confirming read follows within the second either way.
+ * What an entity will look like the instant a command lands, so the widget can draw the result
+ * rather than a spinner. The optimistic kinds get this and locks don't, for the same reason
+ * `RockerSwitch` is optimistic and `LockVault` is not: a lamp that briefly reads wrong is a
+ * cosmetic error, and a confirming read follows within the second either way. Which kinds those
+ * are is [widgetIsOptimistic]'s decision, not this function's.
+ *
+ * Called `predictLight` until the switch and scene-pad widgets landed, at which point the name
+ * described one caller out of three.
  */
-fun predictLight(
+fun predictOptimistic(
     snapshot: WidgetSnapshot,
     service: String,
     extra: Map<String, Any?>,
     nowMs: Long,
 ): WidgetSnapshot {
+    // A select's state IS the chosen option, so the prediction is the option itself — no on/off
+    // reading applies. Checked before the switch logic below, which would otherwise turn a scene
+    // pad's "Ocean" into "off" the moment a key was pressed.
+    (extra["option"] as? String)?.let { option ->
+        return snapshot.copy(state = option, fetchedAtMs = nowMs)
+    }
     val on = when (service) {
         "turn_on" -> true
         "turn_off" -> false

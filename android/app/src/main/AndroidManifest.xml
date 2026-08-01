@@ -124,6 +124,18 @@
                 android:resource="@xml/switch_widget_info" />
         </receiver>
 
+        <receiver
+            android:name=".widget.ScenePadWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_scene_pad_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/scene_pad_widget_info" />
+        </receiver>
+
         <!-- Launched by the system when a widget is dropped on the home screen. Exported because
              the launcher starts it; it takes no input beyond the widget id the system supplies. -->
         <activity
