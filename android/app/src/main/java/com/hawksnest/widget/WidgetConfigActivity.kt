@@ -153,6 +153,7 @@ class WidgetConfigActivity : ComponentActivity() {
             provider.endsWith(AlarmWidgetReceiver::class.java.simpleName) -> WidgetKind.ALARM
             provider.endsWith(TemperatureWidgetReceiver::class.java.simpleName) ->
                 WidgetKind.TEMPERATURE
+            provider.endsWith(SwitchWidgetReceiver::class.java.simpleName) -> WidgetKind.SWITCH
             else -> null
         }
     }
@@ -239,6 +240,7 @@ private fun PickerScreen(
                 WidgetKind.LOCK -> "Choose a lock"
                 WidgetKind.ALARM -> "Choose an alarm panel"
                 WidgetKind.TEMPERATURE -> "Choose a temperature sensor"
+                WidgetKind.SWITCH -> "Choose a switch"
             },
             style = MaterialTheme.typography.headlineSmall,
         )

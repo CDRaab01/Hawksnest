@@ -692,4 +692,143 @@ class WidgetModelTest {
             compactNamePlacement(WidgetKind.TEMPERATURE, 110, WIDGET_COMPACT_BUCKET_DP),
         )
     }
+
+    // ── The switch paddle ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `an on-off switch reported as dimmable still offers no level`() {
+        // The device this widget exists for. Z-Wave models the Inovelli VZW30-SN as a Multilevel
+        // Switch, so HA hands out `supported_color_modes: ["brightness"]` for hardware that has
+        // no dimmer, and the light widget believes it. The switch view must not.
+        val dimmableLooking = snapshot(
+            "on",
+            entityId = "light.nursery_on_off_switch",
+            name = "Nursery",
+            attributes = buildJsonObject {
+                putJsonArray("supported_color_modes") { add("brightness") }
+                put("brightness", 178)
+            },
+        )
+        // Same reading through both views: the light finds a level, the switch never looks.
+        assertTrue(lightWidgetView(dimmableLooking, now).dimmable)
+        assertEquals("On", switchWidgetView(dimmableLooking, now).stateLabel)
+    }
+
+    @Test
+    fun `a switch that is off says so, and is still tappable`() {
+        val view = switchWidgetView(snapshot("off", entityId = "switch.lamp", name = "Lamp"), now)
+        assertFalse(view.on)
+        assertEquals("Off", view.stateLabel)
+        assertTrue(view.controllable)
+    }
+
+    @Test
+    fun `an unavailable switch is drawn, but neither half can be pressed`() {
+        // Drawn rather than hidden: the paddle staying put with its labels greyed is a truer
+        // answer than a widget that empties itself.
+        val view = switchWidgetView(snapshot("unavailable", entityId = "switch.lamp"), now)
+        assertFalse(view.controllable)
+        assertEquals("Unavailable", view.stateLabel)
+    }
+
+    @Test
+    fun `a switch with no reading yet is dark rather than guessing off`() {
+        val view = switchWidgetView(snapshot = null, nowMs = now)
+        assertFalse(view.on)
+        assertFalse(view.controllable)
+        assertEquals("Checking…", view.stateLabel)
+    }
+
+    @Test
+    fun `a switch keeps an old reading, with its age attached`() {
+        // Same bargain as the light: never drop the state, always date it.
+        val view = switchWidgetView(snapshot("on", ageMs = 40 * 60_000, entityId = "switch.lamp"), now)
+        assertTrue(view.on)
+        assertEquals("as of 40m ago", view.staleness)
+    }
+
+    @Test
+    fun `a switch shows both labels at every width`() {
+        // "On" and "Off" are already as short as words get, so unlike the security widgets there
+        // is never a reason to trade the name away for the state line. Two size buckets, not four.
+        assertEquals(
+            CompactName.INLINE,
+            compactNamePlacement(WidgetKind.SWITCH, 110, WIDGET_COMPACT_BUCKET_DP),
+        )
+    }
+
+    @Test
+    fun `a switch settles the moment it changes state, like a light`() {
+        assertFalse(widgetEchoSettled(WidgetKind.SWITCH, before = "on", current = "on"))
+        assertTrue(widgetEchoSettled(WidgetKind.SWITCH, before = "on", current = "off"))
+    }
+
+    @Test
+    fun `the switch picker offers relays from both domains, and camera plumbing from neither`() {
+        // `switch.*` was taken away from the light picker because ring-mqtt buries real switches
+        // under camera toggles. The paddle needs the domain back — a plain relay lives there —
+        // so it is filtered by integration instead, which drops the whole source rather than
+        // guessing at names.
+        val candidates = widgetCandidates(
+            WidgetKind.SWITCH,
+            listOf(
+                entity("light.nursery_on_off_switch", state = "on"),
+                entity("switch.garage_freezer", state = "on"),
+                entity("switch.back2_live_stream", state = "on"),
+                entity("switch.basement_motion_detection", state = "on"),
+            ),
+            platforms = mapOf(
+                "light.nursery_on_off_switch" to "zwave_js",
+                "switch.garage_freezer" to "zwave_js",
+                "switch.back2_live_stream" to MQTT_PLATFORM,
+                "switch.basement_motion_detection" to RING_PLATFORM,
+            ),
+        )
+        assertEquals(
+            listOf("light.nursery_on_off_switch", "switch.garage_freezer"),
+            candidates.map { it.entityId },
+        )
+    }
+
+    @Test
+    fun `the switch picker still finds the real relays with no registry to filter by`() {
+        // Off the tailnet there is no entity registry and so no platforms, and the picker falls
+        // back to the suffix denylist alone: it still catches `_live_stream`, misses
+        // `_motion_detection`, and — the part that matters — keeps every real relay. A worse list,
+        // never a wrong one; an empty picker would read as broken.
+        val candidates = widgetCandidates(
+            WidgetKind.SWITCH,
+            listOf(
+                entity("switch.garage_freezer", state = "on"),
+                entity("switch.back2_live_stream", state = "on"),
+                entity("switch.basement_motion_detection", state = "on"),
+            ),
+        )
+        assertEquals(
+            listOf("switch.garage_freezer", "switch.basement_motion_detection"),
+            candidates.map { it.entityId },
+        )
+    }
+
+    // ── Which kinds may draw ahead of HA, and which may keep a stale reading ───────────────────
+
+    @Test
+    fun `only the security widgets wait for Home Assistant to confirm`() {
+        assertTrue(widgetIsOptimistic(WidgetKind.LIGHT))
+        assertTrue(widgetIsOptimistic(WidgetKind.SWITCH))
+        assertFalse(widgetIsOptimistic(WidgetKind.LOCK))
+        assertFalse(widgetIsOptimistic(WidgetKind.ALARM))
+    }
+
+    @Test
+    fun `a temperature no longer masks itself when Home Assistant goes away`() {
+        // The bug this predicate replaces: the repository asked `kind != LIGHT` and so blanked a
+        // temperature on any failed fetch, contradicting `temperatureWidgetView`, which is built
+        // to show an expired reading with its age. Only a lock or an alarm may drop a reading.
+        assertTrue(widgetKeepsStaleReading(WidgetKind.TEMPERATURE))
+        assertTrue(widgetKeepsStaleReading(WidgetKind.LIGHT))
+        assertTrue(widgetKeepsStaleReading(WidgetKind.SWITCH))
+        assertFalse(widgetKeepsStaleReading(WidgetKind.LOCK))
+        assertFalse(widgetKeepsStaleReading(WidgetKind.ALARM))
+    }
 }
