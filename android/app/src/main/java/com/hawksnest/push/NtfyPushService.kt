@@ -127,11 +127,35 @@ class NtfyPushService : Service() {
         private const val MIN_BACKOFF_MS = 2_000L
         private const val MAX_BACKOFF_MS = 60_000L
 
-        fun start(context: Context) {
+        /**
+         * Bring the listener up, if Android will currently allow it.
+         *
+         * **This must never throw, and that is the whole point of the try.** From Android 12 a
+         * foreground service may not be started while the app is in the background, and the
+         * refusal arrives as `ForegroundServiceStartNotAllowedException` — a subclass of
+         * `IllegalStateException`, which is why it can be caught here without an API guard.
+         *
+         * It used to be allowed to propagate, and because [com.hawksnest.HawksnestApp.onCreate]
+         * calls this from a bare `CoroutineScope`, propagating meant **killing the process**.
+         * `Application.onCreate` runs on *every* process creation, and a widget tap creates a
+         * process — so a tap on a home-screen widget with the app closed crashed the app before
+         * the service call it was supposed to send ever left the device. The widget looked dead
+         * and the light never changed. That is the bug this catch exists for; push failing to
+         * start is a nuisance, and losing every widget tap is not.
+         *
+         * When it is refused, push simply stays down until something starts it from a context
+         * Android accepts — which is why `MainActivity` retries on open. Returns whether the
+         * service was asked to start, for callers that want to know.
+         */
+        fun start(context: Context): Boolean = try {
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, NtfyPushService::class.java),
             )
+            true
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Not allowed to start the push listener from the background right now", e)
+            false
         }
 
         fun stop(context: Context) {

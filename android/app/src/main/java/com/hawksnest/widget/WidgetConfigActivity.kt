@@ -502,15 +502,16 @@ private fun ScenePadScreen(
                 "This entity offers no options, so the keys have nothing to fire. Go back and " +
                     "pick the selector the wall keys actually change."
             } else {
-                "The big key at the top drives the relay. The four below it fire a preset each, " +
-                    "top-left first — the same order as the plate."
+                "The big key at the top toggles whatever you point it at — the light strip " +
+                    "itself, or the controller's relay. The four below it fire a preset each, " +
+                    "top-left first, the same order as the plate."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
         )
 
-        SettingRow(label = "Relay (big key)") {
+        SettingRow(label = "Big key toggles") {
             ChoiceMenu(
                 current = relay?.let { resolveName(it, overrides) }
                     // Not an error state: a pad with no relay simply draws that key dead. Plenty

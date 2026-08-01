@@ -15,9 +15,11 @@ import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
 import androidx.glance.currentState
 import androidx.glance.layout.Column
+import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
+import androidx.glance.layout.width
 import com.hawksnest.R
 import com.hawksnest.core.logic.Channel
 import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
@@ -57,8 +59,9 @@ import kotlinx.serialization.json.Json
  * on, the bottom is off, and which one is lit tells you where you are. That is also the shape of
  * the thing on the wall, which is the whole point of the request.
  *
- * Compact (< [WIDGET_FULL_MIN_HEIGHT_DP]) has no room to stack two controls, so it collapses to
- * one full-height toggle and reads its state from the header line instead.
+ * Compact (< [WIDGET_FULL_MIN_HEIGHT_DP]) has no height to stack two controls, so it lays the same
+ * two side by side. It never drops to a single toggle — see the note above [Half], which is a
+ * correctness rule and not a layout preference.
  */
 class SwitchWidget : GlanceAppWidget() {
     // Responsive, never Exact — see LightWidget for the launcher bug that rules Exact out.
@@ -116,45 +119,27 @@ private fun SwitchBody(prefs: Preferences, json: Json) {
                 ),
             )
             Spacer(modifier = GlanceModifier.height(if (compact) 4.dp else 8.dp))
+            // Both halves, at every size. Compact lays them side by side instead of stacked
+            // because a one-row widget has no height to split, but it never drops to a single
+            // control — the note above `Half` says why that is correctness, not taste.
             if (compact) {
-                // One control, filling what is left. There is no room for a paddle here, and a
-                // 26dp half would be under the touch floor.
-                WidgetButton(
-                    label = if (view.on) "Off" else "On",
-                    action = tap(view.on, view.controllable),
-                    modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
-                    accent = Channel.STREAK,
-                    filled = view.on,
-                    icon = R.drawable.ic_glyph_power,
-                    fillHeight = true,
-                )
+                Row(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
+                    // Bare turn_on: HA restores the device's own last level, which is what the
+                    // top of the physical paddle does. Never a brightness.
+                    Half("On", "turn_on", view.on, view.controllable, GlanceModifier.defaultWeight())
+                    Spacer(modifier = GlanceModifier.width(PADDLE_GAP))
+                    Half("Off", "turn_off", !view.on, view.controllable, GlanceModifier.defaultWeight())
+                }
             } else {
-                // The paddle. Both halves are always present and always tappable in the direction
-                // they name — pressing On while already on is a no-op at HA, and a half that
-                // disappeared or moved when the state changed would be worse than a wasted tap.
                 Column(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
-                    WidgetButton(
-                        label = "On",
-                        action = actionRunCallback<WidgetServiceAction>(
-                            // Bare turn_on: HA restores the device's own last level, which is
-                            // what the top of the physical paddle does. Never a brightness.
-                            widgetParams(WidgetKind.SWITCH, service = "turn_on")
-                        ).takeIf { view.controllable },
-                        modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
-                        accent = Channel.STREAK,
-                        filled = view.on,
-                        fillHeight = true,
+                    Half(
+                        "On", "turn_on", view.on, view.controllable,
+                        GlanceModifier.fillMaxWidth().defaultWeight(),
                     )
                     Spacer(modifier = GlanceModifier.height(PADDLE_GAP))
-                    WidgetButton(
-                        label = "Off",
-                        action = actionRunCallback<WidgetServiceAction>(
-                            widgetParams(WidgetKind.SWITCH, service = "turn_off")
-                        ).takeIf { view.controllable },
-                        modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
-                        accent = Channel.STREAK,
-                        filled = !view.on,
-                        fillHeight = true,
+                    Half(
+                        "Off", "turn_off", !view.on, view.controllable,
+                        GlanceModifier.fillMaxWidth().defaultWeight(),
                     )
                 }
             }
@@ -162,12 +147,51 @@ private fun SwitchBody(prefs: Preferences, json: Json) {
     }
 }
 
-/** The compact tier's single toggle: whichever direction the switch is not already in. */
+/*
+ * ## Why there is no single-toggle layout anywhere in this widget
+ *
+ * The compact tier used to collapse to one button labelled with the direction the switch was not
+ * already in: "Off" when it believed the light was on, "On" when it believed it was off. That is
+ * the ordinary way to draw a toggle, and here it was wrong, because a widget's belief can be
+ * arbitrarily out of date. Nothing redraws the home screen when someone flips the switch on the
+ * wall — the live socket only pushes while the app is running, and the render-triggered refresh
+ * only fires when the widget is redrawn for some other reason.
+ *
+ * So the failure was: turn the light on at the wall, and the widget still holds "off", still
+ * offers only "On", and there is literally no way to turn it off from the phone. The one control
+ * it showed pointed the wrong way, and the owner hit exactly that.
+ *
+ * Both directions, always, makes the widget correct no matter how stale it is: the tap says what
+ * it does rather than depending on what the widget thinks. Pressing On while already on is a
+ * harmless no-op at HA, and the confirming read that follows every tap repairs the stale reading
+ * as a side effect. That is worth far more than the ambiguity a single toggle also carried — the
+ * old layout showed a filled orange button reading "Off" while its own header read "On", which is
+ * unreadable even when the state behind it is right.
+ */
+
+/**
+ * One half of the paddle. [modifier] carries the weight, because `defaultWeight()` is a
+ * scope-specific extension and this is called from both a Row and a Column.
+ */
 @Composable
-private fun tap(on: Boolean, controllable: Boolean) =
-    actionRunCallback<WidgetServiceAction>(
-        widgetParams(WidgetKind.SWITCH, service = if (on) "turn_off" else "turn_on")
-    ).takeIf { controllable }
+private fun Half(
+    label: String,
+    service: String,
+    filled: Boolean,
+    controllable: Boolean,
+    modifier: GlanceModifier,
+) {
+    WidgetButton(
+        label = label,
+        action = actionRunCallback<WidgetServiceAction>(
+            widgetParams(WidgetKind.SWITCH, service = service)
+        ).takeIf { controllable },
+        modifier = modifier,
+        accent = Channel.STREAK,
+        filled = filled,
+        fillHeight = true,
+    )
+}
 
 /**
  * The seam between the two halves. Deliberately tight — a real paddle is one piece split by a

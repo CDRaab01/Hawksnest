@@ -99,7 +99,15 @@ private fun openSettings(): Action = actionStartActivity(
  * Re-opens this widget's own configuration screen. The launcher only shows it once, when the
  * widget is placed, so a widget whose entity has since been deleted from Home Assistant would
  * otherwise be stuck — this makes "Tap to pick another" true.
+ *
+ * Public because the scene pad puts it on its *header*, not just on an error. That widget carries
+ * ten settings — four presets, five LED colours and the key's target — and Android offers no way
+ * back into a placed widget's configuration, so without this the only way to change one of them is
+ * to delete the widget and start again.
  */
+@Composable
+fun openWidgetConfig(): Action = openConfig()
+
 @Composable
 private fun openConfig(): Action {
     val context = LocalContext.current
