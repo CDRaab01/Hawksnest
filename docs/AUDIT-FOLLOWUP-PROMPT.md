@@ -215,16 +215,22 @@ the prod host, and the repo is public (suite invariant #7).
 depend on. Add it, plus the `map $http_upgrade` block, resource limits, replica count, probe paths,
 and `imagePullPolicy`, following the existing assertions in that file.
 
-### 15. Fix or delete Sift; unify the version schemes
+### 15. Decide whether Sift should gate ✅ *partly done — PR #111*
 
-Sift's `sift-audit` job has been red for weeks: Sift is on AGP 8.5.0, Hawksnest on 9.1.1, and a
-composite build cannot mix majors. `ROADMAP.md` already has the verdict — *"A permanently-red
-non-gating job is the dead-settings smell applied to CI."* Either bump Sift (`C:\Code\Sift`, public
-repo `CDRaab01/Sift`) to 9.1.1, or delete the job and the `siftAudit` source set. Do not leave it.
+**The version-scheme half is done.** `android-ci.yml` no longer stamps
+`VERSION_NAME: 0.1.${run_number}`; it inherits the `1.0.0` default from `build.gradle.kts`, which is
+the same line `android-release.yml` greps for major.minor.
 
-Separately: `android-ci.yml`'s `android-release` job hardcodes `VERSION_NAME: 0.1.${run_number}`
-while `android-release.yml` derives `1.0.x`. Make the CI job use the same derivation or drop its
-release step.
+**The Sift half turned out to be a non-problem.** The audit (and `V1.md`, and `ROADMAP.md`) said the
+job was permanently red on an AGP 8.5.0 vs 9.1.1 mismatch. It isn't — Sift was bumped to 9.1.1 in
+its own PR #2 and the job has been green since; run `30712842185` shows the composite build
+resolving and `HawksnestDesignSlopTest` running.
+
+What's actually left is a smaller decision: `continue-on-error: true` means the audit reports but
+gates nothing, so 1.0 bar item #7 ("baselines gating, or job deleted") is still unsatisfied. Now
+that it works, either drop `continue-on-error` and let new slop fail CI, or write down that it is
+deliberately advisory. Note the baseline in `android/app/.sift/baseline.json` already means it only
+ever surfaces *new* slop, so making it gating is less disruptive than it sounds.
 
 ### 16. Broaden the Android instrumented suite
 

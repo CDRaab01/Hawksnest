@@ -34,11 +34,13 @@ live tier (PR #72), and the 1.0 version bump itself (V1.md item 11 — merged; t
 - [ ] [H] **Camera pipeline on-device pass** per `docs/CAMERA-SMOKE.md`. Live WebRTC/LL-HLS is
   hand-tested only, and the mock serves no real camera — the checklist exists precisely so
   this becomes a repeatable pass instead of tribal memory. Run it once, formally.
-- [ ] **Sift design-audit CI job — fix it or delete it, deliberately.** The advisory job has
-  been red since the AGP bump (Sift sits on AGP 8.5.0, Hawksnest on 9.1.1; a composite build
-  can't mix AGP majors), so the audit hasn't actually run in weeks. A permanently-red
-  non-gating job is the "dead settings" smell applied to CI: either bump Sift's toolchain in
-  `CDRaab01/Sift` or remove the job here and record why.
+- [ ] **Sift design-audit CI job — decide whether it should gate.** ~~Red since the AGP bump~~ —
+  **that was fixed**: `CDRaab01/Sift` moved to AGP 9.1.1 in its own PR #2, and the job has been
+  green since (run `30712842185` shows the composite build resolving and `HawksnestDesignSlopTest`
+  running). What's left is smaller: `continue-on-error: true` means the audit reports but gates
+  nothing, so the 1.0 bar's "baselines gating, or job deleted" is still unsatisfied. Either drop
+  `continue-on-error` — the baseline in `android/app/.sift/` means only *new* slop would fail — or
+  record that it is deliberately advisory.
 - [ ] **Docs pass — reconcile prose with the shipped android-v1.0.x reality.** This rewrite is
   most of it. Follow-up: V1.md needs its own one-line closure edit (its status prose still
   presents item 11 as the pending PR), plus a README sweep for any lingering pre-1.0 phrasing.
