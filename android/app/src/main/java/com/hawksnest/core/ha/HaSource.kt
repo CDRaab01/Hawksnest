@@ -514,15 +514,28 @@ class HaSource(
         }
     }
 
-    /** `http(s)://host[:port]` → `ws(s)://host[:port]/api/websocket`. */
-    private fun wsUrl(base: String): String {
-        val trimmed = base.trimEnd('/')
-        val swapped = when {
-            trimmed.startsWith("https://") -> "wss://" + trimmed.removePrefix("https://")
-            trimmed.startsWith("http://") -> "ws://" + trimmed.removePrefix("http://")
-            trimmed.startsWith("wss://") || trimmed.startsWith("ws://") -> trimmed
-            else -> "ws://$trimmed"
-        }
-        return "$swapped/api/websocket"
+}
+
+/**
+ * `http(s)://host[:port]` → `ws(s)://host[:port]/api/websocket`.
+ *
+ * A host typed without a scheme resolves to **`wss://`**, not `ws://`. It used to be the
+ * latter, which was the wrong default in two directions at once: a release build sets
+ * `cleartextTrafficPermitted="false"` and refuses the connection, and the Settings placeholder
+ * showed a schemeless-looking host — so the most natural thing to type produced a connection
+ * the app itself blocks, reported as a generic failure. Someone who genuinely wants cleartext
+ * can still type `ws://` or `http://` and get it.
+ *
+ * Top-level and `internal` rather than a private method so the mapping is unit-testable; it is
+ * the only place the transport scheme is decided.
+ */
+internal fun wsUrl(base: String): String {
+    val trimmed = base.trimEnd('/')
+    val swapped = when {
+        trimmed.startsWith("https://") -> "wss://" + trimmed.removePrefix("https://")
+        trimmed.startsWith("http://") -> "ws://" + trimmed.removePrefix("http://")
+        trimmed.startsWith("wss://") || trimmed.startsWith("ws://") -> trimmed
+        else -> "wss://$trimmed"
     }
+    return "$swapped/api/websocket"
 }

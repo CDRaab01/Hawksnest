@@ -112,7 +112,11 @@ fun SettingsScreen(
                 value = url,
                 onValueChange = { url = it },
                 label = { Text("Base URL") },
-                placeholder = { Text("http://hawksnest.<tailnet>.ts.net:8080") },
+                // HTTPS, and the Serve port — not a suggestion. A release build sets
+                // cleartextTrafficPermitted="false", so the http:// form this used to
+                // show cannot connect, and it fails as a generic connection error with
+                // no hint that the scheme is the problem.
+                placeholder = { Text("https://hawksnest.<tailnet>.ts.net:8443") },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()

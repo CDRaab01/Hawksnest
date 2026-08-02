@@ -10,7 +10,9 @@ import android.net.Uri
 sealed class Screen(val route: String) {
     data object Home : Screen("home")
     data object Devices : Screen("devices")
-    data object Cameras : Screen("cameras")
+    // No Cameras route: cameras live on Home (the 2-up grid and the lightbox) rather than
+    // getting a tab of their own. A `Cameras` route and a placeholder CamerasScreen existed
+    // here from Phase 0, registered in no NavHost and referenced by nothing — removed 2026-08-02.
     data object Rooms : Screen("rooms")
     data object History : Screen("history")
     data object Settings : Screen("settings")
