@@ -22,7 +22,7 @@ import javax.inject.Inject
  * Hilt application root. Starts the [ConnectionManager] in its app-scoped coroutine so the HA
  * WebSocket (or demo source) outlives any individual screen, and supplies Coil an [ImageLoader]
  * backed by the app OkHttp client (so camera snapshots reuse the same connection pool + cleartext
- * network policy). (Phase 4 will also create the push notification channels here.)
+ * network policy). Also creates the push notification channels.
  */
 @HiltAndroidApp
 class HawksnestApp : Application(), ImageLoaderFactory {

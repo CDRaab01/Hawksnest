@@ -5,12 +5,13 @@ with a polished, app-like experience modeled on the **Spotter** design language 
 system). Home Assistant stays the backend/brain; Hawksnest is a presentation layer over HA's
 WebSocket + REST APIs.
 
-> **Status: Phase 4 — detail, history, more domains, drag-and-drop, PWA.** On top of the live HA
-> connection (Phase 1), the blended area-hub layout (Phase 2), and the personalization editor
-> (Phase 3 — pin/unpin, reorder, hide), Phase 4 adds: **entity detail** screens (tap any card) with
-> a **state-history chart** (6h/24h/7d); **first-class cards** for cover, climate, media_player, and
-> fan; **drag-and-drop** favorites reordering in Customize; and an installable **PWA** (offline app
-> shell). With no token saved it falls back to demo fixtures.
+> **Status: 1.0 shipped.** The web app carries the live HA connection, the blended area-hub layout,
+> the personalization editor (pin/unpin, reorder, hide), **entity detail** screens with a
+> **state-history chart** (6h/24h/7d), **first-class cards** for cover, climate, media_player and
+> fan, **drag-and-drop** favorites reordering, light/dark themes, and an installable **PWA** with a
+> prompt-to-update toast. Since 1.0: the go2rtc-direct live tier, the `ring-timeline` recorded
+> backend, and **Frigate** as a second recorded backend (live with 7 Reolink cameras since
+> 2026-07-29). With no token saved it falls back to demo fixtures.
 
 ### Install as an app (PWA)
 
@@ -158,11 +159,14 @@ reconciles the store; the demo source simulates it locally. Lock/unlock, light o
 and alarm arm/disarm are wired. Locks are excluded from optimistic UI — they show a pending state
 until HA confirms.
 
-## Next phases
+## What's next
 
-The sequenced 1.0 plan lives in [V1.md](V1.md); remaining before the 1.0 bump: ntfy push
-prod-apply + on-device smoke, then the version bump. v1.1: OAuth to HA (replacing the
-long-lived token), wall-tablet kiosk mode. (Phase 4 delivered entity detail + history,
-cover/climate/media_player/fan cards, drag-and-drop favorites reordering, and the installable
-PWA; the V1 gates added TLS + cleartext-off, Keystore-wrapped token, light theme, the PWA
-update toast, and the camera smoke checklist.)
+1.0 shipped. The current backlog is [AUDIT-2026-08.md](AUDIT-2026-08.md) §8, with a paste-ready
+execution brief in [docs/AUDIT-FOLLOWUP-PROMPT.md](docs/AUDIT-FOLLOWUP-PROMPT.md).
+[ROADMAP.md](ROADMAP.md) holds the departing-engineer view and [V1.md](V1.md) is the historical
+record of how 1.0 was sequenced.
+
+Two operator-gated proofs are still outstanding from the 1.0 gates: **on-device push verification**
+and the **camera on-device pass** ([docs/CAMERA-SMOKE.md](docs/CAMERA-SMOKE.md)). Both are code-complete
+and neither has been run with a phone in hand. v1.1 candidates: OAuth to HA (replacing the
+long-lived token), wall-tablet kiosk mode.

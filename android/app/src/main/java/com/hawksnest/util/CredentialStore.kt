@@ -20,8 +20,11 @@ private val Context.credentialDataStore: DataStore<Preferences> by
 /**
  * Persists the Home Assistant connection credentials — the base URL and a long-lived access token —
  * and the optional camera RTSP credentials for the direct-to-camera live tier.
- * Mirrors Spotter's `util/TokenStore` DataStore pattern. The LLAT is a full HA credential;
- * DataStore is app-private (a Keystore-wrap is a sensible follow-up).
+ * Mirrors Spotter's `util/TokenStore` DataStore pattern. The LLAT is a full HA credential, so it is
+ * not stored raw: [TokenCipher] wraps it with an AES-256-GCM key held in the Android Keystore, and
+ * what lands in DataStore is ciphertext that cannot be decrypted off-device. The RTSP camera
+ * password gets the same treatment. Consequence: a clean reinstall or a new phone requires
+ * re-entering the token — deliberate for a door-unlocking credential.
  *
  * Everything here rides one DataStore file, and `res/xml/backup_rules.xml` /
  * `data_extraction_rules.xml` exclude that **whole file** from cloud backup and device transfer —

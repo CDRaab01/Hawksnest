@@ -9,7 +9,7 @@ Home Assistant stays the backend/brain. The app talks to HA's WebSocket + REST A
 (no Hawksnest server of its own), reaching HA through the existing Hawksnest reverse-proxy host
 over Tailscale, authenticated with a HA **long-lived access token**.
 
-## Status — Phases 0–4 code-complete (push on-device verify pending)
+## Status — 1.0 shipped (push and camera on-device verification still pending)
 
 What's here today: a live HA client, not a scaffold. The full PULSE theme (`ui/theme/`) and core
 components (`ui/components/`) are in place, plus:
@@ -51,7 +51,7 @@ components (`ui/components/`) are in place, plus:
 
 ## Home-screen widgets
 
-Three widgets, added from the launcher's widget picker like any other. Each asks which device it
+Six widgets, added from the launcher's widget picker like any other. Each asks which device it
 should control when you drop it, and each opens the app when you tap its name.
 
 | Widget | What it does |
@@ -60,8 +60,10 @@ should control when you drop it, and each opens the app when you tap its name.
 | **Hawksnest Lock** | One tap to lock. **Two taps to unlock** — the first arms "Tap again to unlock", which lapses after five seconds. |
 | **Hawksnest Alarm** | Off / Home / Away. Arming is one tap; **disarming takes two**, the same way unlocking does. |
 | **Hawksnest Temperature** | A room's temperature, coloured blue / green / orange / red by three thresholds **you set when you place it**. Read-only — nothing to tap. |
+| **Hawksnest Switch** | A two-half paddle for an on/off switch. Exists because the light widget gets the Inovelli VZW30-SN badly wrong: Z-Wave exposes it as a Multilevel Switch, so HA reports `supported_color_modes: ["brightness"]` and the light widget offers dim steps to hardware with no dimmer. This widget deliberately ignores those attributes and never shows a percentage. |
+| **Hawksnest Scene Pad** | A replica of the Zooz ZEN32 on the wall — the large relay key on top, keys 1–4 in a 2×2 grid beneath, each drawn in its own LED colour. Faceplate order was verified against the hardware (2026-08-01), not assumed: the planning note had the relay at the bottom, which would have put every layout constant upside down. |
 
-All four are **resizable in both directions** and arrive at three cells by one row. Squeezed to a
+All six are **resizable in both directions** and arrive at three cells by one row. Squeezed to a
 single row they switch to a compact layout — one line of text, controls filling the rest — rather
 than clipping. The lock and alarm give up their device *name* first and never the state or the time
 it was read.
