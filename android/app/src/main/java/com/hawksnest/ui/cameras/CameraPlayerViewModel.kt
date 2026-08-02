@@ -17,6 +17,8 @@ import com.hawksnest.core.logic.FootageSpan
 import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.matchDevice
+import com.hawksnest.core.logic.RingClipReading
+import com.hawksnest.core.logic.ringClipReading
 import com.hawksnest.core.logic.ringRecordingMissing
 import com.hawksnest.core.logic.ringRecordingUrl
 import com.hawksnest.core.logic.reolinkRtspUrl
@@ -341,19 +343,16 @@ class CameraPlayerViewModel @Inject constructor(
         alreadySelected: Boolean,
         urlBefore: String?,
     ): String? {
-        /** null = terminal failure, "" = keep waiting, else the playable URL. */
-        fun read(entities: Map<String, HassEntity>): String? {
-            val entity = entities[eventSelectId]
-            if (entity?.state != option) return ""
-            if (ringRecordingMissing(entity)) return null
-            val url = ringRecordingUrl(entity) ?: return ""
-            return if (alreadySelected || url != urlBefore) url else ""
+        // The per-observation decision lives in core/logic (ringClipReading) so it can be
+        // unit-tested; this is only the waiting.
+        val settled = withTimeoutOrNull(RING_CLIP_TIMEOUT_MS) {
+            connection.state.entities
+                .map { ringClipReading(it[eventSelectId], option, alreadySelected, urlBefore) }
+                .first { it !is RingClipReading.Wait }
         }
-
-        // A terminal "no recording" and the deadline both land here as null — both are failures.
-        return withTimeoutOrNull(RING_CLIP_TIMEOUT_MS) {
-            connection.state.entities.map { read(it) }.first { it != "" }
-        }
+        // A terminal Missing and the deadline both land as null — both are failures, and the
+        // caller renders both as Failed rather than a stuck loader.
+        return (settled as? RingClipReading.Ready)?.url
     }
 }
 
