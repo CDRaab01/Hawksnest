@@ -72,6 +72,21 @@ describe("nginx.conf — same-origin HA reverse proxy", () => {
     expect(nginx).toContain("ring-timeline.home-automation.svc.cluster.local:8080");
   });
 
+  it("proxies /go2rtc/ for signalling, and handles both WS and plain HTTP", () => {
+    // The top live tier (go2rtc-direct WebRTC) and two-way Talk both negotiate
+    // through here. Media rides :8555 straight to go2rtc and never touches nginx,
+    // so this location carries signalling only — but if it breaks, every camera
+    // silently steps down the ladder to HLS and Talk disappears, with no error
+    // anywhere. That is exactly the kind of quiet regression this file exists to
+    // catch, and it was the one HA-adjacent route the contract never pinned.
+    expect(nginx).toMatch(/location\s+\/go2rtc\//);
+    expect(nginx).toContain("go2rtc.home-automation.svc.cluster.local:1984");
+    // Signalling upgrades to a WebSocket, but the same prefix also serves plain
+    // HTTP (the stream list `Go2rtcStreams`/`lib/go2rtc.ts` gate the tier on).
+    // A `map $http_upgrade` keeps one location serving both.
+    expect(nginx).toMatch(/map\s+\$http_upgrade/);
+  });
+
   it("falls back to the SPA index for client-side routes", () => {
     expect(nginx).toContain("try_files $uri $uri/ /index.html");
   });
@@ -123,5 +138,37 @@ describe("k8s manifests", () => {
   it("has matching health probes wired to the http port", () => {
     expect(deployment).toContain("readinessProbe");
     expect(deployment).toContain("livenessProbe");
+  });
+
+  it("stays a single replica with Recreate, and pins resource limits", () => {
+    // One replica by design: the pod is stateless but the NodePort + fixed image
+    // tag make a rolling update pointless, and Recreate avoids two pods briefly
+    // serving different builds off the same tag.
+    expect(deployment).toMatch(/replicas:\s+1/);
+    expect(deployment).toMatch(/type:\s+Recreate/);
+    // Limits keep an nginx pod from competing with Frigate on the same node,
+    // which runs close to its own ceiling.
+    expect(deployment).toMatch(/limits:/);
+    expect(deployment).toMatch(/requests:/);
+  });
+
+  it("never pulls the fixed tag from a registry", () => {
+    // There is no registry — the workflow builds and imports straight into k3s
+    // containerd. Always/IfNotPresent matters: `Always` would send the kubelet
+    // looking for docker.io/library/hawksnest:local and fail the rollout.
+    expect(deployment).toMatch(/imagePullPolicy:\s+IfNotPresent/);
+  });
+
+  it("deploys only after CI passes, and never from a pull_request", () => {
+    // The push trigger used to race ci.yml, so a red test could not stop a
+    // rollout. workflow_run makes CI the gate.
+    expect(deployWorkflow).toContain("workflow_run");
+    expect(deployWorkflow).toMatch(/workflows:\s+\["CI"\]/);
+    expect(deployWorkflow).toContain("workflow_run.conclusion == 'success'");
+    // A cron CI run on main must not redeploy.
+    expect(deployWorkflow).toContain("workflow_run.event == 'push'");
+    // Suite invariant #7: this job runs on a self-hosted runner on the prod host
+    // and the repo is public. A fork PR must never be able to trigger it.
+    expect(deployWorkflow).not.toMatch(/^\s*pull_request:/m);
   });
 });

@@ -2,34 +2,69 @@ name: Deploy
 
 # Builds the Hawksnest image on the self-hosted runner inside the Dragonfly WSL2
 # distro, imports it into K3s containerd, and applies the manifests. No registry.
+#
+# Triggered by CI *succeeding* on main rather than by the push itself. The push
+# trigger raced ci.yml: a red typecheck, test, e2e or kubeconform did not stop
+# the rollout, because both workflows started from the same event. `workflow_run`
+# makes CI a gate instead of a bystander.
+#
+# Two consequences of that swap, both handled below:
+#  - `workflow_run` carries no path filter, so "does this commit touch the web
+#    app?" moves into the `scope` step.
+#  - CI also runs on a weekly cron against main, and that must not redeploy —
+#    hence the `workflow_run.event == 'push'` guard.
+#
+# Never add a `pull_request` trigger here: this runs on a self-hosted runner on
+# the prod host and the repo is public (suite invariant #7).
 on:
   workflow_dispatch:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
-    paths:
-      - "src/**"
-      - "deploy/**"
-      - "Dockerfile"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/deploy.yml"
-      - "index.html"
-      - "public/**"
-      - "vite.config.ts"
-      - "tailwind.config.ts"
-      - "postcss.config.js"
-      - "tsconfig*.json"
 
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: [self-hosted, linux, dragonfly]
     steps:
       - uses: actions/checkout@v7
+        with:
+          # workflow_run checks out the default branch by default, which would
+          # deploy something other than the commit CI just passed.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          # HEAD^ is the previous main whether this was a merge commit (first
+          # parent) or a direct push — that's what the scope check diffs against.
+          fetch-depth: 2
+
+      # Replaces the `paths:` filter the push trigger used to carry. A docs-only
+      # commit reaching this workflow should not restart the pod.
+      - name: Does this commit ship?
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual dispatch — shipping."
+            echo "ship=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only HEAD^ HEAD)
+          echo "Changed files:"; echo "$changed"
+          if echo "$changed" | grep -qE '^(src/|deploy/|public/|Dockerfile|package(-lock)?\.json|index\.html|vite\.config\.ts|tailwind\.config\.ts|postcss\.config\.js|tsconfig[^/]*\.json|\.github/workflows/deploy\.yml)'; then
+            echo "ship=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nothing web-facing changed — skipping the rollout."
+            echo "ship=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build image
+        if: steps.scope.outputs.ship == 'true'
         run: docker build -t hawksnest:local .
 
       - name: Import image into K3s containerd
+        if: steps.scope.outputs.ship == 'true'
         run: docker save hawksnest:local | sudo k3s ctr -n k8s.io images import -
 
       # Use k3s's bundled kubectl via sudo so it reads the root-owned kubeconfig
@@ -38,12 +73,15 @@ jobs:
       # file as mode 600, so a host reboot breaks the deploy with "k3s.yaml:
       # permission denied". sudo is already used (passwordless) for `k3s ctr`.
       - name: Apply manifests
+        if: steps.scope.outputs.ship == 'true'
         run: sudo k3s kubectl apply -k deploy/k8s
 
       # Image tag is fixed (hawksnest:local), so apply alone won't roll the pod —
       # restart to pick up the freshly imported image.
       - name: Roll to the new image
+        if: steps.scope.outputs.ship == 'true'
         run: sudo k3s kubectl -n home-automation rollout restart deployment/hawksnest
 
       - name: Wait for rollout
+        if: steps.scope.outputs.ship == 'true'
         run: sudo k3s kubectl -n home-automation rollout status deployment/hawksnest --timeout=120s

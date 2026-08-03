@@ -6,7 +6,8 @@ on:
   pull_request:
   schedule:
     # Weekly bit-rot check (Mondays 11:00 UTC) so "green" stays meaningful between pushes.
-    # deploy.yml is push-path-triggered (not workflow_run), so this never ships.
+    # deploy.yml now triggers on this workflow succeeding, but only for `push` runs —
+    # a green cron run on main does not ship.
     - cron: "0 11 * * 1"
 
 jobs:
@@ -22,7 +23,9 @@ jobs:
   dep-audit:
     name: "Dependency audit (npm audit)"
     runs-on: ubuntu-latest
-    # Weekly-only + advisory: never blocks a push/PR (deploy is push-path-triggered, not this).
+    # Weekly-only + advisory: a new upstream advisory should not block a push or a PR,
+    # so this runs on the cron only. Cron runs never deploy (deploy.yml requires
+    # `workflow_run.event == 'push'`), so a red audit can't hold back a rollout either.
     if: github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v7

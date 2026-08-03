@@ -90,8 +90,17 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.HAWKSNEST_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.HAWKSNEST_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.HAWKSNEST_KEY_PASSWORD }}
+          # No VERSION_NAME override: it falls through to the `?: "1.0.0"` default in
+          # app/build.gradle.kts, which is the single source of truth for major.minor
+          # (android-release.yml greps that same line and appends the commit count).
+          # This job used to stamp "0.1.${run_number}", a scheme the app left behind at
+          # 1.0 — two version schemes in one repo, with the wrong one on the artifact
+          # people actually download from a CI run.
+          #
+          # VERSION_CODE stays the run number on purpose. It is tiny next to a real
+          # release's epoch-minutes code, so a verification APK can never be mistaken
+          # for a release or escape the update train (suite invariant #2).
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: "0.1.${{ github.run_number }}"
         run: ./gradlew :app:assembleRelease --no-daemon
 
       - uses: actions/upload-artifact@v7
