@@ -203,6 +203,21 @@ fun sizeTier(heightDp: Int): WidgetSizeTier =
  * "Unlocked · 10:42 PM" at 12sp come to about 145dp on their own, so 200dp — about a three-cell
  * placement — is the point where a short name still has somewhere to go.
  */
+/**
+ * The narrowest placement to offer, in dp: Android's grid is `70n - 30`, so one cell is 40dp.
+ *
+ * This is a `SizeMode.Responsive` bucket as well as an XML floor, and it has to be both.
+ * `Responsive` picks the largest declared bucket that FITS inside the real size — so lowering
+ * `minResizeWidth` alone would let the launcher hand a widget 40dp while the narrowest bucket
+ * still described 110dp, and the content would be laid out for a width it does not have and
+ * clip. Whenever one moves, the other moves with it.
+ *
+ * At this width nothing but the control and a truncated state line survives; the name is already
+ * gone by then (see [compactNamePlacement]). That is the intended floor, not a degradation to
+ * apologise for — a one-cell widget is a button.
+ */
+const val WIDGET_MIN_WIDTH_DP = 40
+
 const val WIDGET_NAME_MIN_WIDTH_DP = 200
 
 /** Where a compact header puts the device name, given the room it actually has. */

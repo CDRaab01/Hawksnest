@@ -20,6 +20,7 @@ import androidx.glance.layout.height
 import com.hawksnest.R
 import com.hawksnest.core.logic.LockPhase
 import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
+import com.hawksnest.core.logic.WIDGET_MIN_WIDTH_DP
 import com.hawksnest.core.logic.WIDGET_COMPACT_TALL_BUCKET_DP
 import com.hawksnest.core.logic.WIDGET_FULL_MIN_HEIGHT_DP
 import com.hawksnest.core.logic.WIDGET_NAME_MIN_WIDTH_DP
@@ -71,6 +72,9 @@ class LockWidget : GlanceAppWidget() {
             DpSize(WIDGET_NAME_MIN_WIDTH_DP.dp, WIDGET_COMPACT_BUCKET_DP.dp),
             DpSize(NARROW_WIDTH, WIDGET_COMPACT_TALL_BUCKET_DP.dp),
             DpSize(NARROW_WIDTH, WIDGET_FULL_MIN_HEIGHT_DP.dp),
+            DpSize(WIDGET_MIN_WIDTH_DP.dp, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(WIDGET_MIN_WIDTH_DP.dp, WIDGET_COMPACT_TALL_BUCKET_DP.dp),
+            DpSize(WIDGET_MIN_WIDTH_DP.dp, WIDGET_FULL_MIN_HEIGHT_DP.dp),
         )
     )
 

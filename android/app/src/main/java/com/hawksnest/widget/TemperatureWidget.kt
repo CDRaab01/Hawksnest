@@ -30,6 +30,7 @@ import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.hawksnest.R
 import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
+import com.hawksnest.core.logic.WIDGET_MIN_WIDTH_DP
 import com.hawksnest.core.logic.WIDGET_FULL_MIN_HEIGHT_DP
 import com.hawksnest.core.logic.WIDGET_NAME_MIN_WIDTH_DP
 import com.hawksnest.core.logic.WidgetKind
@@ -79,6 +80,8 @@ class TemperatureWidget : GlanceAppWidget() {
             DpSize(NARROW_WIDTH, WIDGET_COMPACT_BUCKET_DP.dp),
             DpSize(WIDGET_NAME_MIN_WIDTH_DP.dp, WIDGET_COMPACT_BUCKET_DP.dp),
             DpSize(NARROW_WIDTH, WIDGET_FULL_MIN_HEIGHT_DP.dp),
+            DpSize(WIDGET_MIN_WIDTH_DP.dp, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(WIDGET_MIN_WIDTH_DP.dp, WIDGET_FULL_MIN_HEIGHT_DP.dp),
         )
     )
 

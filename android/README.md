@@ -63,8 +63,19 @@ should control when you drop it, and each opens the app when you tap its name.
 | **Hawksnest Switch** | A two-half paddle for an on/off switch. Exists because the light widget gets the Inovelli VZW30-SN badly wrong: Z-Wave exposes it as a Multilevel Switch, so HA reports `supported_color_modes: ["brightness"]` and the light widget offers dim steps to hardware with no dimmer. This widget deliberately ignores those attributes and never shows a percentage. |
 | **Hawksnest Scene Pad** | A replica of the Zooz ZEN32 on the wall — the large relay key on top, keys 1–4 in a 2×2 grid beneath, each drawn in its own LED colour. Faceplate order was verified against the hardware (2026-08-01), not assumed: the planning note had the relay at the bottom, which would have put every layout constant upside down. |
 
-All six are **resizable in both directions** and arrive at three cells by one row. Squeezed to a
-single row they switch to a compact layout — one line of text, controls filling the rest — rather
+All six are **resizable in both directions**. Five arrive at one row tall (three cells wide, two
+for temperature) and can be squeezed down to **a single cell** — about the size of an app icon,
+where only the control and a truncated state line survive. The alarm stops at two cells because
+three segments cannot render in one, and the scene pad arrives 3x3 and stops at 80dp because a
+five-key pad needs the room.
+
+Sizing lives in two places that must agree: `minResizeWidth` in `res/xml/*_widget_info.xml` sets
+how small the launcher will let you go, and the `SizeMode.Responsive` bucket set in each widget
+tells Glance which layouts to choose from. Lower one without the other and the launcher hands the
+widget a width the content was not laid out for, which clips instead of reflowing —
+`WidgetSizingTest` fails the build if they drift apart.
+
+Squeezed to a single row they switch to a compact layout — one line of text, controls filling the rest — rather
 than clipping. The lock and alarm give up their device *name* first and never the state or the time
 it was read.
 
