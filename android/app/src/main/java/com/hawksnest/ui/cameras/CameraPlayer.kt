@@ -437,58 +437,17 @@ fun CameraPlayer(
     BackHandler(enabled = fullscreen) { fullscreen = false }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // ONE FlowRow that wraps only when it has to.
+        // The chip row that used to live here is gone. View controls (mute, quality, fullscreen,
+        // Move) now overlay the picture in CameraOverlay; camera actions sit in one fixed row
+        // BELOW it in CameraActions; and the camera switcher dropdown is replaced by swiping the
+        // frame. What that row cost, measured on a 19.5:9 phone: two wrapped lines above a 16:9
+        // frame, roughly a tenth of the screen, pushing the transport toward the fold.
         //
-        // A plain Row cannot hold this many controls on a phone: Row gives every
-        // child its minimum width and then keeps going, so the overflow doesn't
-        // clip or scroll — the last chips get squeezed until their labels wrap one
-        // character per line ("S n a p s h o t" stacked vertically). But forcing a
-        // second row unconditionally is also wrong: it costs a row of height on
-        // every camera, which pushed the transport bar off-screen. FlowRow gives
-        // one line when the set fits and extra lines only when it doesn't — and
-        // the set genuinely varies (Move only for PTZ, Low/High only with a sub
-        // stream, Talk only for Ring, Siren only where one exists).
-        if (!fullscreen) FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            CameraSwitcher(cameras = cameras, current = cam, onSelect = onSelectCamera)
-            if (isLive && ptz != null) {
-                MoveButton(active = showPtz, onToggle = { showPtz = !showPtz })
-            }
-            if (isLive && subAvailable) {
-                QualityToggle(low = qualityLow, onChange = { qualityLow = it })
-            }
-            MuteButton(muted = muted, onToggle = { muted = !muted })
-            FullscreenButton(active = fullscreen, onToggle = { fullscreen = !fullscreen })
-            SnapshotButton(snapshotUrl = cam.snapshotUrl, cameraName = cameraName)
-            // LIVE ONLY, and the gate is load-bearing rather than cosmetic: TalkButton latches the
-            // mic open until tapped again, and unmounting it is what closes the session. Offering
-            // it over recorded footage would be both meaningless (there is nothing to talk to) and
-            // the one way a mic could stay open with no live camera on screen.
-            if (isRing && isLive) {
-                TalkButton(cameraName, viewModel)
-            }
-            cam.sirenSwitchId?.let { sirenId -> SirenButton(sirenId, viewModel) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (isLive) HawksnestTheme.pulse.recovery
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                )
-                Text(
-                    if (isLive) "Live" else "Recorded",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    modifier = Modifier.padding(start = 6.dp),
-                )
-            }
-        }
+        // NOTE ON SIZE, because it is easy to expect more than is possible: a full-width 16:9
+        // frame is ~26% of a 19.5:9 screen and that is simply what 16:9 is. The picture cannot be
+        // made meaningfully taller in portrait without cropping the sides off the source. This
+        // change buys back the space AROUND it, not inside it; fullscreen (which rotates) is
+        // still where a big picture comes from.
 
         // Transport ladder: recorded VOD (when scrubbed) → live RTSP straight to the camera →
         // live WebRTC (go2rtc) → live WebRTC (HA) → live HLS/demo video → MJPEG proxy → snapshot.
@@ -501,9 +460,20 @@ fun CameraPlayer(
         // cannot drift. Fullscreen swaps the fixed 16:9 box for the whole screen — the `when`
         // stays in the same composition slot either way, so the player is NOT torn down and
         // re-created (which on the WebRTC tiers is a 2-4s renegotiation).
+        val camIndex = cameras.indexOfFirst { it.id == cam.id }.takeIf { it >= 0 }
         ZoomableFrame(
             zoom = zoom,
             onZoomChange = { zoom = it },
+            // Wraps at both ends: seven cameras in a ring beats a swipe that silently does
+            // nothing because you are on the last one.
+            onSwipe = if (cameras.size > 1 && camIndex != null) {
+                { dir ->
+                    val next = ((camIndex + dir) % cameras.size + cameras.size) % cameras.size
+                    onSelectCamera(cameras[next])
+                }
+            } else {
+                null
+            },
             modifier = if (fullscreen) {
                 Modifier.fillMaxSize()
             } else {
@@ -618,21 +588,48 @@ fun CameraPlayer(
             else -> RefreshingSnapshot(url = cam.snapshotUrl, modifier = frame)
         }
 
-            // The only on-screen way out of fullscreen (back also works). Inside the frame so it
-            // sits over the picture, and NOT inside the graphicsLayer content — it must stay put
-            // and stay the same size while the picture underneath is magnified and panned.
-            if (fullscreen) {
-                FullscreenButton(
-                    active = true,
-                    onToggle = { fullscreen = false },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(12.dp),
-                )
-            }
+            // Pinned chrome. Inside the frame so it sits over the picture, and deliberately NOT
+            // inside the graphicsLayer content — it must stay put and stay the same size while
+            // the picture underneath is magnified and panned. This is also the only on-screen way
+            // out of fullscreen (back also works).
+            CameraOverlay(
+                isLive = isLive,
+                cameraName = cam.name,
+                muted = muted,
+                onToggleMute = { muted = !muted },
+                fullscreen = fullscreen,
+                onToggleFullscreen = { fullscreen = !fullscreen },
+                qualityLow = qualityLow.takeIf { isLive && subAvailable },
+                onQualityChange = { qualityLow = it },
+                ptzActive = showPtz.takeIf { isLive && ptz != null },
+                onTogglePtz = { showPtz = !showPtz },
+                index = camIndex,
+                count = cameras.size,
+                modifier = Modifier.matchParentSize(),
+            )
         }
 
         if (!fullscreen) {
+            // What the CAMERA does, in one row that cannot wrap. Talk stays live-only and
+            // speaker-only: the gate is load-bearing rather than cosmetic, because TalkButton
+            // latches the mic open until tapped again and unmounting it is what closes the
+            // session. Reply follows the same speaker rule — a camera that cannot talk should
+            // not offer to, so it is absent rather than disabled.
+            CameraActions(
+                talk = if (isRing && isLive) {
+                    { TalkButton(cameraName, viewModel, modifier = Modifier.weight(1f)) }
+                } else {
+                    null
+                },
+                // Reply is wired by the quick-replies change; it will use the same speaker gate.
+                snapshot = cam.snapshotUrl?.let {
+                    { SnapshotButton(cam.snapshotUrl, cameraName, modifier = Modifier.weight(1f)) }
+                },
+                siren = cam.sirenSwitchId?.let { sirenId ->
+                    { SirenButton(sirenId, viewModel, modifier = Modifier.weight(1f)) }
+                },
+            )
+
             // Live only: moving the lens while watching recorded footage would re-aim
             // the camera with no visible feedback. Leaving composition is also what
             // guarantees an in-flight move is stopped (see PtzPad).

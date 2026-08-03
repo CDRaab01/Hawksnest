@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -16,6 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import kotlin.math.abs
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowInsetsCompat
@@ -24,6 +28,7 @@ import com.hawksnest.core.logic.FrameSize
 import com.hawksnest.core.logic.NO_ZOOM
 import com.hawksnest.core.logic.ZoomState
 import com.hawksnest.core.logic.applyGesture
+import com.hawksnest.core.logic.shouldCaptureDrag
 
 /**
  * Pinch-to-zoom + drag-to-pan over the camera picture, the way Ring and the Reolink app do it.
@@ -40,11 +45,22 @@ import com.hawksnest.core.logic.applyGesture
  * The magnification is a VIEW transform — bigger pixels, not a sharper image, and it does not move
  * the camera. Real optical zoom on the E1 Zoom is PTZ, which is the separate Move control.
  */
+/**
+ * How far across the frame a drag must travel to count as a camera change.
+ *
+ * A fraction rather than a dp value so it scales with the frame: the same flick should mean the
+ * same thing on a phone and in fullscreen. A quarter is comfortably past the touch slop that
+ * claimed the gesture, without demanding a full swipe across a large screen.
+ */
+private const val SWIPE_FRACTION = 0.25f
+
 @Composable
 fun ZoomableFrame(
     zoom: ZoomState,
     onZoomChange: (ZoomState) -> Unit,
     modifier: Modifier = Modifier,
+    /** Horizontal fling while un-zoomed: +1 = next camera, -1 = previous. Null disables it. */
+    onSwipe: ((Int) -> Unit)? = null,
     content: @Composable BoxScope.(Modifier) -> Unit,
 ) {
     // The gesture lambdas are installed once (`pointerInput(Unit)`) so a re-pinch doesn't restart
@@ -52,11 +68,50 @@ fun ZoomableFrame(
     // rather than the ones captured on first composition.
     val currentZoom by rememberUpdatedState(zoom)
     val currentOnChange by rememberUpdatedState(onZoomChange)
+    val currentOnSwipe by rememberUpdatedState(onSwipe)
 
     Box(
         modifier
             // Without this the magnified picture paints over the controls above and below it.
             .clipToBounds()
+            // Swipe between cameras, the Reolink gesture. FIRST in the chain so it can claim the
+            // gesture before the transform detector — but it only ever claims one it is certain
+            // about, so pinch still reaches the detector below.
+            //
+            // Hand-rolled rather than detectHorizontalDragGestures because that one consumes
+            // unconditionally, which would eat one-finger PANNING while zoomed. The two rules
+            // that make this safe are both here: bail the moment a second finger lands (that is a
+            // pinch, not a swipe), and do nothing while zoomed (that is a pan). The zoom check is
+            // `shouldCaptureDrag` — the same predicate the pan path already used, so the two can
+            // never disagree about who owns a drag.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    var dx = 0f
+                    var multiTouch = false
+                    var claimed = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.size > 1) multiTouch = true
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        dx += change.positionChange().x
+                        if (!multiTouch && !shouldCaptureDrag(currentZoom) &&
+                            abs(dx) > viewConfiguration.touchSlop
+                        ) {
+                            claimed = true
+                            change.consume()
+                        }
+                    }
+                    if (claimed && !multiTouch) {
+                        val threshold = size.width * SWIPE_FRACTION
+                        when {
+                            dx <= -threshold -> currentOnSwipe?.invoke(1)
+                            dx >= threshold -> currentOnSwipe?.invoke(-1)
+                        }
+                    }
+                }
+            }
             .pointerInput(Unit) {
                 detectTransformGestures(panZoomLock = true) { centroid, pan, gestureZoom, _ ->
                     val frame = FrameSize(size.width.toFloat(), size.height.toFloat())
