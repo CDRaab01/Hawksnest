@@ -497,6 +497,20 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   the OS, and silently flipping an installed app's appearance to match a constant is worse than
   the inconsistency. `ThemePref.parse` is tolerant of junk, because a bad stored value would
   otherwise make the picker unreachable.
+- **Quick replies** — prerecorded messages played out of a camera's speaker, Ring-style. **The
+  audio never touches the phone.** `sendQuickReply` POSTs to go2rtc's
+  `/api/streams?dst=<camera>&src=ffmpeg:/config/replies/<file>#audio=pcmu`, which pushes a file
+  from go2rtc's own config volume into the camera's audio backchannel. The obvious alternative —
+  substituting a file for the microphone inside `TalkButton`'s WebRTC session — needs a custom
+  `AudioDeviceModule` and would only ever work on Android; this needs no mic permission, no peer
+  connection and no negotiation, and the web app gets it free. PCMU because that is the codec the
+  cameras advertise on their sendonly track. `quickReplyPath` (pure, tested) does the encoding:
+  the source contains `:`, `/` and a `#` fragment, and a raw `#` truncates the query at the codec
+  directive — a failure invisible from the app. Gated on `canPlayReplies(canGo2rtc)`, the same
+  signal the live tier uses, and **fails closed**: unknown means no button. The result is always
+  shown, because a reply that fails quietly leaves the user believing they spoke to someone at the
+  door. Audio lives in the `go2rtc-replies` ConfigMap in `hawksnest-automation`; the filenames in
+  `QUICK_REPLIES` and that ConfigMap must agree.
 - **Crash capture** (`crash/`) — an uncaught-exception handler installed **first** in
   `HawksnestApp.onCreate`, before anything else can throw. Writes a scrubbed report to
   `filesDir/crashes/` synchronously and then **chains to the previous handler** so the process
