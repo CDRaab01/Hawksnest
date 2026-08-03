@@ -9,6 +9,8 @@ import com.hawksnest.core.ha.WebRtcSignal
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.PtzControls
+import com.hawksnest.core.logic.QuickReply
+import com.hawksnest.core.logic.quickReplyPath
 import com.hawksnest.core.logic.resolvePtz
 import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
@@ -27,6 +29,12 @@ import com.hawksnest.core.net.RingTimelineClient
 import com.hawksnest.util.CredentialStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -70,6 +78,7 @@ class CameraPlayerViewModel @Inject constructor(
     private val ringTimelineClient: RingTimelineClient,
     private val go2rtcStreams: Go2rtcStreams,
     private val credentialStore: CredentialStore,
+    private val httpClient: OkHttpClient,
 ) : ViewModel() {
 
     /**
@@ -210,6 +219,40 @@ class CameraPlayerViewModel @Inject constructor(
         connection.fetchCameraFootage(camera, startMs, endMs)
 
     /** HA token for media requests that must authenticate themselves — see [ConnectionManager.haToken]. */
+    /**
+     * Play a prerecorded message out of [cameraName]'s speaker.
+     *
+     * One HTTP call, no WebRTC: go2rtc reads the file from its own config volume and pushes it
+     * into the camera's audio backchannel. See [quickReplyPath] for why that beats substituting a
+     * file for the microphone in TalkButton's session.
+     *
+     * Returns whether go2rtc accepted it. The caller SHOWS that result — a reply that quietly
+     * fails is worse than no reply button, because the user believes they said something to
+     * whoever is at the door.
+     *
+     * Routed through the app's own base URL so it rides the same nginx `/go2rtc/` location the
+     * live tier and Talk already use, and inherits the same tailnet-only exposure.
+     */
+    suspend fun sendQuickReply(cameraName: String, reply: QuickReply): Boolean =
+        withContext(Dispatchers.IO) {
+            val base = baseUrl().trimEnd('/')
+            if (base.isBlank()) return@withContext false
+            runCatching {
+                val request = Request.Builder()
+                    .url("$base/${quickReplyPath(cameraName, reply)}")
+                    // go2rtc wants a POST; the body is irrelevant, the query carries everything.
+                    .post(ByteArray(0).toRequestBody())
+                    .build()
+                // Short timeouts: the app client has NO read timeout (it carries the websocket),
+                // which would let a wedged call hang the sheet open indefinitely.
+                httpClient.newBuilder()
+                    .connectTimeout(8, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
+                    .build()
+                    .newCall(request).execute().use { it.isSuccessful }
+            }.getOrDefault(false)
+        }
+
     suspend fun haToken(): String? = connection.haToken()
 
     /** Read a (live) entity from the store — used to pull a ring-mqtt event selector's options. */

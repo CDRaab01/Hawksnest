@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.canPlayReplies
 import com.hawksnest.core.logic.NO_ZOOM
 import com.hawksnest.core.logic.RecordedBackend
 import com.hawksnest.core.logic.RecordedSource
@@ -245,6 +246,10 @@ fun CameraPlayer(
     val ptz by remember(cameraName) { viewModel.ptzControls(cameraName) }
         .collectAsState(initial = null)
     var showPtz by remember(cam.id) { mutableStateOf(false) }
+    // Keyed on cam.id so a swipe to another camera closes the sheet: the replies would still be
+    // addressed to the camera you were looking at a moment ago, which is a message played in the
+    // wrong room.
+    var showReplies by remember(cam.id) { mutableStateOf(false) }
 
     // Pinch-zoom over the picture. Keyed on cam.id so switching cameras starts unzoomed —
     // a magnified corner carried over to a different room is disorienting and reads as a bug.
@@ -621,7 +626,24 @@ fun CameraPlayer(
                 } else {
                     null
                 },
-                // Reply is wired by the quick-replies change; it will use the same speaker gate.
+                // Gated on go2rtc serving this camera, because go2rtc is what carries the
+                // backchannel to the speaker. Fails closed while the stream list is in flight —
+                // a button that appears and then does nothing is worse than one that appears a
+                // moment late. Live-only for the same reason Talk is: there is nothing to say to
+                // a recording.
+                reply = if (canPlayReplies(canGo2rtc) && isLive) {
+                    {
+                        ActionButton(
+                            icon = Icons.Filled.Campaign,
+                            label = "Reply",
+                            accent = true,
+                            onClick = { showReplies = true },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                } else {
+                    null
+                },
                 snapshot = cam.snapshotUrl?.let {
                     { SnapshotButton(cam.snapshotUrl, cameraName, modifier = Modifier.weight(1f)) }
                 },
@@ -629,6 +651,15 @@ fun CameraPlayer(
                     { SirenButton(sirenId, viewModel, modifier = Modifier.weight(1f)) }
                 },
             )
+
+            if (showReplies) {
+                ReplySheet(
+                    cameraName = cameraName,
+                    displayName = cam.name,
+                    viewModel = viewModel,
+                    onDismiss = { showReplies = false },
+                )
+            }
 
             // Live only: moving the lens while watching recorded footage would re-aim
             // the camera with no visible feedback. Leaving composition is also what
