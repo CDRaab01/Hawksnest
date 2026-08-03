@@ -4,6 +4,9 @@ import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import com.hawksnest.core.ha.ConnectionManager
+import com.hawksnest.crash.CrashReporter
+import com.hawksnest.crash.CrashUploader
+import com.hawksnest.shortcuts.ShortcutPublisher
 import com.hawksnest.push.NtfyPushService
 import com.hawksnest.push.PushNotifier
 import com.hawksnest.push.PushSettings
@@ -32,9 +35,15 @@ class HawksnestApp : Application(), ImageLoaderFactory {
     @Inject lateinit var pushNotifier: PushNotifier
     @Inject lateinit var pushSettings: PushSettings
     @Inject lateinit var widgetLiveBridge: WidgetLiveBridge
+    @Inject lateinit var crashReporter: CrashReporter
+    @Inject lateinit var crashUploader: CrashUploader
+    @Inject lateinit var shortcutPublisher: ShortcutPublisher
 
     override fun onCreate() {
         super.onCreate()
+        // FIRST, before anything else can throw: a crash during startup is exactly the one we
+        // most want captured, and installing this later would miss it.
+        crashReporter.install()
         connectionManager.start()
         // Mirror entity changes into any home-screen widgets while this process is alive. Purely
         // additive — widgets read for themselves when the app isn't running.
@@ -43,10 +52,16 @@ class HawksnestApp : Application(), ImageLoaderFactory {
         // once here. Then resume the push listener if the user has it enabled
         // (the service self-stops if not).
         pushNotifier.createChannels()
+        // Launcher shortcuts are rebuilt from the entities that actually exist, so they appear
+        // once connected and adapt if the house changes.
+        shortcutPublisher.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
             if (pushSettings.enabled.first()) {
                 NtfyPushService.start(this@HawksnestApp)
             }
+            // Anything captured on a previous run goes out now — never from the dying
+            // process itself (see CrashReporter).
+            crashUploader.sendPending()
         }
     }
 

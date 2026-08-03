@@ -6,6 +6,10 @@ import android.content.Context
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.net.ReachabilityProbe
+import com.hawksnest.crash.CrashReporter
+import com.hawksnest.core.logic.ThemePref
+import com.hawksnest.crash.CrashStore
+import com.hawksnest.util.DevicePrefsStore
 import com.hawksnest.push.NtfyPushService
 import com.hawksnest.push.PushSettings
 import com.hawksnest.util.CredentialStore
@@ -30,9 +34,42 @@ class SettingsViewModel @Inject constructor(
     private val credentialStore: CredentialStore,
     private val connectionManager: ConnectionManager,
     private val pushSettings: PushSettings,
+    private val crashStore: CrashStore,
+    private val devicePrefs: DevicePrefsStore,
     @ApplicationContext private val appContext: Context,
     okHttpClient: OkHttpClient,
 ) : ViewModel() {
+
+    /**
+     * Recent crashes, read from disk rather than observed: files only change when the process
+     * dies, so there is nothing to keep a Flow open for. Re-read on clear.
+     */
+    private val _crashes = MutableStateFlow(readCrashes())
+    val crashes: StateFlow<List<CrashEntry>> = _crashes.asStateFlow()
+
+    private fun readCrashes(): List<CrashEntry> = crashStore.list().map { f ->
+        val body = crashStore.read(f)
+        val whenMs = f.name.removePrefix("crash-").removeSuffix(".txt").toLongOrNull()
+        // The stored body already leads with "type:" / "message:" lines; surface the type plus
+        // when it happened, which is what distinguishes one entry from another in a list.
+        val type = body.lineSequence().firstOrNull { it.startsWith("type:") }
+            ?.removePrefix("type:")?.trim()?.substringAfterLast('.') ?: "Crash"
+        val stamp = whenMs?.let { CrashReporter.isoUtc(it) } ?: f.name
+        CrashEntry(id = f.name, headline = "$type · $stamp", body = body)
+    }
+
+    fun clearCrashes() {
+        crashStore.clear()
+        _crashes.value = emptyList()
+    }
+
+    /** Appearance preference (Dark / Light / System) — applied by MainActivity. */
+    val themePref: StateFlow<ThemePref> = devicePrefs.themePref
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemePref.DEFAULT)
+
+    fun setThemePref(pref: ThemePref) {
+        viewModelScope.launch { devicePrefs.setThemePref(pref) }
+    }
 
     val status: StateFlow<ConnectionStatus> = connectionManager.state.status
     val error: StateFlow<String?> = connectionManager.state.error
