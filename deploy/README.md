@@ -59,25 +59,41 @@ kubectl -n home-automation rollout undo deployment/hawksnest
 ```
 
 ## Camera streaming locations (WebRTC / HLS, ring-mqtt + Frigate)
-The camera backend is **ring-mqtt** (Ring devices over MQTT, with an embedded **go2rtc** for
-streaming). It bridges each Ring camera into HA as several entities — `camera.<base>_live`,
-`_snapshot`, `_event`, `select.<base>_event_select`, and `binary_sensor.<base>_motion`/`_ding`
-— which the apps collapse into one logical camera.
+There are two camera backends. **ring-mqtt** (Ring devices over MQTT, with an embedded **go2rtc**)
+bridges each Ring camera into HA as several entities — `camera.<base>_snapshot`,
+`select.<base>_event_select`, and `binary_sensor.<base>_motion`/`_ding` — which the apps collapse
+into one logical camera. **Frigate** has recorded the seven Reolink cameras since 2026-07-29. A
+camera's recorded backend is derived per render as `ring | frigate | none`
+(`src/lib/recordedBackend.ts`, and its Kotlin twin `core/logic/RecordedBackend.kt`); the derivation
+fails closed, so a camera Frigate doesn't record resolves exactly as it did before Frigate existed.
+
+> **ring-mqtt 5.x has no `camera.<base>_event` entity.** Selecting an option on the event selector
+> makes ring-mqtt fetch Ring's signed cloud recording and publish it as the selector's
+> `recordingUrl` attribute, which is what the players load. Assuming the 4.x `_event` camera is what
+> pinned every recorded clip on "Loading recording…" (fixed 2026-07-26).
 
 How each transport reaches HA through this one nginx origin:
 - **WebRTC (live, lowest latency)** — negotiated entirely over the existing `/api/websocket`
   (`camera/webrtc/offer`); the media is UDP straight to go2rtc via ICE and never touches nginx. No
-  new route. (Web uses native WebRTC; Android uses go2rtc **LL-HLS** via ExoPlayer.)
-- **HLS (live fallback + ring recorded events)** — `camera/stream` and the `camera.<base>_event`
-  recording stream ride `/api/hls/` and `/api/camera_proxy_stream/` (both **buffering-off**).
-- **`/api/frigate/`** — optional: Frigate's continuous-VOD clips/playlists, kept buffering-off and
-  ready should a Frigate NVR ever join (it needs hardware ring-mqtt doesn't).
+  new route. Both clients prefer it, gated on go2rtc's own stream list rather than on the camera's
+  kind. Android additionally has an **RTSP-direct-to-camera** top tier the browser cannot have.
+- **HLS (live fallback)** — `camera/stream` rides `/api/hls/` and `/api/camera_proxy_stream/` (both
+  **buffering-off**). Resolved lazily, because `camera/stream` wakes a battery camera's pipeline.
+- **`/api/frigate/`** — Frigate's continuous-VOD clips and playlists, buffering-off. **Live and in
+  use.** Segment URLs are signed via `auth/sign_path`.
+- **`/ring-timeline/`** — the sidecar `ring-timeline` service (sibling repo `hawksnest-automation`),
+  which serves Ring's own `video_search` timeline: real event times and pre-signed mp4 URLs, which
+  HA exposes no other way. Note it is **not** under `/api/`.
+- **`/go2rtc/`** — signalling for the dedicated go2rtc instance, used by the two-way Talk path.
+  Media rides `:8555` and bypasses nginx.
 
-Recorded-event playback on ring-mqtt picks one of the **last ~5 events** via the event-selector
-entity (Ring Protect required); it isn't a continuous 24h VOD. All locations omit `X-Forwarded-For`
-for the reason below. The web/Android apps run the whole player — live, timeline, transport,
-doorbell banner — against **demo data** (a bundled clip + synthesized events) with no backend, so
-the UI is exercisable before ring-mqtt is up.
+Recorded playback prefers `ring-timeline` (real event times, real spans, plus a 24/7 continuous
+lane) and falls back to the ring-mqtt event selector — the last ~5 events, Ring Protect required —
+when that service is down. Signed Ring URLs expire in ~15 minutes, so the timeline is refetched,
+never held. All HA-proxied locations clear `X-Forwarded-For` for the reason below. The web/Android
+apps run the whole player — live, timeline, transport, doorbell banner — against **demo data** (a
+bundled clip + synthesized events) with no backend, so the UI is exercisable before any of this
+is up.
 
 ## Note: HA trusted_proxies and X-Forwarded-For
 `nginx.conf` deliberately does **not** forward `X-Forwarded-For` to HA. When HA has

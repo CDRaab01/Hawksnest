@@ -60,7 +60,7 @@
         </service>
 
         <!-- ── Home-screen widgets ────────────────────────────────────────────────────────────
-             Three providers rather than one, so the launcher's picker lists them by name and each
+             Six providers rather than one, so the launcher's picker lists them by name and each
              gets its own size and preview. They share one configuration activity, which works out
              which widget it is configuring from the provider that launched it. The widgets talk to
              Home Assistant over REST (widget/data/WidgetHaClient) — see ARCHITECTURE.md. -->

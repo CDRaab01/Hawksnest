@@ -452,10 +452,17 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   `LockStateTest`). Haptics route through the `Haptics` vocabulary (`rememberHaptics()`) —
   actuation tick, threshold buzz on ticks/steps/commit points, reject buzz with the failure
   snackbar and on entering a jam.
-- Cleartext HTTP is **deliberately permitted** (`network_security_config.xml`): the HA host can
-  be a bare `100.x` Tailscale IP, which a scoped domain-config cannot match. The fix is TLS on
-  the proxy first (ROADMAP #1), then flip `cleartextTrafficPermitted="false"` — not a manifest
-  tweak on its own.
+- Cleartext HTTP is **off** — `network_security_config.xml` sets `cleartextTrafficPermitted="false"`,
+  so the app reaches HA only over HTTPS via the Tailscale Serve TLS front
+  (`https://<host>.ts.net:8443`). This was once deliberately `true`, because the HA host could be a
+  bare `100.x` Tailscale IP that a scoped `<domain-config>` cannot match; TLS on the proxy removed
+  that constraint and the flag was flipped. A **debug-only** override
+  (`src/debug/res/xml/network_security_config.xml`) re-permits cleartext to `10.0.2.2`/`localhost`
+  for the instrumented mock-HA and never ships in a release APK. Reverting to a plain-HTTP host
+  means re-opening cleartext globally — a scoped domain-config still cannot match a bare IP — so it
+  is a discussion, not a manifest tweak. The direct-camera RTSP tier is unaffected: media3's RTSP
+  module connects via raw `java.net.Socket` and never consults `NetworkSecurityPolicy` (verified
+  against 1.10.1).
 - **Push** (`push/`) — self-hosted **ntfy**, no FCM/Google. `NtfyPushService` is a `specialUse`
   foreground service holding one streaming connection to `<base>/<topic>/json`; each frame is
   parsed (`NtfyMessage`, pure/tested), classified (`PushRoute.kindOf`: doorbell/alarm/generic),
@@ -695,7 +702,10 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
 
 The web app ships as an nginx pod in the **same k3s cluster/namespace as HA itself** (cluster
 owned by the sibling `hawksnest-automation` repo), NodePort 30080, exposed to LAN/Tailscale via
-Windows portproxy scripts that run at logon (WSL IP changes each reboot).
+**Tailscale Serve `:8443` → host `8090` → on-disk `socat` systemd units in the WSL `Dragonfly`
+distro → NodePort 30080** (changed 2026-07-22; the older netsh portproxy scripts that ran at logon
+are retired, and `deploy/windows/portproxy-hawksnest.ps1` is kept only for the NAT-mode case —
+it is broken under mirrored WSL networking). Host runbook: `C:\Code\OPERATIONS.md` §1.2 / §6.
 
 nginx reverse-proxies `/api` to HA so the browser is same-origin. **Invariant: every HA-proxied
 location must CLEAR `X-Forwarded-For`/`X-Forwarded-Proto` (`proxy_set_header … ""`)** — with
