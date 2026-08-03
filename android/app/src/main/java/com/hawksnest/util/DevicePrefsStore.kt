@@ -11,6 +11,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
+import com.hawksnest.core.logic.ThemePref
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import javax.inject.Inject
@@ -33,10 +34,23 @@ class DevicePrefsStore @Inject constructor(
 ) {
     private val hiddenKey = stringSetPreferencesKey("hidden_entities")
     private val renamesKey = stringPreferencesKey("entity_renames")
+    private val themeKey = stringPreferencesKey("theme_pref")
 
     /** Entity ids the user hid from the Devices list. */
     val hidden: Flow<Set<String>> =
         context.devicePrefsDataStore.data.map { it[hiddenKey] ?: emptySet() }
+
+    /**
+     * Appearance preference (Dark / Light / System). Lives here rather than in CredentialStore
+     * because it is device personalization, not a credential — and this DataStore is the one
+     * that is deliberately backed up (see BackupExclusionTest), which is right for a preference.
+     */
+    val themePref: Flow<ThemePref> =
+        context.devicePrefsDataStore.data.map { ThemePref.parse(it[themeKey]) }
+
+    suspend fun setThemePref(pref: ThemePref) {
+        context.devicePrefsDataStore.edit { it[themeKey] = pref.name }
+    }
 
     /** entity_id → user-chosen display name. */
     val renames: Flow<Map<String, String>> =

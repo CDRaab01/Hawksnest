@@ -62,6 +62,8 @@ fun SettingsScreen(
     val rtspUser by viewModel.rtspUser.collectAsState()
     val hasRtspPass by viewModel.hasRtspPass.collectAsState()
     val rtspCameraIps by viewModel.rtspCameraIps.collectAsState()
+    val crashes by viewModel.crashes.collectAsState()
+    val themePref by viewModel.themePref.collectAsState()
 
     val context = LocalContext.current
     // Android 13+ gates notifications behind POST_NOTIFICATIONS; request it the
@@ -180,6 +182,12 @@ fun SettingsScreen(
             onSave = { u, p, ips -> viewModel.saveRtsp(u, p, ips) },
             onClear = { viewModel.clearRtsp() },
         )
+
+        SectionHeader("Appearance")
+        AppearancePanel(pref = themePref, onSelect = { viewModel.setThemePref(it) })
+
+        SectionHeader("Diagnostics")
+        CrashPanel(crashes = crashes, onClear = { viewModel.clearCrashes() })
 
         SectionHeader("Notifications")
         PanelCard {

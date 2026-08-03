@@ -13,7 +13,14 @@ import com.hawksnest.push.PushNav
 import com.hawksnest.push.PushNotifier
 import com.hawksnest.ui.navigation.AppNavGraph
 import com.hawksnest.ui.navigation.Screen
+import com.hawksnest.core.logic.ThemePref
+import com.hawksnest.core.logic.resolveDarkTheme
 import com.hawksnest.ui.theme.HawksnestTheme
+import com.hawksnest.shortcuts.ShortcutPublisher
+import com.hawksnest.util.DevicePrefsStore
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import dagger.hilt.android.AndroidEntryPoint
 import androidx.lifecycle.lifecycleScope
 import com.hawksnest.push.NtfyPushService
@@ -31,6 +38,8 @@ class MainActivity : FragmentActivity() {
 
     @Inject lateinit var pushNav: PushNav
     @Inject lateinit var pushSettings: PushSettings
+    @Inject lateinit var devicePrefs: DevicePrefsStore
+    @Inject lateinit var shortcutPublisher: ShortcutPublisher
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,6 +57,10 @@ class MainActivity : FragmentActivity() {
         // (the nav shell brings Home forward and opens that camera's lightbox) rather
         // than a start destination — a specific camera opens in an overlay, not a route.
         handlePushIntent(intent)
+        // A launcher shortcut ("Lock up", "Arm away", "Arm home") arrives as an extra. Performed
+        // here rather than in a BroadcastReceiver so it goes through ControlGate like every other
+        // user-initiated call — same pending state, same failure snackbar.
+        handleShortcutIntent(intent)
         // A widget whose problem the owner can only fix in Settings (no token, token rejected)
         // opens straight there rather than dropping them on Home to find it.
         val start = intent?.getStringExtra(EXTRA_START_ROUTE) ?: Screen.Home.route
@@ -55,8 +68,11 @@ class MainActivity : FragmentActivity() {
         // rather than a route because it is navigated TO rather than started AT — see AppNavGraph.
         val openEntity = intent?.getStringExtra(EXTRA_OPEN_ENTITY)
         setContent {
-            // Dark-first OLED instrument panel; follows the system day/night setting for now.
-            HawksnestTheme {
+            // Dark-first OLED instrument panel. The default still follows the system day/night
+            // setting; Settings → Appearance overrides it (see ThemePref, and its note on why
+            // this default differs from web's).
+            val pref by devicePrefs.themePref.collectAsState(initial = ThemePref.DEFAULT)
+            HawksnestTheme(darkTheme = resolveDarkTheme(pref, isSystemInDarkTheme())) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
@@ -85,6 +101,15 @@ class MainActivity : FragmentActivity() {
             // the camera live, as before.
             pushNav.openCamera(cameraId, intent.getStringExtra(PushNotifier.EXTRA_EVENT))
         }
+    }
+
+    private fun handleShortcutIntent(intent: android.content.Intent?) {
+        val id = intent?.getStringExtra(ShortcutPublisher.EXTRA_SHORTCUT) ?: return
+        // Consume it, so a configuration change that re-delivers the intent cannot re-fire the
+        // action — locking twice is harmless, but arming twice is a state change the owner
+        // did not ask for.
+        intent.removeExtra(ShortcutPublisher.EXTRA_SHORTCUT)
+        lifecycleScope.launch { shortcutPublisher.perform(id) }
     }
 
     companion object {

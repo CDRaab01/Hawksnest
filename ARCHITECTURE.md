@@ -478,6 +478,43 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   automations that publish to it) lives in the `hawksnest-automation` repo (`docs/ntfy-push.md`).
   On-device runtime (delivery with the app closed, battery, reconnect, the tap deep-link) is the
   one part unit tests can't cover — smoke-test it on the phone.
+- **Launcher shortcuts** (`shortcuts/`) — long-press the app icon for **Lock up / Arm away /
+  Arm home**. Published *dynamically* from the entities that exist rather than as static XML,
+  for the same reason widgets ask which device they control: entity ids are per-install. The cost
+  is that they appear only after the first connect, which beats a shortcut that silently fails.
+  **Nothing that unlocks or disarms is offered, and that is a security decision.** A launcher
+  shortcut is one tap with no confirmation and no app in the foreground; locking and arming fail
+  safe, unlocking and disarming do not — which is exactly why the in-app control makes you slide
+  and the widget makes you tap twice. `core/logic/shortcutsFor` owns that rule and is tested on
+  it. Taps route through `ConnectionManager.control` like any other user action (same pending
+  state, same failure snackbar), and `MainActivity` consumes the extra so a configuration change
+  cannot re-fire it.
+- **Appearance** — `HawksnestTheme` has always taken `darkTheme` as a parameter and the light
+  palette shipped with the V1 gates; what was missing was a control. `core/logic/ThemePref`
+  (Dark/Light/System) persists in `DevicePrefsStore` and `MainActivity` resolves it via the pure
+  `resolveDarkTheme(pref, systemIsDark)`. **Android defaults to System, web defaults to Dark** —
+  a deliberate divergence: web has never had another default, while Android has always followed
+  the OS, and silently flipping an installed app's appearance to match a constant is worse than
+  the inconsistency. `ThemePref.parse` is tolerant of junk, because a bad stored value would
+  otherwise make the picker unreachable.
+- **Crash capture** (`crash/`) — an uncaught-exception handler installed **first** in
+  `HawksnestApp.onCreate`, before anything else can throw. Writes a scrubbed report to
+  `filesDir/crashes/` synchronously and then **chains to the previous handler** so the process
+  still dies normally; swallowing it would leave a frozen app and no "keeps stopping" dialog.
+  Nothing is sent from the dying process — `CrashUploader` publishes pending reports on the *next*
+  launch, over the ntfy endpoint push already uses, and only when push is enabled (someone who
+  turned notifications off did not agree to "except crashes"). Reports are marked sent only on a
+  successful POST, so an outage retries rather than dropping. Storage is bounded to the 10 most
+  recent, which is also the blast radius of a boot loop. Visible in **Settings → Diagnostics**;
+  the ntfy line names the first `com.hawksnest.` frame rather than the framework frames above it.
+  **`core/logic/scrubSecrets` runs before anything is written or sent** and is the load-bearing
+  piece — a report reaches disk, a screen, and a subscribable topic, while this app holds an HA
+  token that opens the front door and RTSP camera credentials. It redacts by *shape* (URL
+  userinfo, JWTs, bearer headers, token-ish query params) rather than by knowing the values, and
+  is tested against each. Deliberately **not** a Sentry/GlitchTip client: self-hosting was the
+  plan (ROADMAP2 T1 #7) but wants ~1.5–2 GB beside the door locks and the NVR, and with
+  `isMinifyEnabled = false` these traces need no symbolication. `CrashUploader` is the seam to
+  swap if that changes.
 - **Home-screen widgets** (`widget/`, Glance/RemoteViews) — a light toggle with dim steps, an
   on/off paddle, a lock, the alarm panel's Off/Home/Away, a read-only room temperature, and a copy
   of the wall scene controller. Six `GlanceAppWidgetReceiver`s so the launcher lists them
