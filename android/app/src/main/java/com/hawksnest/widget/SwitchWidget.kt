@@ -23,6 +23,7 @@ import androidx.glance.layout.width
 import com.hawksnest.R
 import com.hawksnest.core.logic.Channel
 import com.hawksnest.core.logic.WIDGET_COMPACT_BUCKET_DP
+import com.hawksnest.core.logic.WIDGET_MIN_WIDTH_DP
 import com.hawksnest.core.logic.WIDGET_FULL_MIN_HEIGHT_DP
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
@@ -74,6 +75,8 @@ class SwitchWidget : GlanceAppWidget() {
         setOf(
             DpSize(NARROW_WIDTH, WIDGET_COMPACT_BUCKET_DP.dp),
             DpSize(NARROW_WIDTH, WIDGET_FULL_MIN_HEIGHT_DP.dp),
+            DpSize(WIDGET_MIN_WIDTH_DP.dp, WIDGET_COMPACT_BUCKET_DP.dp),
+            DpSize(WIDGET_MIN_WIDTH_DP.dp, WIDGET_FULL_MIN_HEIGHT_DP.dp),
         )
     )
 
