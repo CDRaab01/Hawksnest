@@ -48,6 +48,20 @@ fun quickReplyPath(cameraName: String, reply: QuickReply): String {
     return "go2rtc/api/streams?dst=${encode(cameraName)}&src=${encode(src)}"
 }
 
+/*
+ * NO `-re` HERE, AND IT WAS CHECKED RATHER THAN ASSUMED.
+ *
+ * The first on-device test played only the end of each message, and the obvious suspect was
+ * ffmpeg reading the file faster than realtime and letting the camera's jitter buffer discard the
+ * rest. Measured against the running go2rtc: a 6-second file keeps its ffmpeg child alive ~5.2
+ * seconds, so the push is already paced. (go2rtc 1.9.14 also rejects every form of passing extra
+ * input flags through the source string — `#input=`, `#raw=` and an inline `-re` all 400 or 500.)
+ *
+ * The remaining explanation is the camera's speaker taking a moment to open, which swallows the
+ * start. That is fixed in the AUDIO, by padding silence onto the front of each file — see the
+ * replies ConfigMap in hawksnest-automation.
+ */
+
 /**
  * Percent-encode for a query value. Hand-rolled rather than `URLEncoder` so this stays a pure
  * JVM-testable function with no android.net or java.net dependency, and so `+` never appears
