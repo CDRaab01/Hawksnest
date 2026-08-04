@@ -90,6 +90,18 @@ fun WebRtcPlayer(
                 },
             )
             setEnableHardwareScaler(true)
+            // Show the WHOLE frame; do not crop to fill.
+            //
+            // SurfaceViewRenderer defaults to SCALE_ASPECT_BALANCED, which crops when the
+            // container's aspect differs from the source. In the portrait 16:9 box they match, so
+            // it looks right — but fullscreen rotates to a 19.5:9 landscape screen, and BALANCED
+            // then eats the top and bottom of a 16:9 picture. Reported as "full mode cuts off the
+            // camera... looks zoomed in", and there is nothing to pan back into view because the
+            // crop is the renderer's, not the zoom's.
+            //
+            // FIT pillarboxes instead. Black bars beside the picture are the correct answer for a
+            // security camera: seeing all of the frame beats filling all of the glass.
+            setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
         }
     }
 
