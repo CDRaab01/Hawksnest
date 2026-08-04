@@ -497,6 +497,14 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   the OS, and silently flipping an installed app's appearance to match a constant is worse than
   the inconsistency. `ThemePref.parse` is tolerant of junk, because a bad stored value would
   otherwise make the picker unreachable.
+- **Camera chrome stays OFF the picture.** Controls live in the row above the frame, on black.
+  This was tried the other way on 2026-08-03 — view controls as 30dp buttons overlaying the video
+  — and reverted after one look on a device: too small to hit, competing with a bright daylight
+  frame, and drawing a camera name over the one the camera already burns in. Swipe-to-switch went
+  with it in favour of the `CameraSwitcher` dropdown. Two things were kept from that revision: the
+  96dp scrubber, and chrome in **fullscreen only** (`FullscreenChrome`), where the row is
+  off-screen and the previous behaviour lost Mute, Talk and Reply exactly when the picture was
+  biggest.
 - **Quick replies** — prerecorded messages played out of a camera's speaker, Ring-style. **The
   audio never touches the phone.** `sendQuickReply` POSTs to go2rtc's
   `/api/streams?dst=<camera>&src=ffmpeg:/config/replies/<file>#audio=pcmu`, which pushes a file
@@ -510,7 +518,11 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   signal the live tier uses, and **fails closed**: unknown means no button. The result is always
   shown, because a reply that fails quietly leaves the user believing they spoke to someone at the
   door. Audio lives in the `go2rtc-replies` ConfigMap in `hawksnest-automation`; the filenames in
-  `QUICK_REPLIES` and that ConfigMap must agree.
+  `QUICK_REPLIES` and that ConfigMap must agree. **The audio carries 1.5s of leading silence and
+  that is load-bearing** — the camera's speaker takes a moment to open and discards whatever
+  arrives first, so unpadded messages played only their tail. It is not a pacing problem: a
+  6-second file keeps its ffmpeg child alive ~5.2s, so go2rtc already pushes at realtime (and
+  1.9.14 rejects every way of passing `-re` through the source string).
 - **Crash capture** (`crash/`) — an uncaught-exception handler installed **first** in
   `HawksnestApp.onCreate`, before anything else can throw. Writes a scrubbed report to
   `filesDir/crashes/` synchronously and then **chains to the previous handler** so the process

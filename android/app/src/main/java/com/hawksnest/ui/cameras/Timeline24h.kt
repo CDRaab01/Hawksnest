@@ -153,11 +153,13 @@ fun Timeline24h(
         Canvas(
             Modifier
                 .fillMaxWidth()
-                // 64 -> 96dp. Removing the wrapped chip row above the picture (2026-08-03) freed
-                // roughly a tenth of the screen that the 16:9 frame cannot use — a full-width
-                // 16:9 picture is ~26% of a 19.5:9 phone and that is simply what 16:9 is. The
-                // scrubber is the best home for it: this is a drag target holding 24 hours, so
-                // every extra dp is a wider grab area and more room for the event chips.
+                // 64 -> 96dp. Arrived with the 2026-08-03 layout revision and KEPT when the rest
+                // of that revision was reverted, on the owner's call: nothing in the feedback was
+                // about the scrubber, and this is a drag target holding 24 hours, so every extra
+                // dp is a wider grab area and more room for the event chips.
+                //
+                // The height is affordable because the picture cannot use it: a full-width 16:9
+                // frame is ~26% of a 19.5:9 phone and that is simply what 16:9 is.
                 .height(96.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)

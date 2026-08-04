@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.OpenWith
@@ -47,6 +48,115 @@ import java.util.Date
 import java.util.Locale
 
 /**
+ * Player-chrome controls shared by every camera: audio mute, snapshot-to-file
+ * and the Low/High live-quality toggle. Twins of the web's `MuteButton.tsx`,
+ * `SnapshotButton.tsx` and `QualityToggle.tsx` — keep behaviour in lockstep.
+ */
+
+/** Opens the camera-movement drawer. Only shown for cameras that can actually move. */
+@Composable
+fun MoveButton(active: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    ChromeButton(
+        icon = { fg ->
+            Icon(
+                Icons.Filled.OpenWith,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(16.dp),
+            )
+        },
+        label = "Move",
+        active = active,
+        onClick = onToggle,
+        modifier = modifier,
+    )
+}
+
+/**
+ * Fullscreen toggle. A 16:9 frame on a tall phone uses about a third of the screen, so this is
+ * the difference between glancing at a camera and actually looking at one.
+ *
+ * Deliberately a chrome button rather than a gesture: a double-tap already means "reset zoom"
+ * (see [ZoomableFrame]) and overloading it would make both feel unreliable.
+ */
+@Composable
+fun FullscreenButton(active: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    ChromeButton(
+        icon = { fg ->
+            Icon(
+                if (active) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(16.dp),
+            )
+        },
+        label = if (active) "Exit" else "Full",
+        active = active,
+        onClick = onToggle,
+        modifier = modifier,
+    )
+}
+
+/** Speaker toggle. Every player mounts muted; this is the way back to sound. */
+@Composable
+fun MuteButton(muted: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    ChromeButton(
+        icon = { fg ->
+            Icon(
+                if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(16.dp),
+            )
+        },
+        label = if (muted) "Muted" else "Sound",
+        active = !muted,
+        onClick = onToggle,
+        modifier = modifier,
+    )
+}
+
+/**
+ * Live-quality selector — the Reolink app's Low/High pill. High = the go2rtc
+ * main stream; Low = the camera's `_sub` stream at a fraction of the bandwidth
+ * (the practical answer to fixed-bitrate main streams stalling on weak
+ * cellular). Rendered only when go2rtc actually lists the `_sub` stream.
+ */
+@Composable
+fun QualityToggle(low: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        QualityChip("Low", selected = low) { onChange(true) }
+        QualityChip("High", selected = !low) { onChange(false) }
+    }
+}
+
+@Composable
+private fun QualityChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelMedium,
+        maxLines = 1,
+        softWrap = false,
+        color = if (selected) MaterialTheme.colorScheme.onSurface
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.surface
+                else MaterialTheme.colorScheme.surfaceVariant,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+}
+
+/**
  * Save the camera's current snapshot to the device — the Reolink app's camera
  * button, saving into MediaStore (`Pictures/Hawksnest`) on Q+ where that needs
  * no permission, and into the app's external pictures dir on older API levels
@@ -55,6 +165,22 @@ import java.util.Locale
  * Failure is a transient inline state — a snapshot that didn't save is
  * self-evident, not worth a dialog.
  */
+/**
+ * Opens the prerecorded-message sheet. A plain chip like its neighbours on purpose — the whole
+ * row reads as one set of controls, and the version that gave Reply a taller treatment of its own
+ * is what made the row look mismatched on-device.
+ */
+@Composable
+fun ReplyButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    ChromeButton(
+        icon = { tint -> Icon(Icons.Filled.Campaign, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp)) },
+        label = "Reply",
+        active = false,
+        onClick = onClick,
+        modifier = modifier,
+    )
+}
+
 @Composable
 fun SnapshotButton(snapshotUrl: String?, cameraName: String, modifier: Modifier = Modifier) {
     if (snapshotUrl == null) return
