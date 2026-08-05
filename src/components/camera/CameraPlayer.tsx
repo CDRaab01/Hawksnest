@@ -145,6 +145,19 @@ export function CameraPlayer({
 
   const subSrc = `${cameraName}_sub`;
   const hasSubStream = go2rtcKnown && go2rtcMaybeAvailable(subSrc);
+  // Whether anything can be spoken through this camera — the Talk gate, and the
+  // web twin of Android's `canReachSpeaker`. go2rtc is what carries the audio
+  // backchannel, so a camera it doesn't serve has no path to a speaker at all.
+  //
+  // This was `isRing` until 2026-08-05, which is a fact about where a camera's
+  // RECORDINGS live and says nothing about its speaker — the same category error
+  // the live tier made, and it excluded all seven Reolinks from a feature they
+  // support.
+  //
+  // `go2rtcKnown &&` is not redundant: `go2rtcMaybeAvailable` is deliberately
+  // OPTIMISTIC while the stream list is in flight, which is right for choosing a
+  // transport that can step down and wrong for a button. Fails closed here.
+  const canReachSpeaker = go2rtcKnown && go2rtcMaybeAvailable(cameraName);
   // A camera without a sub stream always plays High — don't let a stale Low
   // selection from the previous camera silently pick a nonexistent stream.
   const liveGo2rtcSrc = quality === "low" && hasSubStream ? subSrc : cameraName;
@@ -589,7 +602,9 @@ export function CameraPlayer({
             snapshotUrl={snapshotUrl(camera.snapshotEntity)}
             cameraName={cameraName}
           />
-          {isRing && isLive && <TalkButton src={cameraName} />}
+          {/* Live only: TalkButton latches the mic open and unmounting it is what
+              closes the session, so it must never outlive the live view. */}
+          {canReachSpeaker && isLive && <TalkButton src={cameraName} />}
           {camera.sirenSwitchId && <SirenButton entityId={camera.sirenSwitchId} />}
           {/* ml-auto pushes the status to the right while everything shares a
               line, and simply trails the group once the row wraps. */}

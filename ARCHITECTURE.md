@@ -388,6 +388,21 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   session, so it is the guarantee that a latched mic can never be open over recorded footage.
   Anything that lifts this control somewhere surviving the live/recorded switch must replace that
   guarantee with an explicit one.
+- **Who gets a Talk button is asked of go2rtc, not of the camera's kind**
+  (`core/logic/canReachSpeaker`, web: `canReachSpeaker` in `camera/CameraPlayer.tsx`). go2rtc is
+  what carries the audio backchannel, so "does go2rtc serve this stream" is the whole question —
+  the same predicate Reply uses, so the two speaker features can never disagree about a camera.
+  It **fails closed**: no button while the stream list is in flight, none at all for a stream
+  go2rtc does not list. On web that means `go2rtcStreamsKnown() && go2rtcMaybeAvailable(...)`,
+  because `go2rtcMaybeAvailable` alone is deliberately optimistic before the list lands — right
+  for a transport that can step down, wrong for a button.
+  Until 2026-08-05 this gated on `isRing`, which is a fact about where a camera's **recordings**
+  live. That is the third appearance of the same category error (the live tier and the recorded
+  backend were the first two), and it cost the seven Reolinks a feature they support: E1 Zoom and
+  E1 Pro carry an ONVIF backchannel and advertise `PCMU/8000` sendonly, which is how Reply has
+  been reaching their speakers all along. **The stream name is the HA entity base**, so a
+  mismatch between the two — as four Ring cameras had until the same date — reads to this gate as
+  "go2rtc does not serve it" and correctly shows no button.
 - **RTSP-direct** (`ui/cameras/RtspPlayer.kt`, `core/logic/ReolinkRtsp.kt`) — the top live tier and
   the **one place the two platforms' ladders legitimately differ**: browsers cannot play RTSP at
   any level, so web's ceiling is and stays WebRTC. This is not web lagging Android; it is a

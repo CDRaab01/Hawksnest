@@ -76,3 +76,18 @@ export function go2rtcMaybeAvailable(src: string): boolean {
   if (streamsCache && !streamsCache.has(src)) return false;
   return true;
 }
+
+/**
+ * Drop the cached stream list and circuit-breaker state. **Tests only** — the twin of
+ * `Go2rtcStreams.resetForTest()` on Android.
+ *
+ * Both are module-level and survive a `render`, so without this a test that stubs one stream
+ * list silently reuses the previous test's (the TTL is a minute; a suite runs in seconds).
+ * That makes a gate test pass whatever the gate does, which is worse than no test.
+ */
+export function resetGo2rtcForTest(): void {
+  streamsCache = null;
+  streamsFetchedAt = 0;
+  streamsInFlight = null;
+  mediaHealthy = null;
+}

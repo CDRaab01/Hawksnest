@@ -35,7 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
-import com.hawksnest.core.logic.canPlayReplies
+import com.hawksnest.core.logic.canReachSpeaker
 import com.hawksnest.core.logic.NO_ZOOM
 import com.hawksnest.core.logic.RecordedBackend
 import com.hawksnest.core.logic.RecordedSource
@@ -470,7 +470,12 @@ fun CameraPlayer(
             // mic open until tapped again, and unmounting it is what closes the session. Offering
             // it over recorded footage would be both meaningless (there is nothing to talk to) and
             // the one way a mic could stay open with no live camera on screen.
-            if (isRing && isLive) {
+            //
+            // The other half was `isRing` until 2026-08-05, which is a fact about where a camera's
+            // RECORDINGS live and says nothing about whether it has a speaker. It excluded all
+            // seven Reolinks from a feature they support. Now the same question the Reply button
+            // asks, through the same predicate, so the two can never disagree about one camera.
+            if (canReachSpeaker(canGo2rtc) && isLive) {
                 TalkButton(cameraName, viewModel)
             }
             // Prerecorded messages, played out of the camera's own speaker by go2rtc. A chip like
@@ -481,7 +486,7 @@ fun CameraPlayer(
             // to the speaker, and it fails CLOSED — no button while the stream list is in flight,
             // and none at all on a camera that cannot talk. Live-only for the same reason Talk is:
             // there is nothing to say to a recording.
-            if (canPlayReplies(canGo2rtc) && isLive) {
+            if (canReachSpeaker(canGo2rtc) && isLive) {
                 ReplyButton(onClick = { showReplies = true })
             }
             cam.sirenSwitchId?.let { sirenId -> SirenButton(sirenId, viewModel) }
@@ -646,7 +651,7 @@ fun CameraPlayer(
                     onToggleMute = { muted = !muted },
                     onExitFullscreen = { fullscreen = false },
                     onReply = { showReplies = true }
-                        .takeIf { canPlayReplies(canGo2rtc) && isLive },
+                        .takeIf { canReachSpeaker(canGo2rtc) && isLive },
                 )
             }
         }

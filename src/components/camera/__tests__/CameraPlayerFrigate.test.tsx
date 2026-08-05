@@ -7,6 +7,7 @@ import { startConnection } from "../../../store/connection";
 import { useEntityStore } from "../../../store/entityStore";
 import type { HassEntity } from "../../../lib/ha";
 import type { LogicalCamera } from "../../../lib/cameraModel";
+import { resetGo2rtcForTest } from "../../../lib/go2rtc";
 
 /**
  * A Frigate camera as the app will actually see it: an ordinary HA camera with NO
@@ -120,5 +121,42 @@ describe("CameraPlayer (Frigate camera)", () => {
       // A real recording is finite — looping it would replay the past forever.
       expect((video as HTMLVideoElement).loop).toBe(false);
     });
+  });
+
+  /**
+   * The Talk gate. These reset the go2rtc cache themselves and run LAST on purpose.
+   *
+   * The stream list is module state with a 60s TTL, so within one suite it survives from
+   * test to test — the tests above are order-dependent on it today, and the negative case
+   * here cannot be written without clearing it (it would inherit `{bedroom}` and see a Talk
+   * button no matter what the gate did). Resetting in a shared `beforeEach` is the tidier
+   * fix and is deliberately NOT done here: it changes which live tier the tests above
+   * render, and untangling that belongs in its own change, not one about a button.
+   */
+  it("offers Talk on a camera go2rtc serves — no longer Ring-only", async () => {
+    // The Reolinks carry an ONVIF audio backchannel and go2rtc reaches it; the old
+    // `isRing` gate excluded all seven from a feature they support.
+    resetGo2rtcForTest();
+    stubFrigateAndGo2rtc();
+    renderBedroom();
+    expect(await screen.findByLabelText(/hold to talk|talk requires https/i)).toBeInTheDocument();
+  });
+
+  it("hides Talk when go2rtc doesn't serve the camera", async () => {
+    // Fails CLOSED. A Talk button that appears and then cannot connect is worse than no
+    // button — which is exactly what Talk was on the four Ring cameras whose go2rtc stream
+    // was named after the camera instead of the entity.
+    resetGo2rtcForTest();
+    stubFrigateAndGo2rtc({ go2rtcStreams: {} });
+    renderBedroom();
+    // Wait for the stream list to land, so this cannot pass merely by asserting too early.
+    await waitFor(() =>
+      expect(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some((c) =>
+          String(c[0]).includes("/go2rtc/api/streams"),
+        ),
+      ).toBe(true),
+    );
+    expect(screen.queryByLabelText(/hold to talk|talk requires https/i)).toBeNull();
   });
 });

@@ -66,10 +66,19 @@ class QuickReplyTest {
 
     @Test
     fun `the speaker gate fails closed`() {
-        assertTrue(canPlayReplies(true))
-        assertFalse(canPlayReplies(false))
+        assertTrue(canReachSpeaker(true))
+        assertFalse(canReachSpeaker(false))
         // Unknown — the go2rtc stream list is still in flight. No button rather than a button
         // that might do nothing.
-        assertFalse(canPlayReplies(null))
+        assertFalse(canReachSpeaker(null))
+    }
+
+    @Test
+    fun `the speaker gate does not depend on a camera being Ring`() {
+        // The whole point of the 2026-08-05 change: this predicate answers "can go2rtc reach a
+        // speaker here", which is true for a Reolink go2rtc serves and false for a Ring camera it
+        // does not. A gate that consulted the camera's KIND could not express either.
+        assertTrue("a Reolink go2rtc serves can be spoken through", canReachSpeaker(true))
+        assertFalse("a camera go2rtc does not serve cannot, Ring or not", canReachSpeaker(false))
     }
 }
