@@ -75,15 +75,23 @@ private fun encode(s: String): String = buildString {
 }
 
 /**
- * Which cameras may be offered a reply.
+ * Which cameras can be spoken through at all — the gate for BOTH speaker features, Reply and
+ * Talk. (Named for the capability rather than for either button, because it is now shared.)
  *
  * Gated on go2rtc serving the camera, because go2rtc is what carries the backchannel — a camera it
  * does not serve has no path to a speaker at all. Reusing the same signal as the live tier
  * (`Go2rtcStreams`) rather than inventing a second notion of "can this camera talk", so the two
  * can never disagree.
  *
+ * TALK USED TO ASK A DIFFERENT QUESTION and got a wrong answer: it gated on `isRing`, which is
+ * about where a camera's RECORDINGS live and says nothing about its speaker. That is the same
+ * mistake the live tier made before 2026-07-30, and it cost the same thing — every Reolink
+ * silently excluded, here from a feature they support (E1 Zoom and E1 Pro both advertise a
+ * `PCMU/8000` sendonly backchannel; Reply out of their speakers has worked all along).
+ *
  * Fails CLOSED: unknown means no button. An action that appears and then does nothing is worse
- * than one that never appeared, which is the same reason Reply is absent rather than disabled on
- * cameras without a speaker.
+ * than one that never appeared — which is exactly what Talk was on the four Ring cameras whose
+ * go2rtc stream was named after the camera instead of the entity (fixed in hawksnest-automation
+ * 2026-08-05). Under this gate a camera go2rtc does not list gets no button at all.
  */
-fun canPlayReplies(go2rtcServesCamera: Boolean?): Boolean = go2rtcServesCamera == true
+fun canReachSpeaker(go2rtcServesCamera: Boolean?): Boolean = go2rtcServesCamera == true
