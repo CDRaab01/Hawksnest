@@ -1,56 +1,102 @@
-# Expose Hawksnest over HTTPS on the tailnet via Tailscale Serve. Run at logon
-# (Administrator not required for `tailscale serve`; the socat step uses `wsl -u root`).
+# Expose Hawksnest (and the ntfy push server) over HTTPS on the tailnet via Tailscale Serve.
+# Safe to run at logon or by hand; idempotent, and does NOT need Administrator.
 #
-# Why this replaces portproxy-hawksnest.ps1:
-#   The Dragonfly WSL distro now runs in MIRRORED networking mode (its interfaces
-#   ARE the host's IPs). The old `netsh portproxy 8090 -> <wsl-eth0>:30080` model
-#   assumed NAT (a private 172.x WSL IP) and breaks: there is no such interface,
-#   and the k3s NodePort (:30080) is an iptables DNAT rule, not a real listening
-#   socket, so it is NOT surfaced to the Windows host by mirrored mode.
+# WHAT THIS SCRIPT DOES *NOT* DO ANY MORE (changed 2026-08-06):
+#   It no longer creates the socat forwarders. They are now permanent, enabled,
+#   on-disk systemd units inside the Dragonfly distro (added 2026-07-22 when the
+#   host moved to mirrored WSL networking):
 #
-#   The fix: run a real listening socket inside WSL (socat on :8390 -> the
-#   NodePort's 127.0.0.1:30080, which works inside the distro), which mirrored
-#   mode DOES surface to the Windows host at 127.0.0.1:8390. Tailscale Serve then
-#   fronts that with a real Let's Encrypt cert:
-#       https://<host>.ts.net:8443  ->  127.0.0.1:8390  ->  wsl:30080 (nginx pod) -> HA
-#   (:443 is already taken by Magpie's Serve, so Hawksnest uses :8443.)
-#   The same pattern fronts the self-hosted ntfy push server (hawksnest-automation
-#   repo) so phones can subscribe over TLS:
-#       https://<host>.ts.net:8444  ->  127.0.0.1:8391  ->  wsl:30081 (ntfy pod)
+#       hawksnest-web-fwd.service    socat TCP-LISTEN:8090 -> 127.0.0.1:30080  (nginx pod)
+#       hawksnest-ntfy-fwd.service   socat TCP-LISTEN:8391 -> 127.0.0.1:30081  (ntfy pod)
+#
+#   The previous version created *transient* `systemd-run` units, which was correct
+#   before those on-disk units existed and actively harmful afterwards:
+#
+#     1. It picked the unit name `hawksnest-ntfy-fwd` - identical to the on-disk
+#        unit. Its `systemctl stop <unit>` therefore killed the working forwarder,
+#        and `systemd-run` then refused to create a transient unit over an existing
+#        unit file, so the script threw and left :8391 dead. Net effect: Tailscale
+#        Serve :8444 (phone push) 502'd after EVERY logon, with nothing visibly
+#        wrong in Home Assistant. Found 2026-08-06; it had been silently recurring
+#        on every boot since 2026-07-22.
+#     2. For the web path it used the name `hawksnest-fwd` on port 8390, which did
+#        NOT collide - so it quietly ran a redundant second socat on :8390 next to
+#        the real one on :8090, forever.
+#     3. Its `$ForwardPort` default (8390) disagreed with the live Serve mapping
+#        (:8443 -> 8090), so anyone trusting this file's defaults would have
+#        repointed Hawksnest at the wrong socat.
+#
+#   So the forwarders are left alone here. This script only verifies they are up
+#   and ensures the Serve mappings exist.
+#
+#   Ports are read from the units themselves rather than hardcoded, so this file
+#   cannot drift out of sync with them the way the old defaults did.
+#
+# Topology:
+#   https://<host>.ts.net:8443  ->  127.0.0.1:8090  ->  wsl:30080  (nginx pod -> HA)
+#   https://<host>.ts.net:8444  ->  127.0.0.1:8391  ->  wsl:30081  (ntfy pod)
+#   (:443 is taken by Magpie's Serve, hence :8443/:8444.)
+
 param(
-    [int]$ForwardPort = 8390,     # WSL socat listen port (surfaced to host loopback)
-    [int]$NodePort    = 30080,    # k3s NodePort (deploy/k8s/service.yaml)
-    [int]$HttpsPort   = 8443,     # Tailscale Serve HTTPS port for Hawksnest
-    [int]$NtfyForwardPort = 8391, # WSL socat listen port for ntfy
-    [int]$NtfyNodePort    = 30081,# ntfy k3s NodePort (hawksnest-automation base/ntfy/service.yaml)
-    [int]$NtfyHttpsPort   = 8444, # Tailscale Serve HTTPS port for ntfy
-    [string]$Distribution = "Dragonfly"
+    [int]$HttpsPort       = 8443,   # Tailscale Serve HTTPS port for Hawksnest
+    [int]$NtfyHttpsPort   = 8444,   # Tailscale Serve HTTPS port for ntfy
+    [string]$Distribution = "Dragonfly",
+    [switch]$CleanupLegacy          # also remove the stale transient hawksnest-fwd unit
 )
 
 $ErrorActionPreference = "Stop"
 $tailscale = "C:\Program Files\Tailscale\tailscale.exe"
 
-# Start (or restart) a socat forwarder as a managed systemd transient unit so it
-# survives the launching `wsl.exe` exiting. Idempotent.
-function Start-Forwarder([string]$Unit, [int]$Listen, [int]$Target) {
-    $socat = "systemctl stop $Unit 2>/dev/null; systemctl reset-failed $Unit 2>/dev/null; " +
-             "systemd-run --unit=$Unit --collect /usr/bin/socat " +
-             "TCP-LISTEN:$Listen,fork,reuseaddr TCP:127.0.0.1:$Target"
-    wsl.exe -d $Distribution -u root -e bash -c $socat | Out-Null
-    Start-Sleep -Seconds 1
-    $listening = wsl.exe -d $Distribution -e bash -c "ss -tlnp 2>/dev/null | grep -c ':$Listen '"
-    if ($listening.Trim() -eq "0") { throw "socat unit $Unit failed to listen on :$Listen in $Distribution." }
+# Read the listen port straight out of the unit definition. If a unit is ever
+# re-pointed, this follows it instead of silently disagreeing.
+function Get-ForwarderPort([string]$Unit) {
+    $exec = wsl.exe -d $Distribution -u root -e bash -lc "systemctl show $Unit -p ExecStart --value 2>/dev/null"
+    if ($exec -match 'TCP-LISTEN:(\d+)') { return [int]$Matches[1] }
+    return 0
 }
 
-# 1) Forwarders: Hawksnest nginx pod, and the ntfy push server.
-Start-Forwarder -Unit "hawksnest-fwd"      -Listen $ForwardPort     -Target $NodePort
-Start-Forwarder -Unit "hawksnest-ntfy-fwd" -Listen $NtfyForwardPort -Target $NtfyNodePort
+function Assert-Forwarder([string]$Unit) {
+    $state = (wsl.exe -d $Distribution -u root -e bash -lc "systemctl is-active $Unit 2>&1").Trim()
+    if ($state -ne 'active') {
+        Write-Warning "$Unit is '$state' - starting it."
+        wsl.exe -d $Distribution -u root -e bash -lc "systemctl reset-failed $Unit 2>/dev/null; systemctl start $Unit" | Out-Null
+        Start-Sleep -Seconds 2
+        $state = (wsl.exe -d $Distribution -u root -e bash -lc "systemctl is-active $Unit 2>&1").Trim()
+        if ($state -ne 'active') { throw "$Unit failed to start (state: $state) in $Distribution." }
+    }
+    $port = Get-ForwarderPort $Unit
+    if ($port -eq 0) { throw "Could not read a TCP-LISTEN port from $Unit." }
+    $listening = wsl.exe -d $Distribution -e bash -lc "ss -tln 2>/dev/null | grep -c ':$port '"
+    if ($listening.Trim() -eq "0") { throw "$Unit is active but nothing is listening on :$port." }
+    Write-Host "  $Unit  active, listening on :$port"
+    return $port
+}
 
-# 2) Ensure Tailscale Serve fronts each with HTTPS. `serve --bg` persists in
-#    tailscaled state across reboots, so this is a no-op after the first run.
+Write-Host "Checking on-disk forwarders in '$Distribution' ..."
+$ForwardPort     = Assert-Forwarder 'hawksnest-web-fwd'
+$NtfyForwardPort = Assert-Forwarder 'hawksnest-ntfy-fwd'
+
+# The old script's redundant transient unit on :8390. Harmless but confusing -
+# it looks like a second, competing web forwarder. Opt-in, so this script stays
+# read-only by default.
+if ($CleanupLegacy) {
+    $legacy = (wsl.exe -d $Distribution -u root -e bash -lc "systemctl is-active hawksnest-fwd 2>&1").Trim()
+    if ($legacy -eq 'active') {
+        wsl.exe -d $Distribution -u root -e bash -lc "systemctl stop hawksnest-fwd; systemctl reset-failed hawksnest-fwd 2>/dev/null" | Out-Null
+        Write-Host "  removed stale transient unit 'hawksnest-fwd' (redundant socat on :8390)"
+    } else {
+        Write-Host "  no stale 'hawksnest-fwd' transient unit present"
+    }
+}
+
+# Tailscale Serve state persists in tailscaled across reboots, so these are
+# no-ops after the first run. Kept for first-time setup and drift repair.
+# NOTE: one target per port - re-running with a different port silently
+# OVERWRITES whatever else was mapped there (this is how Remnant clobbered
+# Hawksnest's :8443 once; see the host's OPERATIONS.md).
 & $tailscale serve --bg --https=$HttpsPort     "http://127.0.0.1:$ForwardPort"     | Out-Null
 & $tailscale serve --bg --https=$NtfyHttpsPort "http://127.0.0.1:$NtfyForwardPort" | Out-Null
 
 $dns = (& $tailscale status --json | ConvertFrom-Json).Self.DNSName.TrimEnd('.')
-Write-Host "Hawksnest reachable at https://${dns}:$HttpsPort  (-> 127.0.0.1:$ForwardPort -> wsl:$NodePort)"
-Write-Host "ntfy      reachable at https://${dns}:$NtfyHttpsPort  (-> 127.0.0.1:$NtfyForwardPort -> wsl:$NtfyNodePort)"
+Write-Host "Hawksnest reachable at https://${dns}:$HttpsPort  (-> 127.0.0.1:$ForwardPort -> wsl:30080)"
+Write-Host "ntfy      reachable at https://${dns}:$NtfyHttpsPort  (-> 127.0.0.1:$NtfyForwardPort -> wsl:30081)"

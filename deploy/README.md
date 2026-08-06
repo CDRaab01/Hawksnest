@@ -19,12 +19,22 @@ browser ──http──> Hawksnest pod (nginx :80)
 - `k8s/` — kustomize: `deployment.yaml`, `service.yaml` (NodePort **30080**), `kustomization.yaml`
   (namespace `home-automation`).
 - `windows/hawksnest-serve.ps1` — **HTTPS exposure over the tailnet** via Tailscale Serve
-  (`https://<host>.ts.net:8443 → 127.0.0.1:8390 → wsl:30080`), run at logon. This supersedes
+  (`https://<host>.ts.net:8443 → 127.0.0.1:8090 → wsl:30080`, and `:8444 → 127.0.0.1:8391 →
+  wsl:30081` for ntfy). Safe to run at logon or by hand; no Administrator needed. This supersedes
   `portproxy-hawksnest.ps1` (below) now that the Dragonfly WSL distro runs in **mirrored**
   networking, where the old `netsh portproxy → <wsl-eth0>:30080` model breaks (no NAT interface;
-  the NodePort is an iptables DNAT, not a listening socket the host can see). The script instead
-  runs a real socat listener inside WSL that mirrored mode surfaces to host loopback, then fronts
-  it with Tailscale's TLS. See the script header for the full rationale.
+  the NodePort is an iptables DNAT, not a listening socket the host can see). The fix is a real
+  socat listener inside WSL that mirrored mode surfaces to host loopback, fronted by Tailscale's TLS.
+  **The script no longer creates those listeners (changed 2026-08-06).** They are permanent,
+  enabled, on-disk systemd units in the distro — `hawksnest-web-fwd` (8090→30080) and
+  `hawksnest-ntfy-fwd` (8391→30081) — so the script only *verifies* them and ensures the Serve
+  mappings. Until 2026-08-06 it created **transient** `systemd-run` units instead, and its ntfy unit
+  name collided with the on-disk unit of the same name: every logon it stopped the working forwarder,
+  failed to replace it, and left `:8391` dead, so **push died after every reboot** while Home
+  Assistant looked fine. It also left a redundant socat on `:8390`, and its old `$ForwardPort`
+  default of `8390` disagreed with the live `:8443 → 8090` mapping. Ports are now read from the
+  units themselves so this can't drift again. Run with `-CleanupLegacy` once to clear the stale
+  `:8390` unit. See the script header for the full rationale.
 - `windows/portproxy-hawksnest.ps1` — *legacy* NAT-mode LAN/Tailscale exposure
   `0.0.0.0:8080 → wsl:30080`. Broken under mirrored WSL networking; kept for the NAT-mode case.
 - `../.github/workflows/deploy.yml` — self-hosted-runner build + import + apply.
@@ -43,9 +53,10 @@ browser ──http──> Hawksnest pod (nginx :80)
    ```powershell
    .\deploy\windows\hawksnest-serve.ps1
    ```
-   Add it to the host's logon/boot task. It starts the WSL socat forwarder each boot; the
-   Tailscale Serve config persists on its own. (On a NAT-mode host, use the legacy
-   `portproxy-hawksnest.ps1` instead.)
+   The host runs this as the `Hawksnest-Serve` logon task. Note it is **not load-bearing at boot**:
+   the forwarders are enabled systemd units that come up with the distro, and Tailscale Serve config
+   persists in `tailscaled` across reboots. It is a verifier and a first-time/drift-repair tool.
+   (On a NAT-mode host, use the legacy `portproxy-hawksnest.ps1` instead.)
 3. **Open** `https://<host>.ts.net:8443` (the script prints the exact URL). Go to **Settings** —
    the URL defaults to this site (the proxy) — paste a Home Assistant **long-lived access token**
    (HA → your profile → Long-lived access tokens) → **Connect**.
