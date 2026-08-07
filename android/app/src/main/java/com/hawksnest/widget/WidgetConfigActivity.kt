@@ -182,6 +182,7 @@ class WidgetConfigActivity : ComponentActivity() {
                 WidgetKind.TEMPERATURE
             provider.endsWith(SwitchWidgetReceiver::class.java.simpleName) -> WidgetKind.SWITCH
             provider.endsWith(ScenePadWidgetReceiver::class.java.simpleName) -> WidgetKind.SCENE_PAD
+            provider.endsWith(GarageWidgetReceiver::class.java.simpleName) -> WidgetKind.GARAGE
             else -> null
         }
     }
@@ -291,6 +292,10 @@ private fun PickerScreen(
                 WidgetKind.TEMPERATURE -> "Choose a temperature sensor"
                 WidgetKind.SWITCH -> "Choose a switch"
                 WidgetKind.SCENE_PAD -> "Choose a preset selector"
+                // "door sensor" rather than "garage door": the picker also offers `cover.*`, and
+                // on this house every candidate is a sensor. Naming the thing you pick, not the
+                // thing it watches, is what stops the list reading as empty when it is not.
+                WidgetKind.GARAGE -> "Choose a garage door sensor"
             },
             style = MaterialTheme.typography.headlineSmall,
         )

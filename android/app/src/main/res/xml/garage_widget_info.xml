@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  See light_widget_info.xml for the sizing and refresh reasoning; this widget takes the lock's
+  numbers verbatim because it has the same two shapes — a header alone when the door is only
+  watched, a header over one full-width button when it can actually be driven.
+
+  updatePeriodMillis is the platform's 30-minute floor and is explicitly NOT how this stays fresh:
+  every render calls refreshAsync, and the live bridge pushes socket state while the app runs.
+  Left declared because a widget with no periodic update at all never recovers if both of those
+  paths are dead.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="1"
+    android:minResizeWidth="40dp"
+    android:minResizeHeight="40dp"
+    android:maxResizeWidth="500dp"
+    android:maxResizeHeight="400dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:previewImage="@drawable/ic_widget_garage"
+    android:description="@string/widget_garage_description"
+    android:configure="com.hawksnest.widget.WidgetConfigActivity"
+    android:widgetCategory="home_screen" />

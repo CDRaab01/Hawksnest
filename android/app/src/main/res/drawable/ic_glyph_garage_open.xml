@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  In-widget glyph: a garage with its door UP — the garage widget's mark when the door is open or
+  travelling. Tinted at draw time.
+
+  Deliberately the same roof and posts as `ic_glyph_garage`, with the three slats replaced by one
+  rolled-up panel under the roof and a threshold bar at the floor. Keeping the frame identical is
+  what makes the pair legible: the eye reads the CHANGE — a filled opening becoming an empty one —
+  rather than two unrelated icons. The empty middle is the whole message.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Roof -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,2.5L1.5,8v2.2L12,4.7l10.5,5.5V8z" />
+    <!-- Posts -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M2.5,10.5h2.2V21H2.5z" />
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M19.3,10.5h2.2V21h-2.2z" />
+    <!-- Door, rolled up under the roof -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M4.7,11h14.6v2.4H4.7z" />
+    <!-- Threshold, so the opening reads as a doorway rather than a hole -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M4.7,19.4h14.6V21H4.7z" />
+</vector>
