@@ -1,6 +1,7 @@
 package com.hawksnest.core.logic
 
 import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.ha.stringAttr
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -31,7 +32,7 @@ import kotlin.math.roundToInt
  */
 
 /** Which control a home-screen widget hosts. */
-enum class WidgetKind { LIGHT, LOCK, ALARM, TEMPERATURE, SWITCH, SCENE_PAD }
+enum class WidgetKind { LIGHT, LOCK, ALARM, TEMPERATURE, SWITCH, SCENE_PAD, GARAGE }
 
 /**
  * Kinds that draw a command the instant it is sent and reconcile a beat later, rather than
@@ -43,7 +44,10 @@ enum class WidgetKind { LIGHT, LOCK, ALARM, TEMPERATURE, SWITCH, SCENE_PAD }
  */
 fun widgetIsOptimistic(kind: WidgetKind): Boolean = when (kind) {
     WidgetKind.LIGHT, WidgetKind.SWITCH, WidgetKind.SCENE_PAD -> true
-    WidgetKind.LOCK, WidgetKind.ALARM, WidgetKind.TEMPERATURE -> false
+    // GARAGE issues no commands at all — see [garageWidgetView] — so there is never a command to
+    // draw early. It sits with the security kinds rather than the cosmetic ones on principle:
+    // if it ever gains an opener, false is the direction that stays safe.
+    WidgetKind.LOCK, WidgetKind.ALARM, WidgetKind.TEMPERATURE, WidgetKind.GARAGE -> false
 }
 
 /**
@@ -57,6 +61,17 @@ fun widgetIsOptimistic(kind: WidgetKind): Boolean = when (kind) {
  * TEMPERATURE wrong — [temperatureWidgetView]'s own contract is that an expired reading is still
  * shown with its age, but the repository masked it on any failed fetch. Naming the rule once fixes
  * that and stops the condition growing an `||` for every kind added after.
+ *
+ * GARAGE KEEPS ITS READING, and that is deliberate even though it is the most security-shaped
+ * thing here after the lock and the alarm. The reason is the hardware. The garage sensors are
+ * battery tilt sensors that transmit ONLY when the door moves — a door that has been shut since
+ * Tuesday sends nothing at all until it opens. Expiring that reading would blank a correct
+ * "Closed" every time the house was quiet, which is precisely when the widget is most likely to
+ * be glanced at and precisely when it is most certainly right. The staleness the lock guards
+ * against does not exist here: there is no state transition the widget can miss without the
+ * sensor also having failed to report it, and that failure is the battery watchdog's problem,
+ * not this widget's. The read-at stamp still prints, so a persisted frame cannot lie about when
+ * it was drawn.
  */
 fun widgetKeepsStaleReading(kind: WidgetKind): Boolean =
     kind != WidgetKind.LOCK && kind != WidgetKind.ALARM
@@ -286,6 +301,13 @@ fun widgetCandidateDomains(kind: WidgetKind): Set<String> = when (kind) {
     // relay it also drives is a second, write-only entity chosen on the next step, and is not
     // what this picker is looking for.
     WidgetKind.SCENE_PAD -> setOf("select")
+    // BOTH, because a garage door arrives as either depending on what is fitted. A tilt or
+    // contact sensor — which is what this house has — lands in `binary_sensor` and is read-only.
+    // An opener (MyQ, ratgdo, a relay board) lands in `cover` and can be driven. The widget
+    // renders both and only offers buttons for the second; see [garageWidgetView]. Offering only
+    // `cover` would have made the widget unusable on the hardware it was written for, and
+    // offering only `binary_sensor` would have to be undone the day an opener is fitted.
+    WidgetKind.GARAGE -> setOf("binary_sensor", "cover")
 }
 
 /**
@@ -324,6 +346,16 @@ fun widgetCandidates(
                 kind != WidgetKind.SWITCH ||
                     entity.entityId.substringBefore('.') != "switch" ||
                     platforms[entity.entityId] !in setOf(RING_PLATFORM, MQTT_PLATFORM)
+                ) &&
+            // `binary_sensor` is the worst domain in the house to offer unfiltered — on this
+            // install it is dozens of Ring tampers, motion sensors, battery flags and lock
+            // sub-states, and a garage picker listing "Front Door Lock Replace battery soon" is
+            // useless. Narrow it by device_class to the ones that describe a door's position.
+            // `cover.*` needs no such filter: the domain already means "a thing that opens".
+            (
+                kind != WidgetKind.GARAGE ||
+                    entity.entityId.substringBefore('.') != "binary_sensor" ||
+                    entity.stringAttr("device_class") in GARAGE_DEVICE_CLASSES
                 )
     }
     // The household runs both the Ring integration and ring-mqtt, so a Ring light can appear
@@ -482,6 +514,11 @@ fun widgetEchoSettled(kind: WidgetKind, before: String?, current: String): Boole
         WidgetKind.TEMPERATURE -> true
         // A select lands on the chosen option in one step; there is no "selecting".
         WidgetKind.SCENE_PAD -> true
+        // Same as temperature: the garage widget is read-only, so no echo is ever awaited. A
+        // real garage door DOES have a transitional phase — `opening`/`closing` on a `cover` —
+        // but nothing here waits on it, and inventing a transitional set for a state machine we
+        // never drive would be a rule with no caller.
+        WidgetKind.GARAGE -> true
     }
 }
 
@@ -825,6 +862,156 @@ fun lockWidgetView(
         channel = vault.stateChannel,
         actionChannel = vault.actionChannel,
         known = true,
+        readAtMs = snapshot.fetchedAtMs,
+    )
+}
+
+// ── Garage ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The `binary_sensor` device classes that describe a door's position rather than something else
+ * about it. Narrower than `DeviceControlCard`'s list on purpose: "contact" is not a HA device
+ * class at all, and "window" is not a garage.
+ */
+val GARAGE_DEVICE_CLASSES: Set<String> = setOf("garage_door", "door", "opening")
+
+/** Whether the door is shut, standing open, or somewhere this widget cannot name. */
+enum class GaragePhase { CLOSED, OPEN, OPENING, CLOSING, UNKNOWN }
+
+data class GarageWidgetView(
+    val name: String,
+    val phase: GaragePhase,
+    /** "Open", "Closed", "Opening…", "Checking…", "Unavailable". */
+    val label: String,
+    /** Green shut, orange open, absent when we cannot say. */
+    val channel: Channel?,
+    /** False for unknown/unavailable and before the first read — the widget says so rather than guessing. */
+    val known: Boolean,
+    /**
+     * The HA service a button would send, or **null when this door cannot be driven at all** —
+     * which is the case for every contact and tilt sensor. See [garageWidgetView].
+     */
+    val service: String?,
+    /** The button's word, when there is a button. Null means: draw no button. */
+    val actionLabel: String?,
+    /** The channel the action wears — the colour of what it will *do*, as the lock's does. */
+    val actionChannel: Channel?,
+    val pending: Boolean,
+    /** When this reading was taken, printed beside the state so a persisted frame can't lie. */
+    val readAtMs: Long?,
+)
+
+/**
+ * A garage door's position on the home screen.
+ *
+ * THIS WIDGET IS READ-ONLY ON THE HARDWARE IT WAS WRITTEN FOR, and that is the central fact about
+ * it rather than a limitation to apologise for. The doors here are watched by Ecolink tilt
+ * sensors, which are `binary_sensor` entities: they report a position and accept nothing. There
+ * is no opener in this house — MyQ/ratgdo is explicitly deferred — so a widget with an "Open"
+ * button would be a button that cannot work. It draws no button at all rather than a disabled one,
+ * because a permanently greyed control is a worse answer than an honest status card.
+ *
+ * It still handles `cover.*`, where a door genuinely can be driven, so that fitting an opener
+ * later is a configuration change and not a rewrite. That path is UNTESTED against real hardware —
+ * there is no cover entity in this house to test it on — and it is written to fail closed: an
+ * unrecognised state yields no service and therefore no button.
+ *
+ * WHY NO CONFIRM TAP even on the cover path, when the lock has one: the asymmetry is which
+ * direction is destructive. Unlocking a door from a pocket exposes the house; opening a garage
+ * from a pocket does too, so `open_cover` gets the same treatment as `unlock` would — it is the
+ * caller's job to arm a confirm. This model reports the service and the colour; the widget decides
+ * the gesture, exactly as it does for the lock.
+ *
+ * OPEN IS ORANGE, CLOSED IS GREEN. Same grammar as the lock vault (secure is RECOVERY) and the
+ * in-app cover controls (Open = STREAK, Close = RECOVERY). Orange is not an alarm — the panel's
+ * error red is reserved for things needing action now, and a garage door standing open at four in
+ * the afternoon is information, not an emergency. The push notifications are what escalate.
+ *
+ * Unlike the lock, an old reading is KEPT rather than blanked. See [widgetKeepsStaleReading] for
+ * why — a tilt sensor that has sent nothing for three days is a door that has not moved for three
+ * days, not a sensor whose word has expired.
+ */
+fun garageWidgetView(
+    snapshot: WidgetSnapshot?,
+    nowMs: Long,
+    pendingSinceMs: Long? = null,
+): GarageWidgetView {
+    val pending = widgetPending(pendingSinceMs, nowMs)
+    val name = snapshot?.name ?: "Garage"
+
+    if (snapshot == null) {
+        return GarageWidgetView(
+            name = name,
+            phase = GaragePhase.UNKNOWN,
+            label = "Checking…",
+            channel = null,
+            known = false,
+            service = null,
+            actionLabel = null,
+            actionChannel = null,
+            pending = pending,
+            readAtMs = null,
+        )
+    }
+
+    // A `cover` reports words; a `binary_sensor` reports on/off, where ON MEANS OPEN. That
+    // inversion is the standard HA meaning of a door-class binary sensor and is worth naming,
+    // because it is the exact thing that was got backwards once already on the HA side of this
+    // integration: `on` is not "working", it is "open".
+    val isCover = domainOf(snapshot.entityId) == "cover"
+    val phase = when (snapshot.state) {
+        "open", "on" -> GaragePhase.OPEN
+        "closed", "off" -> GaragePhase.CLOSED
+        "opening" -> GaragePhase.OPENING
+        "closing" -> GaragePhase.CLOSING
+        else -> GaragePhase.UNKNOWN
+    }
+
+    val known = phase != GaragePhase.UNKNOWN
+    val transitional = phase == GaragePhase.OPENING || phase == GaragePhase.CLOSING
+    // Only a cover can be driven, and only once it has settled somewhere we recognise.
+    val actionable = isCover && known && !transitional && !pending
+    val service = when {
+        !actionable -> null
+        phase == GaragePhase.OPEN -> "close_cover"
+        else -> "open_cover"
+    }
+
+    return GarageWidgetView(
+        name = name,
+        phase = phase,
+        label = when {
+            pending && phase == GaragePhase.OPEN -> "Closing…"
+            pending -> "Opening…"
+            phase == GaragePhase.OPEN -> "Open"
+            phase == GaragePhase.CLOSED -> "Closed"
+            phase == GaragePhase.OPENING -> "Opening…"
+            phase == GaragePhase.CLOSING -> "Closing…"
+            snapshot.state == "unavailable" -> "Unavailable"
+            else -> "Checking…"
+        },
+        channel = when (phase) {
+            GaragePhase.CLOSED -> Channel.RECOVERY
+            GaragePhase.OPEN -> Channel.STREAK
+            // Mid-travel wears the direction it is heading, so the colour moves before the word
+            // settles. Unknown wears nothing.
+            GaragePhase.OPENING -> Channel.STREAK
+            GaragePhase.CLOSING -> Channel.RECOVERY
+            GaragePhase.UNKNOWN -> null
+        },
+        known = known,
+        service = service,
+        actionLabel = when {
+            service == null -> null
+            service == "close_cover" -> "Close"
+            else -> "Open"
+        },
+        actionChannel = when (service) {
+            null -> null
+            "close_cover" -> Channel.RECOVERY
+            else -> Channel.STREAK
+        },
+        pending = pending,
         readAtMs = snapshot.fetchedAtMs,
     )
 }

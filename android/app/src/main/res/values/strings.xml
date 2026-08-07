@@ -16,4 +16,6 @@
     <string name="widget_switch_description">A paddle for one on/off switch — on top, off below.</string>
     <string name="widget_scene_pad_label">Hawksnest Scene Pad</string>
     <string name="widget_scene_pad_description">A copy of the wall scene controller: relay on top, four scene keys below.</string>
+    <string name="widget_garage_label">Hawksnest Garage</string>
+    <string name="widget_garage_description">Whether a garage door is open or closed. Adds a button only if the door has an opener.</string>
 </resources>

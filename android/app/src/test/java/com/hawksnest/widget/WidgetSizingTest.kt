@@ -38,7 +38,7 @@ class WidgetSizingTest {
     @Test
     fun `every widget declares the attributes resizing depends on`() {
         val files = infoFiles()
-        assertEquals("expected six widget providers", 6, files.size)
+        assertEquals("expected seven widget providers", 7, files.size)
         for (f in files) {
             val xml = f.readText()
             for (a in listOf(

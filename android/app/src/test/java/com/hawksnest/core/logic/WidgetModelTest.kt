@@ -1,5 +1,6 @@
 package com.hawksnest.core.logic
 
+import com.hawksnest.core.ha.HassEntity
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -830,5 +831,157 @@ class WidgetModelTest {
         assertTrue(widgetKeepsStaleReading(WidgetKind.SWITCH))
         assertFalse(widgetKeepsStaleReading(WidgetKind.LOCK))
         assertFalse(widgetKeepsStaleReading(WidgetKind.ALARM))
+    }
+
+    // ── Garage ────────────────────────────────────────────────────────────────────────────────
+
+    private fun garageSensor(state: String, ageMs: Long = 0) =
+        snapshot(state, ageMs, entityId = "binary_sensor.garage_bay_main_open", name = "Main garage")
+
+    private fun garageCover(state: String, ageMs: Long = 0) =
+        snapshot(state, ageMs, entityId = "cover.garage_door", name = "Main garage")
+
+    @Test
+    fun `a door-class binary sensor reads on as OPEN, not as working`() {
+        // The inversion that is easy to get backwards — and was got backwards once already on the
+        // Home Assistant side of this integration. For a door-class binary_sensor, `on` is OPEN.
+        val open = garageWidgetView(garageSensor("on"), now)
+        assertEquals(GaragePhase.OPEN, open.phase)
+        assertEquals("Open", open.label)
+        assertEquals(Channel.STREAK, open.channel)
+
+        val shut = garageWidgetView(garageSensor("off"), now)
+        assertEquals(GaragePhase.CLOSED, shut.phase)
+        assertEquals("Closed", shut.label)
+        assertEquals(Channel.RECOVERY, shut.channel)
+    }
+
+    @Test
+    fun `a tilt sensor offers no button, because it cannot be driven`() {
+        // The central fact about this widget on the hardware it was written for. A disabled button
+        // would be worse than none: it invites a tap that can never work.
+        for (state in listOf("on", "off")) {
+            val view = garageWidgetView(garageSensor(state), now)
+            assertNull(view.service, "a binary_sensor must expose no service")
+            assertNull(view.actionLabel, "and therefore no button label")
+            assertNull(view.actionChannel)
+        }
+    }
+
+    @Test
+    fun `an old garage reading is kept, unlike a lock's`() {
+        // The rule this widget bends on purpose. A tilt sensor transmits only when the door moves,
+        // so a reading from three days ago describes a door that has not moved for three days.
+        // Expiring it would blank a correct answer precisely when the house is quiet.
+        val old = garageWidgetView(garageSensor("off", ageMs = WIDGET_SECURITY_FRESH_MS * 10), now)
+        assertTrue(old.known)
+        assertEquals("Closed", old.label)
+        assertEquals(Channel.RECOVERY, old.channel)
+        assertTrue(widgetKeepsStaleReading(WidgetKind.GARAGE))
+    }
+
+    @Test
+    fun `a kept reading still carries the time it was read`() {
+        // Keeping a stale reading is only honest because the frame dates itself.
+        val view = garageWidgetView(garageSensor("on", ageMs = 90_000), now)
+        assertEquals(now - 90_000, view.readAtMs)
+    }
+
+    @Test
+    fun `a cold garage widget is unknown, not closed`() {
+        // Failing to "Closed" would be the one genuinely dangerous default here.
+        val cold = garageWidgetView(null, now)
+        assertFalse(cold.known)
+        assertEquals(GaragePhase.UNKNOWN, cold.phase)
+        assertEquals("Checking…", cold.label)
+        assertNull(cold.channel)
+        assertNull(cold.service)
+    }
+
+    @Test
+    fun `an unavailable door says so rather than guessing`() {
+        val gone = garageWidgetView(garageSensor("unavailable"), now)
+        assertFalse(gone.known)
+        assertEquals("Unavailable", gone.label)
+        assertNull(gone.channel)
+    }
+
+    @Test
+    fun `a cover can be driven, and the button offers the opposite of where it is`() {
+        val shut = garageWidgetView(garageCover("closed"), now)
+        assertEquals("open_cover", shut.service)
+        assertEquals("Open", shut.actionLabel)
+        assertEquals(Channel.STREAK, shut.actionChannel)
+
+        val open = garageWidgetView(garageCover("open"), now)
+        assertEquals("close_cover", open.service)
+        assertEquals("Close", open.actionLabel)
+        assertEquals(Channel.RECOVERY, open.actionChannel)
+    }
+
+    @Test
+    fun `a door in motion is not actionable and wears the direction it is heading`() {
+        val opening = garageWidgetView(garageCover("opening"), now)
+        assertEquals(GaragePhase.OPENING, opening.phase)
+        assertEquals("Opening…", opening.label)
+        assertEquals(Channel.STREAK, opening.channel)
+        assertNull(opening.service, "mid-travel must not accept a second command")
+
+        val closing = garageWidgetView(garageCover("closing"), now)
+        assertEquals("Closing…", closing.label)
+        assertEquals(Channel.RECOVERY, closing.channel)
+        assertNull(closing.service)
+    }
+
+    @Test
+    fun `a pending cover command shows the direction it was sent, not the state it left`() {
+        val view = garageWidgetView(garageCover("closed"), now, pendingSinceMs = now - 500)
+        assertTrue(view.pending)
+        assertEquals("Opening…", view.label)
+        assertNull(view.service, "a pending door takes no second command")
+    }
+
+    @Test
+    fun `the garage picker offers door sensors and covers, not the rest of binary_sensor`() {
+        // binary_sensor is the worst domain in this house to offer unfiltered — dozens of Ring
+        // tampers, motion sensors and lock battery flags.
+        val entities = listOf(
+            HassEntity(
+                "binary_sensor.garage_bay_main_open", "off",
+                buildJsonObject { put("device_class", "garage_door") },
+            ),
+            HassEntity(
+                "binary_sensor.front_door", "off",
+                buildJsonObject { put("device_class", "door") },
+            ),
+            HassEntity(
+                "binary_sensor.front_door_lock_replace_battery_soon", "off",
+                buildJsonObject { put("device_class", "battery") },
+            ),
+            HassEntity(
+                "binary_sensor.upstairs_motion", "off",
+                buildJsonObject { put("device_class", "motion") },
+            ),
+            HassEntity("cover.garage_door", "closed", JsonObject(emptyMap())),
+        )
+        val offered = widgetCandidates(WidgetKind.GARAGE, entities).map { it.entityId }.toSet()
+        assertEquals(
+            setOf(
+                "binary_sensor.garage_bay_main_open",
+                "binary_sensor.front_door",
+                "cover.garage_door",
+            ),
+            offered,
+        )
+    }
+
+    @Test
+    fun `the garage widget sends nothing, so nothing waits on its echo`() {
+        assertTrue(widgetEchoSettled(WidgetKind.GARAGE, "off", "on"))
+        assertFalse(
+            widgetEchoSettled(WidgetKind.GARAGE, "on", "on"),
+            "an unchanged state is never a settled echo",
+        )
+        assertFalse(widgetIsOptimistic(WidgetKind.GARAGE))
     }
 }
