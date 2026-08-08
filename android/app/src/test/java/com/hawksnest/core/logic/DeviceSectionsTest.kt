@@ -171,6 +171,31 @@ class DeviceSectionsTest {
         assertEquals(3, out.total) // lock + light + one camera group, not 5
     }
 
+    @Test
+    fun `area-detail shape - constant areaOf yields one section with controls plus groups`() {
+        // The AreaDetailViewModel path: every device already scoped to one room, areaOf constant.
+        val out = buildDeviceSections(
+            devices = listOf(
+                D("Lamp", "Nursery", CardType.LIGHT, active = true),
+                D("Night light", "Nursery", CardType.LIGHT),
+                D("m1", "Nursery", CardType.BINARY_SENSOR, deviceId = "cam1"),
+                D("m2", "Nursery", CardType.CAMERA, deviceId = "cam1"),
+                D("m3", "Nursery", CardType.BINARY_SENSOR, deviceId = "cam1"),
+                D("Lone temp", "Nursery", CardType.GENERIC),
+            ),
+            areaOf = { "Nursery" },
+            cardOf = { it.card },
+            nameOf = { it.name },
+            isActive = { it.active },
+            deviceKeyOf = { it.deviceId },
+            deviceNameOf = { deviceNames[it] ?: it },
+        ).single()
+        assertEquals(listOf("Lamp", "Night light"), out.controls.map { it.name })
+        assertEquals(2, out.readonlyItems.size) // one camera group + one lone sensor
+        assertEquals(1, out.readonlyItems.filterIsInstance<ReadonlyItem.Group<D>>().size)
+        assertEquals(4, out.total) // 2 controls + group-once + single
+    }
+
     // ── filterSections (the chip filter) ─────────────────────────────────────
 
     private val chipMatchesSensors: (D) -> Boolean =

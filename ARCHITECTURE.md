@@ -457,6 +457,15 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   singles, and recomputes `total`/`activeCount` so room summaries never lie; `total` counts a
   group once (room summaries say what the *list shows*, not the entity count). FEATURED/CONTROL
   tiers stay per-entity — an inline control is never buried in a group.
+  **The same chain applies to Rooms → area detail** (since 2026-08-08): `AreaDetailViewModel`
+  historically filtered on `isPrimaryEntity` alone, which was survivable while the camera
+  devices had no HA area — the moment they were assigned rooms, each camera poured ~30 primary
+  entities (PTZ buttons, snapshot images, sensor spray) into its room's detail. It now applies
+  `NON_DEVICE_DOMAINS` + user-hidden + renames and device-groups its read-only tail via the
+  same `buildDeviceSections` (constant `areaOf`, one section). `DeviceGroupRow`/`DeviceGroupSheet`
+  live in `ui/components/DeviceGroup.kt`, shared by both screens, so the two renderings of a
+  grouped device cannot drift. Invariant: **wherever read-only entities render, they group by
+  device and honor the full visibility chain.**
   **Pinned rail** (since 2026-08-07, closing AUDIT-2026-08 §7.1): the tab opens with a "PINNED"
   section — the user's ordered shortcuts, long-press → Pin/Unpin/Move up/Move down. Stored as a
   JSON string-array in `util/DevicePrefsStore` (`pinned_entities`; order matters, hence not a
