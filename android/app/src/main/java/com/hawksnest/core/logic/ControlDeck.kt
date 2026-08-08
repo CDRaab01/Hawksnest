@@ -34,15 +34,25 @@ data class ControlDeck<T>(
     val isSearch: Boolean get() = searchResults.isNotEmpty()
 }
 
-/** Offline states, as the web's `entityHealth` counts them (`src/lib/deviceHealth.ts`). */
-private val ATTENTION_OFFLINE = setOf("unavailable", "unknown")
-
 /**
- * The attention rule, shared with the web's needs-attention rail: the entity itself is
- * unreachable, or its device reports a battery at or under 20%.
+ * The attention rule. MEASURED against the live house 2026-08-08, because the first
+ * version was wrong in both directions:
+ *
+ * - "unknown" does NOT mean offline. Sirens, PTZ-preset selects and similar stateless
+ *   entities rest at "unknown" forever — the first rule would have pinned 13 healthy
+ *   devices to the strip permanently. Only "unavailable" (the integration lost the
+ *   device) counts, and only when the WHOLE device is unavailable (see
+ *   [buildControlDeck]) — a single unavailable member on an otherwise-healthy device is
+ *   normal (e.g. WLED's playlist select with no playlists saved).
+ * - Battery health lives in DIAGNOSTIC entities the tab rightly filters out (a Ring
+ *   sensor's `*_battery` is `entity_category: diagnostic`), so a dead sensor would never
+ *   have surfaced. The ViewModel scans ALL entities — pre-filter — for battery signals
+ *   (a `device_class: battery` sensor's own state, or a `battery_level` attribute) and
+ *   flags the device; verified against the real failure it must catch (Upstairs Motion:
+ *   batteryStatus "failed", last comm two months stale, battery sensor diagnostic).
  */
 fun needsAttention(rawState: String, batteryLevel: Double?): Boolean =
-    rawState in ATTENTION_OFFLINE || (batteryLevel != null && batteryLevel <= 20.0)
+    rawState == "unavailable" || (batteryLevel != null && batteryLevel <= 20.0)
 
 /**
  * Build the deck. Pure — the ViewModel adapts its UI models through the lambdas, exactly
@@ -56,6 +66,7 @@ fun <T> buildControlDeck(
     nameOf: (T) -> String,
     isActive: (T) -> Boolean,
     attentionOf: (T) -> Boolean,
+    offlineOf: (T) -> Boolean,
     query: String = "",
     deviceKeyOf: (T) -> String? = { null },
     deviceNameOf: (String) -> String = { it },
@@ -73,6 +84,27 @@ fun <T> buildControlDeck(
     val byCard = devices.groupBy { cardOf(it) }
     fun of(vararg cards: CardType): List<T> =
         cards.flatMap { byCard[it].orEmpty() }.sortedWith(byName)
+
+    // Attention, device-level: a device is offline only when EVERY visible entity of it is
+    // unavailable; battery flags come in via attentionOf (the ViewModel's pre-filter scan).
+    // One row per flagged device (the alphabetically-first member represents it) — a dead
+    // device must not flood the strip with each of its entities.
+    val attention = run {
+        val flagged = mutableListOf<T>()
+        val byDevice = devices.groupBy(deviceKeyOf)
+        for ((key, members) in byDevice) {
+            if (key == null) {
+                // No device identity — evaluate each entity on its own.
+                flagged += members.filter { attentionOf(it) || offlineOf(it) }
+            } else {
+                val allOffline = members.all(offlineOf)
+                if (allOffline || members.any(attentionOf)) {
+                    flagged += members.sortedWith(byName).first()
+                }
+            }
+        }
+        flagged.sortedWith(byName)
+    }
 
     // Locks before the alarm: the deck's one intra-section ordering opinion — a lock is
     // the thing you act on; the alarm summarizes.
@@ -115,7 +147,7 @@ fun <T> buildControlDeck(
     cameraGroups.sortBy { it.name.lowercase() }
 
     return ControlDeck(
-        attention = devices.filter(attentionOf).sortedWith(byName),
+        attention = attention,
         security = security,
         lights = of(CardType.LIGHT, CardType.SWITCH),
         climate = of(CardType.CLIMATE, CardType.FAN),

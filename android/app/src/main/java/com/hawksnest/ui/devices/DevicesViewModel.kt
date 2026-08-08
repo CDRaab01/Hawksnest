@@ -13,7 +13,6 @@ import com.hawksnest.core.logic.DEVICE_ACTIVE_STATES
 import com.hawksnest.core.logic.NON_DEVICE_DOMAINS
 import com.hawksnest.core.logic.buildControlDeck
 import com.hawksnest.core.logic.displayName
-import com.hawksnest.core.logic.needsAttention
 import com.hawksnest.core.logic.domainToCard
 import com.hawksnest.core.logic.effectivePins
 import com.hawksnest.core.logic.isPrimaryEntity
@@ -126,13 +125,34 @@ class DevicesViewModel @Inject constructor(
         }
         val (hidden, shown) = primary.partition { it.entityId in hiddenIds }
 
+        // Battery health lives in DIAGNOSTIC entities the tab filters out (e.g. a Ring
+        // sensor's `*_battery` sensor), so the scan runs over ALL entities and flags the
+        // owning device — the deck then surfaces its visible representative.
+        fun batteryOf(e: HassEntity): Double? =
+            if ((e.attributes["device_class"] as? JsonPrimitive)?.content == "battery") {
+                e.state.toDoubleOrNull()
+            } else {
+                e.attributes.num("battery_level")
+            }
+        val lowBatteryDevices = entities.values.mapNotNullTo(HashSet()) { e ->
+            val level = batteryOf(e)
+            if (level != null && level <= 20.0) deviceIndex.deviceByEntity[e.entityId] else null
+        }
+
         val deck = buildControlDeck(
             devices = shown.map(::toUi),
             areaOf = { areas[it.entityId] },
             cardOf = { it.card },
             nameOf = { it.name },
             isActive = { it.rawState in ACTIVE_STATES },
-            attentionOf = { needsAttention(it.rawState, it.attributes.num("battery_level")) },
+            // attentionOf carries the BATTERY signal only — offline is judged whole-device
+            // via offlineOf inside the deck, so one unavailable member (WLED's empty
+            // playlist select) never flags an otherwise-healthy device.
+            attentionOf = {
+                (it.attributes.num("battery_level")?.let { b -> b <= 20.0 } == true) ||
+                    deviceIndex.deviceByEntity[it.entityId] in lowBatteryDevices
+            },
+            offlineOf = { it.rawState == "unavailable" },
             query = query,
             // Read-only entities sharing a physical device collapse into one group row —
             // the registry's device id is the grouping key, its name the row title.

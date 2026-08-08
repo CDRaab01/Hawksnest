@@ -43,7 +43,14 @@ export function entityHealth(entity: HassEntity): EntityHealth {
     online,
     battery,
     lowBattery,
-    needsAttention: !online || lowBattery,
+    // ONLY "unavailable" flags attention — measured 2026-08-08: "unknown" is the
+    // RESTING state for sirens, PTZ-preset selects and other stateless entities
+    // (13 healthy devices would sit pinned to the rail forever). `online` keeps the
+    // broader definition for the entity-detail readout, where "no live reading" is
+    // the honest thing to display. Android's deck goes further (whole-device offline
+    // + a pre-filter device-level battery scan, core/logic/ControlDeck.kt) — this
+    // per-entity rule is the floor both platforms share.
+    needsAttention: entity.state.toLowerCase() === "unavailable" || lowBattery,
     lastChangedMs: lastChangedMs(entity),
   };
 }
