@@ -25,4 +25,21 @@ class CardsTest {
         assertEquals(CardType.GENERIC, domainToCard("weather.home"))
         assertEquals(CardType.GENERIC, domainToCard("totally_made_up.thing"))
     }
+
+    @Test
+    fun `Devices hub excludes non-device and plumbing domains`() {
+        // Non-devices with their own surfaces / infrastructure entities.
+        for (domain in listOf("automation", "script", "scene", "person", "zone", "sun")) {
+            assertEquals(true, domain in NON_DEVICE_DOMAINS, "expected $domain excluded")
+        }
+        // Device plumbing (PTZ buttons, scene-controller event streams, AI-snapshot images) —
+        // trimmed 2026-08-07; reachable via entity-detail diagnostics instead.
+        for (domain in listOf("button", "event", "image")) {
+            assertEquals(true, domain in NON_DEVICE_DOMAINS, "expected $domain excluded")
+        }
+        // The domains the tab exists for must never creep into the exclusion set.
+        for (domain in listOf("lock", "light", "switch", "camera", "sensor", "binary_sensor")) {
+            assertEquals(false, domain in NON_DEVICE_DOMAINS, "expected $domain included")
+        }
+    }
 }

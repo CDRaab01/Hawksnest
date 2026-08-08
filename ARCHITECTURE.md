@@ -439,6 +439,13 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   persisted in `util/DevicePrefsStore` (DataStore) with a hidden-devices shelf. Display names
   resolve rename → override → non-junk friendly_name → registry device name
   (`core/logic/Resolve.kt displayName`).
+  **Domain contract** (`core/logic/Cards.kt NON_DEVICE_DOMAINS`, lockstep with `src/lib/ha.ts`):
+  besides automations/scripts/scenes/people/zones/sun, the hub also excludes `button`/`event`/
+  `image` (since 2026-08-07) — measured against the live house they were ~73 of 305 rows and all
+  of it device plumbing (PTZ nudges, scene-controller event streams, AI snapshots). They stay
+  reachable through entity-detail **Diagnostics**, whose sibling filter readmits
+  `NON_DEVICE_DOMAINS` on both platforms (`EntityDetailViewModel.diagnostics` /
+  `entityStore.useDeviceDiagnostics`).
 - **Control interaction model** (`ui/components/`): the hero domains render premium PULSE
   widgets, each committing **exactly one service call per gesture** with live-local preview
   (no mid-drag calls, so no `awaitEcho` plumbing):

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { AreaRegistry, HassEntity } from "../lib/ha";
-import { domainOf } from "../lib/ha";
+import { domainOf, NON_DEVICE_DOMAINS } from "../lib/ha";
 import { groupByArea, type AreaGroup } from "../lib/areas";
 import { isPrimaryEntity, isNoiseEntity } from "../lib/entityVisibility";
 import { resolveCameras, type LogicalCamera } from "../lib/cameraModel";
@@ -228,6 +228,10 @@ export const useEntityCategories = (): Record<string, string> =>
 /**
  * The hidden config/diagnostic entities belonging to the same device as `entityId` — surfaced under
  * the entity detail so they stay reachable after being filtered out of the main Devices list.
+ * `NON_DEVICE_DOMAINS` is readmitted here for the same reason: the Devices hub trims
+ * button/event/image plumbing, and this panel is where those siblings resurface. Safe to test the
+ * whole set — automations/scripts/scenes/people/zones/sun never carry a `device_id`, so only the
+ * plumbing domains can actually match.
  */
 export function useDeviceDiagnostics(entityId: string): HassEntity[] {
   const entities = useEntityStore((s) => s.entities);
@@ -239,7 +243,11 @@ export function useDeviceDiagnostics(entityId: string): HassEntity[] {
     const record = devices.devices[deviceId];
     if (!record) return [];
     return record.entityIds
-      .filter((id) => id !== entityId && (id in categories || isNoiseEntity(id)))
+      .filter(
+        (id) =>
+          id !== entityId &&
+          (id in categories || isNoiseEntity(id) || NON_DEVICE_DOMAINS.has(domainOf(id))),
+      )
       .map((id) => entities[id])
       .filter((e): e is HassEntity => e !== undefined);
   }, [entityId, entities, devices, categories]);

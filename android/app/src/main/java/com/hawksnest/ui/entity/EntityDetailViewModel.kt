@@ -8,6 +8,7 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.ha.historyLevels
+import com.hawksnest.core.logic.NON_DEVICE_DOMAINS
 import com.hawksnest.core.logic.domainToCard
 import com.hawksnest.core.logic.isNoiseEntity
 import com.hawksnest.core.logic.resolveName
@@ -67,13 +68,20 @@ class EntityDetailViewModel @Inject constructor(
      * The hidden config/diagnostic entities belonging to the same device as this entity (battery,
      * last activity, volume, siren, motion-detection toggle…). They're filtered out of the main
      * Devices list, so this entity's detail doubles as the device view that keeps them reachable.
+     * `NON_DEVICE_DOMAINS` is readmitted here for the same reason: the Devices hub trims
+     * button/event/image plumbing, and this panel is where those siblings resurface. Safe to test
+     * the whole set — automations/scripts/scenes/people/zones/sun never carry a `device_id`, so
+     * only the plumbing domains can actually match.
      */
     val diagnostics: StateFlow<List<DeviceUi>> =
         combine(state.entities, state.devices, state.entityCategories) { entities, index, categories ->
             val deviceId = index.deviceByEntity[entityId] ?: return@combine emptyList()
             val record = index.devices[deviceId] ?: return@combine emptyList()
             record.entityIds
-                .filter { it != entityId && (it in categories || isNoiseEntity(it)) }
+                .filter {
+                    it != entityId &&
+                        (it in categories || isNoiseEntity(it) || domainOf(it) in NON_DEVICE_DOMAINS)
+                }
                 .mapNotNull { entities[it] }
                 .map { e ->
                     DeviceUi(

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { domainToCard } from "../cards";
+import { NON_DEVICE_DOMAINS } from "../ha";
 import { LockCard } from "../../cards/LockCard";
 import { LightCard } from "../../cards/LightCard";
 import { CameraTile } from "../../cards/CameraTile";
@@ -29,5 +30,23 @@ describe("domainToCard", () => {
     expect(domainToCard("weather.home")).toBe(GenericCard);
     expect(() => domainToCard("totally_made_up.thing")).not.toThrow();
     expect(domainToCard("totally_made_up.thing")).toBe(GenericCard);
+  });
+});
+
+describe("NON_DEVICE_DOMAINS", () => {
+  it("excludes non-device and plumbing domains from the Devices hub", () => {
+    // Non-devices with their own surfaces / infrastructure entities.
+    for (const domain of ["automation", "script", "scene", "person", "zone", "sun"]) {
+      expect(NON_DEVICE_DOMAINS.has(domain), `expected ${domain} excluded`).toBe(true);
+    }
+    // Device plumbing (PTZ buttons, scene-controller event streams, AI-snapshot
+    // images) — trimmed 2026-08-07; reachable via entity-detail diagnostics instead.
+    for (const domain of ["button", "event", "image"]) {
+      expect(NON_DEVICE_DOMAINS.has(domain), `expected ${domain} excluded`).toBe(true);
+    }
+    // The domains the tab exists for must never creep into the exclusion set.
+    for (const domain of ["lock", "light", "switch", "camera", "sensor", "binary_sensor"]) {
+      expect(NON_DEVICE_DOMAINS.has(domain), `expected ${domain} included`).toBe(false);
+    }
   });
 });
