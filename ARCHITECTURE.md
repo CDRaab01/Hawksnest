@@ -434,11 +434,19 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   **Cleartext:** verified against media3 1.10.1 that the RTSP module never consults
   `NetworkSecurityPolicy` (raw `java.net.Socket`), so `cleartextTrafficPermitted="false"` stands
   unchanged — see CLAUDE.md for what to do if that ever changes.
-- **Devices v2** (`ui/devices/`): single-column list in the three-tier rhythm, PULSE segment
-  chips (not stock M3), room summaries ("N devices · M on"), search, and long-press → rename/hide
-  persisted in `util/DevicePrefsStore` (DataStore) with a hidden-devices shelf. Display names
-  resolve rename → override → non-junk friendly_name → registry device name
-  (`core/logic/Resolve.kt displayName`).
+- **Devices v3 — the control deck** (`ui/devices/` + `core/logic/ControlDeck.kt`, 2026-08-08):
+  the tab regrouped by FUNCTION and ordered by IMPORTANCE, because the Rooms tab already
+  browses by place — Rooms answers "where things are", Devices answers "what can I do".
+  Fixed section order (the hierarchy IS the design, no per-user section config):
+  Needs attention (offline / battery ≤20%, absent when healthy) → Pinned → Security (locks
+  then alarm, full cards — a lock never becomes a tile) → Lights & switches (2-col
+  `ControlTile` grid, room as caption) → Climate & fans → Covers → Media → one Cameras
+  summary row and one Sensors summary row, each opening a sheet built from the shared
+  device-group components. The v2 chip filter is GONE — sections are the categories.
+  Search still bypasses everything (flat `searchResults`, one tap to detail); long-press →
+  rename / pin / hide everywhere, persisted in `util/DevicePrefsStore` (DataStore) with the
+  hidden-devices shelf. Display names resolve rename → override → non-junk friendly_name →
+  registry device name (`core/logic/Resolve.kt displayName`).
   **Domain contract** (`core/logic/Cards.kt NON_DEVICE_DOMAINS`, lockstep with `src/lib/ha.ts`):
   besides automations/scripts/scenes/people/zones/sun, the hub also excludes `button`/`event`/
   `image` (since 2026-08-07) — measured against the live house they were ~73 of 305 rows and all

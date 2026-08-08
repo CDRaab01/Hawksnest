@@ -8,11 +8,12 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.DeviceIndex
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.domainOf
+import com.hawksnest.core.logic.ControlDeck
 import com.hawksnest.core.logic.DEVICE_ACTIVE_STATES
-import com.hawksnest.core.logic.DeviceSection
 import com.hawksnest.core.logic.NON_DEVICE_DOMAINS
-import com.hawksnest.core.logic.buildDeviceSections
+import com.hawksnest.core.logic.buildControlDeck
 import com.hawksnest.core.logic.displayName
+import com.hawksnest.core.logic.needsAttention
 import com.hawksnest.core.logic.domainToCard
 import com.hawksnest.core.logic.effectivePins
 import com.hawksnest.core.logic.isPrimaryEntity
@@ -31,29 +32,35 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
 import javax.inject.Inject
 
-/** The Devices tab's whole render model: pinned rail + per-room sections + hidden shelf. */
+private fun JsonObject.num(key: String): Double? = (this[key] as? JsonPrimitive)?.doubleOrNull
+
+/** The Devices tab's whole render model: pinned rail + the control deck + hidden shelf. */
 data class DevicesUi(
     /**
      * The pinned rail, in the user's stored order (seeded from `config/Favorites`
      * until first customized). Ids missing from the entity map are skipped; a
      * pinned-and-hidden entity is skipped too (hide wins — the partition runs
-     * first). Pinned devices also stay in their rooms: the rail is a shortcut,
-     * not a re-org, so room summaries never lie.
+     * first). Pinned devices also stay in their deck sections: the rail is a
+     * shortcut, not a re-org.
      */
     val pinned: List<DeviceUi> = emptyList(),
-    val sections: List<DeviceSection<DeviceUi>> = emptyList(),
+    /** Devices v3: the function-ordered control deck (see core/logic/ControlDeck.kt). */
+    val deck: ControlDeck<DeviceUi> = ControlDeck(),
     /** Devices the user hid (long-press → Hide), restorable from the footer sheet. */
     val hidden: List<DeviceUi> = emptyList(),
 )
 
 /**
- * Devices — every controllable entity, grouped by room into the three-tier
- * rhythm (featured cards / control rows / read-only rows; see core/logic
- * DeviceSections). Layered on top of the store's already-deduped entities:
- * HA config/diagnostic noise is filtered, user-hidden entities move to the
- * hidden shelf, and names resolve through user renames → overrides →
+ * Devices — the control deck (v3): every controllable entity regrouped by function
+ * and ordered by importance (see core/logic/ControlDeck.kt), with cameras and
+ * sensor spray demoted to summaries. Layered on top of the store's already-deduped
+ * entities: HA config/diagnostic noise is filtered, user-hidden entities move to
+ * the hidden shelf, and names resolve through user renames → overrides →
  * non-junk friendly_name → registry device name.
  */
 @HiltViewModel
@@ -88,6 +95,9 @@ class DevicesViewModel @Inject constructor(
     /** Entity ids with a control in flight — rows/cards render pending state from this. */
     val pending: StateFlow<Set<String>> = connection.pendingControls
 
+    /** entity_id → area name, for the tile grid's room captions. */
+    val areas: StateFlow<Map<String, String>> = state.areas
+
     private fun build(
         entities: Map<String, HassEntity>,
         areas: Map<String, String>,
@@ -116,14 +126,15 @@ class DevicesViewModel @Inject constructor(
         }
         val (hidden, shown) = primary.partition { it.entityId in hiddenIds }
 
-        val sections = buildDeviceSections(
+        val deck = buildControlDeck(
             devices = shown.map(::toUi),
             areaOf = { areas[it.entityId] },
             cardOf = { it.card },
             nameOf = { it.name },
             isActive = { it.rawState in ACTIVE_STATES },
+            attentionOf = { needsAttention(it.rawState, it.attributes.num("battery_level")) },
             query = query,
-            // READONLY entities sharing a physical device collapse into one group row —
+            // Read-only entities sharing a physical device collapse into one group row —
             // the registry's device id is the grouping key, its name the row title.
             deviceKeyOf = { deviceIndex.deviceByEntity[it.entityId] },
             deviceNameOf = { deviceIndex.devices[it]?.name ?: it },
@@ -137,7 +148,7 @@ class DevicesViewModel @Inject constructor(
 
         return DevicesUi(
             pinned = pinned,
-            sections = sections,
+            deck = deck,
             hidden = hidden.map(::toUi).sortedBy { it.name.lowercase() },
         )
     }
