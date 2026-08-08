@@ -447,6 +447,17 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   rename / pin / hide everywhere, persisted in `util/DevicePrefsStore` (DataStore) with the
   hidden-devices shelf. Display names resolve rename → override → non-junk friendly_name →
   registry device name (`core/logic/Resolve.kt displayName`).
+  **Needs-attention semantics** (fixed 2026-08-08, measured against real failures): offline
+  means `unavailable` ONLY — "unknown" is the resting state for sirens/PTZ selects (13 healthy
+  devices would pin the strip forever) — and is judged **whole-device** (every visible entity
+  unavailable), so one dead member (WLED's empty playlist select) never flags a healthy
+  device; one representative row per flagged device. Battery is scanned **pre-filter across
+  ALL entities** in the ViewModel (a `device_class: battery` sensor's state or a
+  `battery_level` attribute, ≤20%), because battery entities are `entity_category: diagnostic`
+  and invisible to the tab — the case that forced this was a Ring sensor dead for two months
+  whose only symptoms lived in diagnostic entities. Web's `entityHealth.needsAttention`
+  carries the same unavailable-only floor; `online` keeps the broader no-live-reading meaning
+  for entity-detail display.
   **Domain contract** (`core/logic/Cards.kt NON_DEVICE_DOMAINS`, lockstep with `src/lib/ha.ts`):
   besides automations/scripts/scenes/people/zones/sun, the hub also excludes `button`/`event`/
   `image` (since 2026-08-07) — measured against the live house they were ~73 of 305 rows and all

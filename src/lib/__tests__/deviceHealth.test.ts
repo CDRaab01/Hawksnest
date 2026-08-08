@@ -21,6 +21,14 @@ describe("entityHealth", () => {
     expect(entityHealth(e({ entity_id: "light.c", state: "on" })).online).toBe(true);
   });
 
+  it("flags attention only for unavailable — unknown is a resting state", () => {
+    // Sirens and PTZ-preset selects sit at "unknown" forever while perfectly healthy;
+    // counting them pinned 13 devices to the rail permanently (measured 2026-08-08).
+    expect(entityHealth(e({ entity_id: "light.a", state: "unavailable" })).needsAttention).toBe(true);
+    expect(entityHealth(e({ entity_id: "siren.a", state: "unknown" })).needsAttention).toBe(false);
+    expect(entityHealth(e({ entity_id: "light.c", state: "on" })).needsAttention).toBe(false);
+  });
+
   it("reads a battery percent from a battery-class sensor", () => {
     const h = entityHealth(
       e({
