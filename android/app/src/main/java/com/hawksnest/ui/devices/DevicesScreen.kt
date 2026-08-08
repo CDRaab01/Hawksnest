@@ -61,9 +61,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.logic.CardType
 import com.hawksnest.core.logic.DEVICE_ACTIVE_STATES
 import com.hawksnest.core.logic.DeviceSection
+import com.hawksnest.core.logic.DeviceTier
 import com.hawksnest.core.logic.ReadonlyItem
 import com.hawksnest.core.logic.entities
 import com.hawksnest.core.logic.filterSections
+import com.hawksnest.core.logic.tierOf
 import com.hawksnest.ui.components.DeviceControlCard
 import com.hawksnest.ui.components.DeviceUi
 import com.hawksnest.ui.components.PanelCard
@@ -176,6 +178,51 @@ fun DevicesScreen(
             PulseChipRow(chips = chips, selected = active, onSelect = { filter = it })
         }
 
+        // The pinned rail: the user's shortcuts, above every room. Hidden while searching
+        // or chip-filtered (same gating as the hidden footer) — those modes are about
+        // finding, and the rail would just be noise between the query and its results.
+        if (ui.pinned.isNotEmpty() && active == DeviceFilter.ALL && query.isBlank()) {
+            item(key = "pinned-header") {
+                Box(Modifier.padding(top = HawksnestTheme.spacing.sm)) { SectionHeader("Pinned") }
+            }
+            ui.pinned.filter { tierOf(it.card) == DeviceTier.FEATURED }.forEach { device ->
+                item(key = "pin:" + device.entityId) {
+                    Box(
+                        Modifier.combinedClickable(
+                            onClick = { onOpenEntity(device.entityId) },
+                            onLongClick = { sheetFor = device },
+                        ),
+                    ) {
+                        DeviceControlCard(
+                            device,
+                            onCall = { service, extra -> viewModel.call(device.entityId, service, extra) },
+                            onOpen = { onOpenEntity(device.entityId) },
+                            pending = device.entityId in pending,
+                        )
+                    }
+                }
+            }
+            val pinnedRows = ui.pinned.filter { tierOf(it.card) != DeviceTier.FEATURED }
+            if (pinnedRows.isNotEmpty()) {
+                item(key = "pinned-rows") {
+                    PanelCard {
+                        pinnedRows.forEachIndexed { i, device ->
+                            if (i > 0) {
+                                HorizontalDivider(color = HawksnestTheme.pulse.hairline, thickness = 1.dp)
+                            }
+                            DeviceRow(
+                                device = device,
+                                pending = device.entityId in pending,
+                                onCall = { service, extra -> viewModel.call(device.entityId, service, extra) },
+                                onOpen = { onOpenEntity(device.entityId) },
+                                onLongPress = { sheetFor = device },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         sections.forEach { section ->
             item(key = "area:" + section.area) {
                 RoomHeader(section)
@@ -272,8 +319,11 @@ fun DevicesScreen(
     sheetFor?.let { device ->
         DeviceActionsSheet(
             device = device,
+            pinned = ui.pinned.any { it.entityId == device.entityId },
             onRename = { viewModel.rename(device.entityId, it) },
             onHide = { viewModel.hide(device.entityId) },
+            onTogglePin = { viewModel.togglePin(device.entityId) },
+            onMovePin = { viewModel.movePin(device.entityId, it) },
             onDismiss = { sheetFor = null },
         )
     }
@@ -624,13 +674,19 @@ private fun DeviceGroupActionsSheet(
     }
 }
 
-/** Long-press sheet: rename (persisted on-device) or hide, with the raw entity id for reference. */
+/**
+ * Long-press sheet: rename (persisted on-device), pin/unpin (+ reorder while pinned),
+ * or hide, with the raw entity id for reference.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeviceActionsSheet(
     device: DeviceUi,
+    pinned: Boolean,
     onRename: (String?) -> Unit,
     onHide: () -> Unit,
+    onTogglePin: () -> Unit,
+    onMovePin: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by remember(device.entityId) { mutableStateOf(device.name) }
@@ -668,9 +724,19 @@ private fun DeviceActionsSheet(
                     onDismiss()
                 }) { Text("Save") }
                 TextButton(onClick = {
+                    onTogglePin()
+                    onDismiss()
+                }) { Text(if (pinned) "Unpin" else "Pin to top") }
+                TextButton(onClick = {
                     onHide()
                     onDismiss()
                 }) { Text("Hide from list") }
+            }
+            if (pinned) {
+                Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
+                    TextButton(onClick = { onMovePin(-1) }) { Text("Move up") }
+                    TextButton(onClick = { onMovePin(1) }) { Text("Move down") }
+                }
             }
         }
     }

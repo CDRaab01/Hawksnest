@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import com.hawksnest.core.logic.ThemePref
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import javax.inject.Inject
@@ -21,12 +22,15 @@ private val Context.devicePrefsDataStore: DataStore<Preferences> by
     preferencesDataStore(name = "hawksnest_device_prefs")
 
 private val mapSerializer = MapSerializer(String.serializer(), String.serializer())
+private val listSerializer = ListSerializer(String.serializer())
 
 /**
  * On-device personalization for the Devices list: entities the user hid
- * (long-press → Hide) and user renames (long-press → Rename). Mirrors the web's
- * Customize hide/pin in spirit, persisted in a dedicated DataStore so the app
- * never needs a code deploy to tame a noisy or badly-named entity.
+ * (long-press → Hide), user renames (long-press → Rename), and the ordered
+ * pinned rail (long-press → Pin). Mirrors the web's Customize pin/hide,
+ * persisted in a dedicated DataStore so the app never needs a code deploy to
+ * tame a noisy or badly-named entity. This store is deliberately backed up
+ * (see BackupExclusionTest) — right for preferences, unlike the token store.
  */
 @Singleton
 class DevicePrefsStore @Inject constructor(
@@ -35,6 +39,10 @@ class DevicePrefsStore @Inject constructor(
     private val hiddenKey = stringSetPreferencesKey("hidden_entities")
     private val renamesKey = stringPreferencesKey("entity_renames")
     private val themeKey = stringPreferencesKey("theme_pref")
+
+    // A JSON string array, not a stringSetPreferencesKey — pin order is the display
+    // order (same reason `entity_renames` above is JSON-in-a-string).
+    private val pinnedKey = stringPreferencesKey("pinned_entities")
 
     /** Entity ids the user hid from the Devices list. */
     val hidden: Flow<Set<String>> =
@@ -59,6 +67,26 @@ class DevicePrefsStore @Inject constructor(
                 runCatching { Json.decodeFromString(mapSerializer, it) }.getOrNull()
             } ?: emptyMap()
         }
+
+    /**
+     * The user's pinned entity ids, in display order. `null` = the key was never
+     * written — "never customized", callers fall back to the `config/Favorites`
+     * seed via `core/logic effectivePins` (exact web `prefsStore.ts` semantics:
+     * the first edit materializes the seed).
+     */
+    val pinned: Flow<List<String>?> =
+        context.devicePrefsDataStore.data.map { prefs ->
+            prefs[pinnedKey]?.let {
+                runCatching { Json.decodeFromString(listSerializer, it) }.getOrNull()
+            }
+        }
+
+    /** Persist the full pinned list (callers compute it with the pure pin helpers). */
+    suspend fun setPinned(entityIds: List<String>) {
+        context.devicePrefsDataStore.edit { prefs ->
+            prefs[pinnedKey] = Json.encodeToString(listSerializer, entityIds)
+        }
+    }
 
     suspend fun setHidden(entityId: String, hide: Boolean) {
         context.devicePrefsDataStore.edit { prefs ->
