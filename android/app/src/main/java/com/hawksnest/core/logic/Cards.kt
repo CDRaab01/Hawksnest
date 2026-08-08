@@ -36,7 +36,14 @@ fun domainToCard(entityId: String): CardType =
  * Domains that aren't physical "devices" and shouldn't appear in the Devices hub — automations/
  * scripts/scenes have their own surfaces, and people/zones/the sun are infrastructure entities the
  * automation builder consumes. Mirrors `NON_DEVICE_DOMAINS` in `src/lib/ha.ts`.
+ *
+ * `button`/`event`/`image` joined 2026-08-07, measured against the live house: they contributed
+ * ~73 of the Devices tab's 305 rows and every one was device *plumbing* — PTZ nudge buttons,
+ * scene-controller event streams, AI-snapshot images. Nobody browses a list for those; they stay
+ * reachable through their device's entity-detail Diagnostics panel (the diagnostics filter in
+ * `EntityDetailViewModel` readmits these domains for exactly that reason).
  */
 val NON_DEVICE_DOMAINS: Set<String> = setOf(
     "automation", "script", "scene", "person", "zone", "sun",
+    "button", "event", "image",
 )

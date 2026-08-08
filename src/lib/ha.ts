@@ -30,6 +30,12 @@ export function domainOf(entityId: string): string {
  * hub — automations/scripts/scenes have their own surfaces, and people/zones/the
  * sun are infrastructure entities the automation builder consumes. Shared so web
  * and Android filter the device list the same way.
+ *
+ * `button`/`event`/`image` joined 2026-08-07, measured against the live house:
+ * they contributed ~73 of the Devices tab's 305 rows and every one was device
+ * plumbing — PTZ nudge buttons, scene-controller event streams, AI-snapshot
+ * images. Nobody browses a list for those; they stay reachable through their
+ * device's entity-detail diagnostics.
  */
 export const NON_DEVICE_DOMAINS = new Set<string>([
   "automation",
@@ -38,6 +44,9 @@ export const NON_DEVICE_DOMAINS = new Set<string>([
   "person",
   "zone",
   "sun",
+  "button",
+  "event",
+  "image",
 ]);
 
 /**
