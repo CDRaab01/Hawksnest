@@ -67,6 +67,8 @@ import com.hawksnest.core.logic.entities
 import com.hawksnest.core.logic.filterSections
 import com.hawksnest.core.logic.tierOf
 import com.hawksnest.ui.components.DeviceControlCard
+import com.hawksnest.ui.components.DeviceGroupRow
+import com.hawksnest.ui.components.DeviceGroupSheet
 import com.hawksnest.ui.components.DeviceUi
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.SectionHeader
@@ -506,134 +508,6 @@ private fun DeviceRow(
     }
 }
 
-/**
- * One device-group row in the READONLY tier: same 44dp anatomy as [DeviceRow], but standing for
- * a whole physical device (a camera and its sensor spray). Tap opens the member sheet; long-press
- * offers hide-all.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun DeviceGroupRow(
-    group: ReadonlyItem.Group<DeviceUi>,
-    onOpen: () -> Unit,
-    onLongPress: () -> Unit,
-) {
-    val pulse = HawksnestTheme.pulse
-    val hasCamera = group.members.any { it.card == CardType.CAMERA }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
-            .padding(horizontal = HawksnestTheme.spacing.md, vertical = HawksnestTheme.spacing.sm)
-            .height(44.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(pulse.panelHigh),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                if (hasCamera) Icons.Filled.Videocam else Icons.Filled.Sensors,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-        Spacer(Modifier.width(HawksnestTheme.spacing.md))
-        Column(Modifier.weight(1f)) {
-            Text(
-                group.name,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                buildString {
-                    append(group.members.size)
-                    append(if (group.members.size == 1) " sensor" else " sensors")
-                    if (group.activeCount > 0) {
-                        append(" · ")
-                        append(group.activeCount)
-                        append(" active")
-                    }
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-/** A device group's members: name + state each, tap-through to the entity detail. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DeviceGroupSheet(
-    group: ReadonlyItem.Group<DeviceUi>,
-    onOpenEntity: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = HawksnestTheme.pulse.panelHigh,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = HawksnestTheme.spacing.lg)
-                .padding(bottom = HawksnestTheme.spacing.xl),
-            verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm),
-        ) {
-            Text(
-                group.name,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            group.members.forEach { device ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.small)
-                        .clickable { onOpenEntity(device.entityId) }
-                        .padding(vertical = HawksnestTheme.spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            device.name,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            device.stateText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
 
 /** Long-press sheet for a device group: hide every member at once. */
 @OptIn(ExperimentalMaterial3Api::class)
