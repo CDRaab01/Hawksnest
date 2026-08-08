@@ -248,14 +248,10 @@ fun DevicesScreen(
             if (rowCount > 0) {
                 item(key = "rows:" + section.area) {
                     PanelCard {
-                        var i = 0
-                        fun divider() {
-                            if (i++ > 0) {
+                        section.controls.forEachIndexed { i, device ->
+                            if (i > 0) {
                                 HorizontalDivider(color = HawksnestTheme.pulse.hairline, thickness = 1.dp)
                             }
-                        }
-                        section.controls.forEach { device ->
-                            divider()
                             DeviceRow(
                                 device = device,
                                 pending = device.entityId in pending,
@@ -264,8 +260,10 @@ fun DevicesScreen(
                                 onLongPress = { sheetFor = device },
                             )
                         }
-                        section.readonlyItems.forEach { item ->
-                            divider()
+                        section.readonlyItems.forEachIndexed { i, item ->
+                            if (i > 0 || section.controls.isNotEmpty()) {
+                                HorizontalDivider(color = HawksnestTheme.pulse.hairline, thickness = 1.dp)
+                            }
                             when (item) {
                                 is ReadonlyItem.Single -> DeviceRow(
                                     device = item.device,
