@@ -7,6 +7,7 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.DeviceIndex
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.domainOf
+import com.hawksnest.core.logic.DEVICE_ACTIVE_STATES
 import com.hawksnest.core.logic.DeviceSection
 import com.hawksnest.core.logic.NON_DEVICE_DOMAINS
 import com.hawksnest.core.logic.buildDeviceSections
@@ -107,6 +108,10 @@ class DevicesViewModel @Inject constructor(
             nameOf = { it.name },
             isActive = { it.rawState in ACTIVE_STATES },
             query = query,
+            // READONLY entities sharing a physical device collapse into one group row —
+            // the registry's device id is the grouping key, its name the row title.
+            deviceKeyOf = { deviceIndex.deviceByEntity[it.entityId] },
+            deviceNameOf = { deviceIndex.devices[it]?.name ?: it },
         )
         return DevicesUi(
             sections = sections,
@@ -120,13 +125,19 @@ class DevicesViewModel @Inject constructor(
     }
 
     fun hide(entityId: String) = viewModelScope.launch { devicePrefs.setHidden(entityId, true) }
+
+    /** Hide a whole device group at once; members restore individually from the hidden shelf. */
+    fun hideAll(entityIds: List<String>) = viewModelScope.launch {
+        entityIds.forEach { devicePrefs.setHidden(it, true) }
+    }
+
     fun unhide(entityId: String) = viewModelScope.launch { devicePrefs.setHidden(entityId, false) }
     fun rename(entityId: String, name: String?) =
         viewModelScope.launch { devicePrefs.setRename(entityId, name) }
 
     private companion object {
         /** States that count as "active" for the per-room "N on" summary. */
-        val ACTIVE_STATES = setOf("on", "unlocked", "open", "opening", "playing", "heat", "cool")
+        val ACTIVE_STATES = DEVICE_ACTIVE_STATES
     }
 }
 
