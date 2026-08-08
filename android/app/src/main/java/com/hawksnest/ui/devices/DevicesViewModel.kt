@@ -2,6 +2,7 @@ package com.hawksnest.ui.devices
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.hawksnest.config.favorites
 import com.hawksnest.config.overrides
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.DeviceIndex
@@ -13,7 +14,10 @@ import com.hawksnest.core.logic.NON_DEVICE_DOMAINS
 import com.hawksnest.core.logic.buildDeviceSections
 import com.hawksnest.core.logic.displayName
 import com.hawksnest.core.logic.domainToCard
+import com.hawksnest.core.logic.effectivePins
 import com.hawksnest.core.logic.isPrimaryEntity
+import com.hawksnest.core.logic.movePin
+import com.hawksnest.core.logic.togglePin
 import com.hawksnest.core.logic.prettifyEntityId
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.ui.components.DeviceUi
@@ -24,12 +28,21 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** The Devices tab's whole render model: per-room sections + the hidden-devices shelf. */
+/** The Devices tab's whole render model: pinned rail + per-room sections + hidden shelf. */
 data class DevicesUi(
+    /**
+     * The pinned rail, in the user's stored order (seeded from `config/Favorites`
+     * until first customized). Ids missing from the entity map are skipped; a
+     * pinned-and-hidden entity is skipped too (hide wins — the partition runs
+     * first). Pinned devices also stay in their rooms: the rail is a shortcut,
+     * not a re-org, so room summaries never lie.
+     */
+    val pinned: List<DeviceUi> = emptyList(),
     val sections: List<DeviceSection<DeviceUi>> = emptyList(),
     /** Devices the user hid (long-press → Hide), restorable from the footer sheet. */
     val hidden: List<DeviceUi> = emptyList(),
@@ -57,7 +70,7 @@ class DevicesViewModel @Inject constructor(
 
     val ui: StateFlow<DevicesUi> = combine(
         state.entities, state.areas, state.entityCategories, state.devices,
-        devicePrefs.hidden, devicePrefs.renames, _query,
+        devicePrefs.hidden, devicePrefs.renames, devicePrefs.pinned, _query,
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         build(
@@ -67,7 +80,8 @@ class DevicesViewModel @Inject constructor(
             values[3] as DeviceIndex,
             values[4] as Set<String>,
             values[5] as Map<String, String>,
-            values[6] as String,
+            values[6] as List<String>?,
+            values[7] as String,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DevicesUi())
 
@@ -81,6 +95,7 @@ class DevicesViewModel @Inject constructor(
         deviceIndex: DeviceIndex,
         hiddenIds: Set<String>,
         renames: Map<String, String>,
+        storedPins: List<String>?,
         query: String,
     ): DevicesUi {
         fun toUi(e: HassEntity): DeviceUi {
@@ -113,10 +128,28 @@ class DevicesViewModel @Inject constructor(
             deviceKeyOf = { deviceIndex.deviceByEntity[it.entityId] },
             deviceNameOf = { deviceIndex.devices[it]?.name ?: it },
         )
+        // Rail order = stored order; missing entities skipped; hidden wins over pinned
+        // for free because the partition above already removed hidden ids from `shown`.
+        val shownById = shown.associateBy { it.entityId }
+        val pinned = effectivePins(storedPins, favorites)
+            .mapNotNull { shownById[it] }
+            .map(::toUi)
+
         return DevicesUi(
+            pinned = pinned,
             sections = sections,
             hidden = hidden.map(::toUi).sortedBy { it.name.lowercase() },
         )
+    }
+
+    /** Pin or unpin an entity; the first edit materializes the `config/Favorites` seed. */
+    fun togglePin(entityId: String) = viewModelScope.launch {
+        devicePrefs.setPinned(togglePin(effectivePins(devicePrefs.pinned.first(), favorites), entityId))
+    }
+
+    /** Move a pinned entity up (-1) or down (+1) in the rail; clamps at the ends. */
+    fun movePin(entityId: String, delta: Int) = viewModelScope.launch {
+        devicePrefs.setPinned(movePin(effectivePins(devicePrefs.pinned.first(), favorites), entityId, delta))
     }
 
     /** Crash-safe control call; failures surface on the app snackbar, pending on [pending]. */

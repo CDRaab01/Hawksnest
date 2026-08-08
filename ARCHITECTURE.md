@@ -457,6 +457,14 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   singles, and recomputes `total`/`activeCount` so room summaries never lie; `total` counts a
   group once (room summaries say what the *list shows*, not the entity count). FEATURED/CONTROL
   tiers stay per-entity — an inline control is never buried in a group.
+  **Pinned rail** (since 2026-08-07, closing AUDIT-2026-08 §7.1): the tab opens with a "PINNED"
+  section — the user's ordered shortcuts, long-press → Pin/Unpin/Move up/Move down. Stored as a
+  JSON string-array in `util/DevicePrefsStore` (`pinned_entities`; order matters, hence not a
+  string-set); `null` = never customized = the `config/Favorites` seed, with the first edit
+  materializing it (`core/logic/Pins.kt`, exact web `prefsStore.ts` semantics). Pinned devices
+  **also stay in their rooms** — the rail is a shortcut, not a re-org, so room summaries never
+  lie. Hide wins over pin (the hidden partition runs before the rail is built), and the rail
+  hides while searching or chip-filtered, same gating as the hidden footer.
 - **Control interaction model** (`ui/components/`): the hero domains render premium PULSE
   widgets, each committing **exactly one service call per gesture** with live-local preview
   (no mid-drag calls, so no `awaitEcho` plumbing):
