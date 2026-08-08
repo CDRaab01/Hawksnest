@@ -59,7 +59,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.logic.CardType
+import com.hawksnest.core.logic.DEVICE_ACTIVE_STATES
 import com.hawksnest.core.logic.DeviceSection
+import com.hawksnest.core.logic.ReadonlyItem
+import com.hawksnest.core.logic.entities
+import com.hawksnest.core.logic.filterSections
 import com.hawksnest.ui.components.DeviceControlCard
 import com.hawksnest.ui.components.DeviceUi
 import com.hawksnest.ui.components.PanelCard
@@ -91,10 +95,13 @@ enum class DeviceFilter(val label: String, val cardTypes: Set<CardType>?) {
  * Devices v2 — a single-column list with a deliberate three-tier rhythm per room:
  * FEATURED devices (locks/climate/alarm) keep their full control cards; everything
  * else collapses into compact rows inside one hairline panel per room (controls
- * with an inline switch first, read-only state rows last). Room headers carry a
- * "N devices - M on" summary and survive filtering. Long-press any row/card to
- * rename or hide it (persisted on-device); hidden devices live behind a quiet
- * footer. Chips are PULSE segments, not stock Material chips.
+ * with an inline switch first, read-only state rows last). The read-only tier is
+ * *device-aggregated* (since 2026-08-07): a physical device shedding several
+ * read-only entities renders as one group row that opens a member sheet — see
+ * core/logic DeviceSections. Room headers carry a "N devices - M on" summary and
+ * survive filtering. Long-press any row/card to rename or hide it (persisted
+ * on-device; a group hides all members at once); hidden devices live behind a
+ * quiet footer. Chips are PULSE segments, not stock Material chips.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -108,27 +115,30 @@ fun DevicesScreen(
     var filter by rememberSaveable { mutableStateOf(DeviceFilter.ALL) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var sheetFor by remember { mutableStateOf<DeviceUi?>(null) }
+    var groupSheet by remember { mutableStateOf<ReadonlyItem.Group<DeviceUi>?>(null) }
+    var groupActions by remember { mutableStateOf<ReadonlyItem.Group<DeviceUi>?>(null) }
     var hiddenSheet by remember { mutableStateOf(false) }
 
     // Only offer chips for kinds that are actually present, so the row isn't full of dead filters.
     val present = remember(ui.sections) {
-        ui.sections.flatMapTo(HashSet()) { s -> (s.featured + s.controls + s.readonly).map { it.card } }
+        ui.sections.flatMapTo(HashSet()) { s ->
+            (s.featured + s.controls + s.readonlyItems.flatMap { it.entities() }).map { it.card }
+        }
     }
     val chips = remember(present) {
         DeviceFilter.entries.filter { it == DeviceFilter.ALL || it.cardTypes!!.any(present::contains) }
     }
     val active = if (filter in chips) filter else DeviceFilter.ALL
 
-    // Apply the chip filter per tier; rooms with nothing left disappear entirely.
+    // Apply the chip filter (element-wise on tiers, member-wise inside groups — the pure
+    // helper keeps summaries honest); rooms with nothing left disappear entirely.
     val sections = remember(ui.sections, active) {
         if (active == DeviceFilter.ALL) ui.sections
-        else ui.sections.mapNotNull { s ->
-            val f = s.featured.filter { active.matches(it.card) }
-            val c = s.controls.filter { active.matches(it.card) }
-            val r = s.readonly.filter { active.matches(it.card) }
-            if (f.isEmpty() && c.isEmpty() && r.isEmpty()) null
-            else s.copy(featured = f, controls = c, readonly = r, total = f.size + c.size + r.size)
-        }
+        else filterSections(
+            ui.sections,
+            isActive = { it.rawState in DEVICE_ACTIVE_STATES },
+            predicate = { active.matches(it.card) },
+        )
     }
 
     LazyColumn(
@@ -187,14 +197,18 @@ fun DevicesScreen(
                     }
                 }
             }
-            val rows = section.controls + section.readonly
-            if (rows.isNotEmpty()) {
+            val rowCount = section.controls.size + section.readonlyItems.size
+            if (rowCount > 0) {
                 item(key = "rows:" + section.area) {
                     PanelCard {
-                        rows.forEachIndexed { i, device ->
-                            if (i > 0) {
+                        var i = 0
+                        fun divider() {
+                            if (i++ > 0) {
                                 HorizontalDivider(color = HawksnestTheme.pulse.hairline, thickness = 1.dp)
                             }
+                        }
+                        section.controls.forEach { device ->
+                            divider()
                             DeviceRow(
                                 device = device,
                                 pending = device.entityId in pending,
@@ -202,6 +216,25 @@ fun DevicesScreen(
                                 onOpen = { onOpenEntity(device.entityId) },
                                 onLongPress = { sheetFor = device },
                             )
+                        }
+                        section.readonlyItems.forEach { item ->
+                            divider()
+                            when (item) {
+                                is ReadonlyItem.Single -> DeviceRow(
+                                    device = item.device,
+                                    pending = item.device.entityId in pending,
+                                    onCall = { service, extra ->
+                                        viewModel.call(item.device.entityId, service, extra)
+                                    },
+                                    onOpen = { onOpenEntity(item.device.entityId) },
+                                    onLongPress = { sheetFor = item.device },
+                                )
+                                is ReadonlyItem.Group -> DeviceGroupRow(
+                                    group = item,
+                                    onOpen = { groupSheet = item },
+                                    onLongPress = { groupActions = item },
+                                )
+                            }
                         }
                     }
                 }
@@ -242,6 +275,23 @@ fun DevicesScreen(
             onRename = { viewModel.rename(device.entityId, it) },
             onHide = { viewModel.hide(device.entityId) },
             onDismiss = { sheetFor = null },
+        )
+    }
+    groupSheet?.let { group ->
+        DeviceGroupSheet(
+            group = group,
+            onOpenEntity = {
+                groupSheet = null
+                onOpenEntity(it)
+            },
+            onDismiss = { groupSheet = null },
+        )
+    }
+    groupActions?.let { group ->
+        DeviceGroupActionsSheet(
+            group = group,
+            onHideAll = { viewModel.hideAll(group.members.map { it.entityId }) },
+            onDismiss = { groupActions = null },
         )
     }
     if (hiddenSheet) {
@@ -404,6 +454,172 @@ private fun DeviceRow(
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * One device-group row in the READONLY tier: same 44dp anatomy as [DeviceRow], but standing for
+ * a whole physical device (a camera and its sensor spray). Tap opens the member sheet; long-press
+ * offers hide-all.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DeviceGroupRow(
+    group: ReadonlyItem.Group<DeviceUi>,
+    onOpen: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val pulse = HawksnestTheme.pulse
+    val hasCamera = group.members.any { it.card == CardType.CAMERA }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
+            .padding(horizontal = HawksnestTheme.spacing.md, vertical = HawksnestTheme.spacing.sm)
+            .height(44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(pulse.panelHigh),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (hasCamera) Icons.Filled.Videocam else Icons.Filled.Sensors,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Spacer(Modifier.width(HawksnestTheme.spacing.md))
+        Column(Modifier.weight(1f)) {
+            Text(
+                group.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                buildString {
+                    append(group.members.size)
+                    append(if (group.members.size == 1) " sensor" else " sensors")
+                    if (group.activeCount > 0) {
+                        append(" · ")
+                        append(group.activeCount)
+                        append(" active")
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** A device group's members: name + state each, tap-through to the entity detail. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DeviceGroupSheet(
+    group: ReadonlyItem.Group<DeviceUi>,
+    onOpenEntity: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = HawksnestTheme.pulse.panelHigh,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = HawksnestTheme.spacing.lg)
+                .padding(bottom = HawksnestTheme.spacing.xl),
+            verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm),
+        ) {
+            Text(
+                group.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            group.members.forEach { device ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.small)
+                        .clickable { onOpenEntity(device.entityId) }
+                        .padding(vertical = HawksnestTheme.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            device.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            device.stateText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Long-press sheet for a device group: hide every member at once. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DeviceGroupActionsSheet(
+    group: ReadonlyItem.Group<DeviceUi>,
+    onHideAll: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = HawksnestTheme.pulse.panelHigh,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = HawksnestTheme.spacing.lg)
+                .padding(bottom = HawksnestTheme.spacing.xl),
+            verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
+        ) {
+            Text(
+                group.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                group.members.size.toString() + " entities on this device",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = {
+                onHideAll()
+                onDismiss()
+            }) { Text("Hide device from list") }
         }
     }
 }

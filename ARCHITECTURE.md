@@ -446,6 +446,17 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   reachable through entity-detail **Diagnostics**, whose sibling filter readmits
   `NON_DEVICE_DOMAINS` on both platforms (`EntityDetailViewModel.diagnostics` /
   `entityStore.useDeviceDiagnostics`).
+  **The READONLY tier is device-aggregated** (since 2026-08-07, Android): entities sharing an HA
+  device-registry id (≥2 in a room's read-only tier) collapse into one `ReadonlyItem.Group` row —
+  a camera and its 12–18 sensor spray become one "Nursery Camera — N sensors · M active" row that
+  opens a member sheet. Invariants worth knowing before touching `DeviceSections.kt`: a non-blank
+  search query **bypasses grouping** (hits render flat, one tap from detail); user-hiding
+  partitions **before** sectioning, so groups self-heal as members hide and long-press on a group
+  bulk-hides its members (restorable individually from the shelf); the chip filter goes through
+  the pure `filterSections` helper, which filters group members, degrades one-survivor groups to
+  singles, and recomputes `total`/`activeCount` so room summaries never lie; `total` counts a
+  group once (room summaries say what the *list shows*, not the entity count). FEATURED/CONTROL
+  tiers stay per-entity — an inline control is never buried in a group.
 - **Control interaction model** (`ui/components/`): the hero domains render premium PULSE
   widgets, each committing **exactly one service call per gesture** with live-local preview
   (no mid-drag calls, so no `awaitEcho` plumbing):
