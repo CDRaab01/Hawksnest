@@ -69,7 +69,11 @@ labels** (HA's raw "Lock Current status …" → "Front Door"):
   logical camera (`src/lib/cameraModel.ts`), and recorded playback uses the **event selector**
   (last ~5 events, Ring Protect). **demo mode** runs the whole player against a bundled clip +
   synthesized events with no backend (`src/components/camera/`, `src/lib/{cameraModel,ringEvents,
-  doorbell}.ts`). (Frigate's continuous-VOD path is also supported via `src/lib/cameraEvents.ts`.)
+  doorbell}.ts`). (Frigate's continuous-VOD path is also supported via `src/lib/cameraEvents.ts`.) On Frigate
+  cameras the timeline also does **clip export**: mark a start and an end (scrub then "Start
+  here"/"End here", or drag the handles, then nudge by 1s/15s) and download that range as an mp4 —
+  saved by the browser on web, into `Movies/Hawksnest` with a share sheet on Android
+  (`src/lib/clipExport.ts` ⇄ `core/logic/ClipExport.kt`).
 - **Area detail** (`/area/:area`) — **mixed density**: camera spans full width, controls render
   comfortable, read-only sensors render compact (`src/lib/density.ts`).
 - **Settings** (`/settings`) — connection status + the "Connect to Home Assistant" form, plus a

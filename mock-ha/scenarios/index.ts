@@ -1,5 +1,5 @@
 import type { Scenario } from "../wsProtocol";
-import { baseEntities, ringEntities } from "./entities";
+import { baseEntities, frigateEntities, ringEntities } from "./entities";
 import { buildRegistries, buildHistory } from "./registries";
 
 const HA_VERSION = "2024.12.0";
@@ -39,6 +39,16 @@ export const scenarios: Record<string, () => Scenario> = {
    *  recorded-playback specs (pair with `setStreamOutcome` to script failures). */
   "ring-camera": () => {
     const entities = [...baseEntities, ...ringEntities()];
+    return base({
+      entities,
+      registries: buildRegistries(entities),
+      history: buildHistory(entities),
+    });
+  },
+
+  /** A Frigate-recorded camera (Front Gate) — the backend clip export requires. */
+  "frigate-camera": () => {
+    const entities = [...baseEntities, ...frigateEntities()];
     return base({
       entities,
       registries: buildRegistries(entities),

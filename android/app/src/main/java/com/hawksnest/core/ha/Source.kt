@@ -155,6 +155,25 @@ interface Source {
     /** A playable URL for one recorded event's clip. Null when unsupported. */
     fun eventClipUrl(eventId: String): String? = null
 
+    /**
+     * A **downloadable** mp4 of `[startMs, endMs]` for a Frigate [camera] — clip export.
+     *
+     * Its own seam rather than a flag on [signedRecordingUrlAt], because it differs in all three
+     * things that matter: it addresses the integration's `RecordingProxyView` (`/recording/…`) not
+     * the VOD view, the response is a single progressive mp4 that Frigate generates on demand with
+     * **no `Content-Length`** (so no caller can show progress), and it is consumed by a downloader
+     * rather than by a media player — which is why it must carry its own auth in the query string.
+     *
+     * Note the default is **null**, not the unsigned URL that [signedRecordingUrlAt] falls back to.
+     * That asymmetry is deliberate: `RecordingProxyView` 401s an unsigned request outright, with
+     * none of the VOD playlist's leniency, so an unsigned export URL is known-broken rather than
+     * merely degraded. Null is the honest "this source cannot export".
+     *
+     * `[startMs, endMs]` must already be validated by `core/logic/ClipExport` — this only builds
+     * and signs.
+     */
+    suspend fun signedClipExportUrl(camera: String, startMs: Long, endMs: Long): String? = null
+
     /** True when this source can negotiate WebRTC (the live HA source; not demo). */
     fun supportsWebRtc(): Boolean = false
 

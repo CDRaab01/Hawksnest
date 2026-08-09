@@ -20,6 +20,9 @@ import com.hawksnest.core.logic.parseFrigateWsEvents
 import com.hawksnest.core.logic.parseFrigateWsRecordings
 import com.hawksnest.core.logic.recordingUrlAt as buildRecordingUrl
 import com.hawksnest.core.logic.eventClipUrl as buildEventClipUrl
+import com.hawksnest.core.logic.clipExportUrl as buildClipExportUrl
+import com.hawksnest.core.logic.ClipSelection
+import com.hawksnest.core.logic.clipRangeSeconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -333,9 +336,24 @@ class HaSource(
      */
     override suspend fun signedRecordingUrlAt(camera: String, startMs: Long, endMs: Long): String {
         val unsigned = recordingUrlAt(camera, startMs, endMs)
-        val c = conn ?: return unsigned
+        // Unsignable → the unsigned URL. That is not a silent swallow: an unsigned URL is what the
+        // app sent before signing existed, so the worst case is the previous behaviour (a black
+        // recorded view) rather than a crash or an empty player.
+        return signPath(unsigned) ?: unsigned
+    }
+
+    /**
+     * Mint an HA signed path for [unsigned], or null if it can't be minted.
+     *
+     * Shared by [signedRecordingUrlAt] and [signedClipExportUrl] deliberately: the timeout and
+     * expiry constants and the never-throw contract are load-bearing, and a second copy would be a
+     * second place for them to drift. What the two callers do with a **null** differs — see each —
+     * so this returns null rather than deciding on their behalf.
+     */
+    private suspend fun signPath(unsigned: String): String? {
+        val c = conn ?: return null
         // auth/sign_path wants a server-relative path, not the absolute URL we hand the player.
-        val path = runCatching { java.net.URI(unsigned).path }.getOrNull() ?: return unsigned
+        val path = runCatching { java.net.URI(unsigned).path }.getOrNull() ?: return null
         return try {
             withTimeoutOrNull(SIGN_PATH_TIMEOUT_MS) {
                 val frame = c.request("auth/sign_path") {
@@ -344,14 +362,25 @@ class HaSource(
                 }
                 val signed = (frame["result"] as? JsonObject)?.get("path")?.jsonPrimitive?.contentOrNull
                 signed?.let { withBase(it, baseUrl) }
-            } ?: unsigned
+            }
         } catch (_: Exception) {
-            unsigned
+            null
         }
     }
 
     override fun eventClipUrl(eventId: String): String =
         buildEventClipUrl(eventId, withBase(FRIGATE_BASE, baseUrl))
+
+    /**
+     * Sign an arbitrary-range export URL. Null when it cannot be signed — see
+     * [Source.signedClipExportUrl] for why this refuses rather than degrading to unsigned.
+     */
+    override suspend fun signedClipExportUrl(camera: String, startMs: Long, endMs: Long): String? {
+        val range = clipRangeSeconds(ClipSelection(startMs, endMs))
+        val unsigned =
+            buildClipExportUrl(camera, range.startSec, range.endSec, withBase(FRIGATE_BASE, baseUrl))
+        return signPath(unsigned)
+    }
 
     override fun supportsWebRtc(): Boolean = true
 

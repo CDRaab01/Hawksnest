@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CameraEvent } from "../../lib/cameraEvents";
 import type { FootageSpan } from "../../lib/ringFootage";
 import { clockTime } from "../../lib/relativeTime";
+import { setEdge, type ClipEdge, type ClipSelection } from "../../lib/clipExport";
 import {
   DEFAULT_SPAN_MS,
   type TimeWindow,
@@ -71,6 +72,9 @@ export function Timeline24h({
   onSeek,
   onScrub,
   onLive,
+  selection = null,
+  selectionBounds,
+  onSelectionChange,
 }: {
   events: CameraEvent[];
   /**
@@ -89,11 +93,21 @@ export function Timeline24h({
   onScrub?: (ms: number) => void;
   /** Snap back to live — fired when a tap/drag lands in the "Live" region right of now. */
   onLive?: () => void;
+  /**
+   * The clip-export range being marked, or null when not in clip mode. Drawn as a band with a
+   * draggable handle at each end. Optional so every existing call site is unaffected.
+   */
+  selection?: ClipSelection | null;
+  /** The exportable range a dragged handle is clamped into (`clipExport.exportBounds`). */
+  selectionBounds?: TimeWindow;
+  onSelectionChange?: (sel: ClipSelection) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [vp, setVp] = useState<Viewport | null>(null);
   const drag = useRef<{ startX: number; startVp: Viewport; moved: boolean } | null>(null);
+  /** The selection handle currently under the finger. Mutually exclusive with `drag`. */
+  const handleDrag = useRef<ClipEdge | null>(null);
   // Live pointer x-positions by id, and the previous two-finger separation. Only the x axis
   // matters: the strip is one-dimensional, so a vertical pinch should not zoom it.
   const pointers = useRef(new Map<number, number>());
@@ -134,7 +148,10 @@ export function Timeline24h({
   // Re-center on external seeks (Live / prev / next / event tap) and on width
   // changes, preserving the current zoom. Suppressed while actively dragging.
   useEffect(() => {
-    if (width <= 0 || drag.current) return;
+    // `handleDrag` suppresses this as well as `drag`: without it, moving a selection handle
+    // re-centres the viewport on the playhead mid-gesture, so the strip slides out from under the
+    // finger and the handle runs away from it.
+    if (width <= 0 || drag.current || handleDrag.current) return;
     setVp((cur) =>
       viewportForSpan(
         scrubTime,
@@ -166,6 +183,14 @@ export function Timeline24h({
     if (!vp || width <= 0) return;
     // Let an event chip handle its own tap.
     if ((e.target as HTMLElement).closest("[data-chip]")) return;
+    // A selection handle claims the gesture outright — no pan, no tap-to-seek on release. Same
+    // escape-hatch mechanism the chips use, so there is only one way this component yields control.
+    const grabbed = (e.target as HTMLElement).closest("[data-clip-handle]");
+    if (grabbed && selection && onSelectionChange) {
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      handleDrag.current = grabbed.getAttribute("data-clip-handle") as ClipEdge;
+      return;
+    }
     e.currentTarget.setPointerCapture?.(e.pointerId);
     pointers.current.set(e.pointerId, e.clientX);
     // A second finger turns the gesture into a pinch — abandon the pan so the strip doesn't
@@ -179,6 +204,19 @@ export function Timeline24h({
   }
 
   function onPointerMove(e: React.PointerEvent) {
+    // Dragging a selection handle: map the finger straight to a time and let the pure module do
+    // the clamping. Returns before any pan/pinch/scrub handling — this gesture is not a scrub.
+    const edge = handleDrag.current;
+    if (edge) {
+      if (!vp || !selection || !onSelectionChange || !selectionBounds) return;
+      const rect = trackRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      onSelectionChange(
+        setEdge(selection, edge, xToTime(e.clientX - rect.left, vp, width), selectionBounds),
+      );
+      return;
+    }
+
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, e.clientX);
 
     // Pinch to zoom — the phone's only way to zoom, since there is no wheel there. Android's
@@ -213,6 +251,14 @@ export function Timeline24h({
   }
 
   function onPointerUp(e: React.PointerEvent) {
+    // Finishing a handle drag must NOT fall through to the commit below — that would seek the
+    // player to wherever the handle was released, which is not what the user asked for.
+    if (handleDrag.current) {
+      handleDrag.current = null;
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+      return;
+    }
+
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinchDist.current = null;
     const d = drag.current;
@@ -300,6 +346,66 @@ export function Timeline24h({
               />
             );
           })}
+
+        {/* Clip-export selection. Drawn UNDER the event chips so tapping a chip still seeks, and
+            over the footage lane so the marked range reads against it. The band is
+            `pointer-events-none`; only the two handles are grabbable.
+
+            `opacity-*` rather than a `bg-recovery/25` alpha modifier: the PULSE tokens are
+            `var()`-valued and Tailwind 3 silently DROPS an alpha modifier on those, which would
+            paint the band at full opacity and hide the timeline underneath it. Same trap the
+            footage lane documents above. */}
+        {vp && selection && (
+          <>
+            {/* Dim what is not selected, the way the Live region dims the future. */}
+            <div
+              aria-hidden
+              style={{ left: 0, width: `${Math.max(0, timeToX(selection.startMs, vp, width))}px` }}
+              className="pointer-events-none absolute top-0 h-full bg-black/40"
+            />
+            <div
+              aria-hidden
+              style={{
+                left: `${timeToX(selection.endMs, vp, width)}px`,
+                width: `${Math.max(0, width - timeToX(selection.endMs, vp, width))}px`,
+              }}
+              className="pointer-events-none absolute top-0 h-full bg-black/40"
+            />
+            <div
+              aria-hidden
+              style={{
+                left: `${timeToX(selection.startMs, vp, width)}px`,
+                width: `${Math.max(
+                  2,
+                  timeToX(selection.endMs, vp, width) - timeToX(selection.startMs, vp, width),
+                )}px`,
+              }}
+              className="pointer-events-none absolute top-0 h-full bg-recovery opacity-25"
+            />
+            {(["start", "end"] as const).map((edge) => {
+              const at = edge === "start" ? selection.startMs : selection.endMs;
+              return (
+                <div
+                  key={edge}
+                  data-clip-handle={edge}
+                  role="slider"
+                  aria-label={edge === "start" ? "Clip start" : "Clip end"}
+                  aria-valuemin={startMs}
+                  aria-valuemax={endMs}
+                  aria-valuenow={at}
+                  aria-valuetext={clockTime(at)}
+                  tabIndex={0}
+                  style={{ left: `${timeToX(at, vp, width)}px` }}
+                  // w-6 is the invisible touch target (matching HANDLE_HIT_SLOP_PX either side of
+                  // the hairline); the visible bar is the inner div.
+                  className="absolute top-0 flex h-full w-6 -translate-x-1/2 cursor-ew-resize touch-none items-center justify-center"
+                >
+                  <div className="h-full w-0.5 bg-recovery" />
+                </div>
+              );
+            })}
+          </>
+        )}
 
         {/* Recording blocks — solid effort-blue, tall like Ring's; every block is a
             playable clip. (All rendered; off-screen ones are clipped by overflow-hidden.) */}

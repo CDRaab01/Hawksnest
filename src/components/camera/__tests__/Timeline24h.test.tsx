@@ -67,7 +67,14 @@ function renderTimeline(overrides: Partial<Parameters<typeof Timeline24h>[0]> = 
       {...overrides}
     />,
   );
-  return { onSeek, onScrub, onLive, track: screen.getByRole("slider") };
+  // Named, because the clip-export handles are sliders too — an unnamed lookup goes ambiguous
+  // the moment a selection is on screen.
+  return {
+    onSeek,
+    onScrub,
+    onLive,
+    track: screen.getByRole("slider", { name: /recording timeline/i }),
+  };
 }
 
 describe("Timeline24h scrubbing", () => {
@@ -133,5 +140,70 @@ describe("Timeline24h scrubbing", () => {
     fireEvent.click(screen.getByRole("button", { name: /motion at/ }));
     expect(onSeek).toHaveBeenCalledWith(start);
     expect(onScrub).not.toHaveBeenCalled();
+  });
+});
+
+describe("Timeline24h clip selection", () => {
+  // The viewport opens at a 1h span over a 1000px track (3.6s per px) centred on `now`, so a
+  // selection has to sit within ~30 min of now to be on screen at all — and a handle you can't
+  // see is a handle you can't press.
+  const SELECTION = { startMs: NOW - 600_000, endMs: NOW - 540_000 };
+  const BOUNDS = { startMs: NOW - DAY, endMs: NOW - 60_000 };
+  /** Where a given time lands on the track, by the same centre-anchored math the component uses. */
+  const xOf = (ms: number) => 500 + (ms - NOW) / 3_600;
+
+  it("renders nothing selection-related until a selection is passed", () => {
+    renderTimeline();
+    expect(screen.queryByRole("slider", { name: /clip start/i })).toBeNull();
+  });
+
+  it("exposes both handles with the time they sit at", () => {
+    renderTimeline({ selection: SELECTION, selectionBounds: BOUNDS });
+    const start = screen.getByRole("slider", { name: /clip start/i });
+    const end = screen.getByRole("slider", { name: /clip end/i });
+    expect(start).toHaveAttribute("aria-valuenow", String(SELECTION.startMs));
+    expect(end).toHaveAttribute("aria-valuenow", String(SELECTION.endMs));
+  });
+
+  it("dragging a handle moves that edge and never seeks the player", () => {
+    // The whole point: a handle drag is not a scrub. If it fell through to the pan/commit path,
+    // finishing a drag would jump playback to wherever the handle was released.
+    const onSelectionChange = vi.fn();
+    const { onSeek, onScrub, onLive } = renderTimeline({
+      selection: SELECTION,
+      selectionBounds: BOUNDS,
+      onSelectionChange,
+    });
+    const end = screen.getByRole("slider", { name: /clip end/i });
+
+    const from = xOf(SELECTION.endMs);
+    pointer(end, "pointerdown", from);
+    pointer(end, "pointermove", from + 30);
+    flushRaf();
+    pointer(end, "pointerup", from + 30);
+
+    expect(onSelectionChange).toHaveBeenCalled();
+    const moved = onSelectionChange.mock.calls.at(-1)![0];
+    // The held edge moved later; the other one stayed exactly where it was.
+    expect(moved.endMs).toBeGreaterThan(SELECTION.endMs);
+    expect(moved.startMs).toBe(SELECTION.startMs);
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(onScrub).not.toHaveBeenCalled();
+    expect(onLive).not.toHaveBeenCalled();
+  });
+
+  it("still pans and seeks normally when the press misses the handles", () => {
+    const onSelectionChange = vi.fn();
+    const { onSeek, track } = renderTimeline({
+      selection: SELECTION,
+      selectionBounds: BOUNDS,
+      onSelectionChange,
+    });
+    pointer(track, "pointerdown", 200);
+    pointer(track, "pointermove", 300);
+    flushRaf();
+    pointer(track, "pointerup", 300);
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSelectionChange).not.toHaveBeenCalled();
   });
 });

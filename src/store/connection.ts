@@ -177,6 +177,21 @@ export function eventClipUrl(eventId: string): string | null {
   return current?.eventClipUrl?.(eventId) ?? null;
 }
 
+/**
+ * A signed, downloadable mp4 of an arbitrary range — clip export (see `Source.signedClipExportUrl`).
+ *
+ * Deliberately has no unsigned fallback, unlike {@link signedRecordingUrlAt} above: an unsigned
+ * export URL 401s at the proxy, and handing one to the browser's downloader produces a failure the
+ * app never sees. Null means "don't start a download", and the UI says so.
+ */
+export async function signedClipExportUrl(
+  camera: string,
+  startMs: number,
+  endMs: number,
+): Promise<string | null> {
+  return (await current?.signedClipExportUrl?.(camera, startMs, endMs)) ?? null;
+}
+
 /** True when the active source can negotiate WebRTC (live HA, not demo). */
 export function supportsWebRtc(): boolean {
   return typeof current?.webrtcOffer === "function";

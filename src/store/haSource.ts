@@ -17,9 +17,11 @@ import {
   parseFrigateWsEvents,
   recordingUrlAt as buildRecordingUrl,
   eventClipUrl as buildEventClipUrl,
+  clipExportUrl as buildClipExportUrl,
   FRIGATE_BASE,
   type CameraEvent,
 } from "../lib/cameraEvents";
+import { clipRangeSeconds } from "../lib/clipExport";
 import { dedupeRingMqtt } from "../lib/dedupe";
 import { parseFrigateWsRecordings } from "../lib/ringFootage";
 import {
@@ -200,6 +202,46 @@ const SIGN_PATH_TIMEOUT_MS = 10_000;
  * page for over an hour — which then surfaces as a playback error rather than silently.
  */
 const SIGN_PATH_EXPIRY_SECONDS = 3_600;
+
+/**
+ * Mint an HA **signed path** for `unsigned`, or null if it can't be minted.
+ *
+ * A signed URL carries its own authorisation in the query string (`?authSig=`), which is what lets
+ * a URL be handed to something that cannot set an `Authorization` header — hls.js's segment
+ * fetches, and the browser's own downloader.
+ *
+ * Shared by the two callers deliberately: the fallback semantics and the two constants above are
+ * load-bearing, and a second copy of this would be a second place for them to drift. What differs
+ * between the callers is what they do with a **null** — see each of them — so this returns null
+ * rather than deciding on their behalf.
+ */
+async function signPath(
+  socket: Connection | null,
+  unsigned: string,
+  baseUrl: string,
+): Promise<string | null> {
+  // auth/sign_path wants a server-relative path, not the absolute URL the caller gets.
+  let path: string;
+  try {
+    path = new URL(unsigned, globalThis.location?.origin ?? "http://localhost").pathname;
+  } catch {
+    return null;
+  }
+  if (!socket) return null;
+  try {
+    const res = await Promise.race([
+      socket.sendMessagePromise<{ path?: string }>({
+        type: "auth/sign_path",
+        path,
+        expires: SIGN_PATH_EXPIRY_SECONDS,
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), SIGN_PATH_TIMEOUT_MS)),
+    ]);
+    return res?.path ? withBase(res.path, baseUrl) : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Ask HA for an on-demand stream URL for a camera. `camera/stream` returns a
@@ -427,35 +469,28 @@ export function createHaSource(
         endMs,
         withBase(FRIGATE_BASE, creds.url),
       );
-      // auth/sign_path wants a server-relative path, not the absolute URL the player gets.
-      let path: string;
-      try {
-        path = new URL(unsigned, globalThis.location?.origin ?? "http://localhost").pathname;
-      } catch {
-        return unsigned;
-      }
-      // No socket, no signature — hand back the unsigned URL rather than throwing. Matches the
-      // catch below: the caller's fallback is the pre-signing behaviour, not a dead player.
-      const socket = conn;
-      if (!socket) return unsigned;
-      try {
-        const res = await Promise.race([
-          socket.sendMessagePromise<{ path?: string }>({
-            type: "auth/sign_path",
-            path,
-            expires: SIGN_PATH_EXPIRY_SECONDS,
-          }),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), SIGN_PATH_TIMEOUT_MS)),
-        ]);
-        return res?.path ? withBase(res.path, creds.url) : unsigned;
-      } catch {
-        // Fall back to the unsigned URL: that is the behaviour before signing existed, so the
-        // worst case is the original bug rather than an empty player.
-        return unsigned;
-      }
+      // Unsignable → hand back the unsigned URL rather than throwing. That is the behaviour from
+      // before signing existed, so the worst case is the original bug (a black recorded view)
+      // rather than an empty player.
+      return (await signPath(conn, unsigned, creds.url)) ?? unsigned;
     },
     eventClipUrl(eventId) {
       return buildEventClipUrl(eventId, withBase(FRIGATE_BASE, creds.url));
+    },
+    async signedClipExportUrl(camera, startMs, endMs) {
+      const { startSec, endSec } = clipRangeSeconds({ startMs, endMs });
+      const unsigned = buildClipExportUrl(
+        camera,
+        startSec,
+        endSec,
+        withBase(FRIGATE_BASE, creds.url),
+      );
+      // Null, NOT the unsigned URL — the opposite of signedRecordingUrlAt above, on purpose.
+      // RecordingProxyView 401s an unsigned request outright (it has none of the VOD playlist's
+      // leniency), and this URL is handed to the browser's downloader, where a 401 lands as a
+      // silently failed entry in the download shelf with nothing the app can catch. Refusing up
+      // front lets the UI say why.
+      return signPath(conn, unsigned, creds.url);
     },
     async webrtcOffer(entityId, offerSdp, onSignal) {
       if (!conn) throw new Error("Not connected to Home Assistant.");

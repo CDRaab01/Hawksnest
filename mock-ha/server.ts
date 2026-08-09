@@ -104,6 +104,11 @@ async function handleHttp(req: IncomingMessage, res: ServerResponse): Promise<vo
     });
     return json(res, 200, { ok: true });
   }
+  if (path === "/__scenario/clip-outcome" && method === "POST") {
+    const b = asRecord(await readBody(req));
+    hub.setClipOutcome(str(b.outcome) as "ok" | "empty");
+    return json(res, 200, { ok: true });
+  }
   if (path === "/__scenario/disconnect" && method === "POST") {
     hub.disconnectAll();
     return json(res, 200, { ok: true });
@@ -132,6 +137,29 @@ async function handleHttp(req: IncomingMessage, res: ServerResponse): Promise<vo
     return json(res, 200, { result: "ok" });
   }
   if (path === "/api/frigate/events") return json(res, 200, []);
+  // Clip export — the HA Frigate integration's RecordingProxyView. Faithful in the three ways that
+  // the app's behaviour depends on:
+  //   1. It 401s without `authSig`. A Bearer token does NOT satisfy this view, which is the entire
+  //      reason clip export goes through `auth/sign_path` instead of just reusing the token.
+  //   2. It can 400 with Frigate's own JSON body when no recordings cover the range — the one
+  //      server error the client's coverage check is meant to pre-empt, and the case the web
+  //      download probe exists to turn into a sentence.
+  //   3. On success it streams `video/mp4` in chunks with **no `Content-Length`**, because Frigate
+  //      muxes on demand and cannot know the length. That is why nothing can show a percentage.
+  if (/^\/api\/frigate\/(?:[^/]+\/)?recording\/[^/]+\/start\/[\d.]+\/end\/[\d.]*$/.test(path)) {
+    if (!url.searchParams.has("authSig")) return json(res, 401, { message: "Unauthorized" });
+    if (hub.clipOutcomeFor() === "empty") {
+      return json(res, 400, {
+        success: false,
+        message: "No recordings found for the specified time range",
+      });
+    }
+    cors(res);
+    res.writeHead(200, { "Content-Type": "video/mp4" });
+    for (let i = 0; i < 4; i++) res.write(Buffer.alloc(1024, i));
+    res.end();
+    return;
+  }
   if (path === "/api/hls/mock/master.m3u8") {
     cors(res);
     res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" });

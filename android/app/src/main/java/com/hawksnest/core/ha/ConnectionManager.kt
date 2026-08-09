@@ -142,6 +142,13 @@ class ConnectionManager @Inject constructor(
     suspend fun signedRecordingUrlAt(camera: String, startMs: Long, endMs: Long): String? =
         current?.signedRecordingUrlAt(camera, startMs, endMs)
 
+    /**
+     * A signed, downloadable mp4 of an arbitrary range — clip export
+     * (see [Source.signedClipExportUrl]). Null means "don't start a download".
+     */
+    suspend fun signedClipExportUrl(camera: String, startMs: Long, endMs: Long): String? =
+        current?.signedClipExportUrl(camera, startMs, endMs)
+
     /** Days of continuous recording Frigate keeps for [camera] (see [Source.frigateRetentionDays]). */
     suspend fun frigateRetentionDays(camera: String): Double? =
         current?.frigateRetentionDays(camera)

@@ -208,6 +208,76 @@ just the camera — the window opens at the 24h fallback and widens to real rete
 `frigateRetentionDays` resolves, and an unkeyed fetch would leave days 2–3 laneless (the event
 fetch had the same latent bug; both are keyed now).
 
+**Clip export — downloading an arbitrary range as an mp4 (2026-08-09).** The scrubber could show
+recorded footage but never *keep* any of it, so anything worth saving aged out of Frigate's 3-day
+retention. Marking a start and an end on the timeline now downloads exactly that range.
+
+Nothing new had to be deployed. Frigate exposes
+`GET /api/<camera>/start/<s>/end/<e>/clip.mp4` (ffmpeg concat over the 60 s recording segments,
+integer-second in/out points, stream copy), and the HA integration **already proxies it** as
+`RecordingProxyView` → `/api/frigate/recording/<camera>/start/<s>/end/<e>` — note `recording`,
+singular, and no extension, because the proxy appends Frigate's `/clip.mp4` upstream. nginx's
+existing `location /api/frigate/` (buffering off, `proxy_read_timeout 3600s`) already carries it,
+so `deploy/` is untouched and `deploy.test.ts` needed no edit.
+
+Auth is the reason this is its own seam rather than a flag on `signedRecordingUrlAt`.
+`RecordingProxyView` 401s unless the request is authenticated, and the URL is consumed by the
+*browser's downloader* (and Android's HTTP client), neither of which can set an `Authorization`
+header — so it must be an HA **signed path** (`auth/sign_path` → `?authSig=`). Hence
+`Source.signedClipExportUrl` (⇄ `core/ha/Source.kt`), which resolves **null** when signing fails
+rather than degrading to an unsigned URL the way `signedRecordingUrlAt` does: an unsigned VOD
+merely plays black, but an unsigned export downloads an error body under a `.mp4` name. The
+sign_path round trip is now a single shared helper on both platforms (`signPath` in `haSource.ts`,
+`HaSource.signPath`) so the timeout/expiry constants cannot fork.
+
+All selection rules live in the pure pair `lib/clipExport.ts` ⇄ `core/logic/ClipExport.kt`
+(32 matched tests each): `exportBounds`, `clampSelection`, `setEdge`, `nudge`, `pickHandle`,
+`coverage`, `selectionProblem`, `clipRangeSeconds`, `clipFileName`. Four things there are
+load-bearing and non-obvious:
+
+- **`clampSelection` resolves the duration first, then places it.** Clamping the two edges
+  independently and repairing the duration afterwards looks equivalent and is not — a selection
+  overhanging the live edge gets its far edge pulled in, and the repair then reads that shortened
+  span as the user's intent. A 30 s clip marked at the live edge silently became 15 s that way.
+- **`EXPORT_TAIL_LAG_MS` (60 s).** The recording segment currently being written is not in
+  Frigate's `Recordings` table yet, so a range running up to *now* comes back short or 400s.
+- **`clipRangeSeconds` rounds outwards**, so the frame the user aimed at is always inside the
+  delivered clip. (It still cannot be frame-accurate: `-c copy` starts at the first keyframe at or
+  after the in-point. The UI never implies otherwise.)
+- **`coverage` returns `unknown` for an empty footage lane and fails OPEN.** It is measured against
+  the same `frigate/recordings/get` spans the lane draws — Frigate's own recordings table, which is
+  what makes it a legitimate pre-check for the 400. But an *absent* lane means the lookup failed,
+  not that footage is missing, and blocking there would make export permanently dead on a transient
+  failure. (Deliberately the opposite of `frigate.ts`, which fails closed. Different question:
+  "is this a Frigate camera" must never guess yes; "is there footage here" may.)
+
+**The two platforms save differently, on purpose.** Web hands a signed URL to a same-origin
+`<a download>` navigation, so a 300 MB export never enters memory and the browser owns the download
+UI — but it first issues a **pre-flight probe**, because a bare navigation cannot see a failure and
+Frigate's "no recordings" 400 would otherwise land as a silently-broken file. Cross-origin (Settings
+pointed straight at HA instead of at the proxy) the `download` attribute is ignored and, with no
+`Content-Disposition` from Frigate, the browser would *render* the mp4 instead of saving it — so
+that configuration streams the probe response into a blob instead. Android streams straight into
+`MediaStore.Video` (`Movies/Hawksnest`, `IS_PENDING` until complete) and offers a share sheet from
+the resulting `content://` URI. `DownloadManager` was rejected: on Android 10+ it can only write to
+`Downloads/`, not `Movies/`, gives back no `MediaStore.Video` URI to share, and reports failures as
+a bare status code rather than Frigate's message. The cost is that the save runs in `viewModelScope`
+rather than surviving process death — bounded by the 10-minute cap.
+
+**Gated to Frigate, and only when scrubbed.** One check on each platform (`isFrigate && !isLive`).
+Ring is excluded because it *cannot* do this: its recorded footage is whole pre-signed event mp4s
+that expire in ~15 minutes with no trim capability, so a range selector would promise something the
+backend can't keep. A one-tap "save this event" for Ring (`eventClipUrl`, already plumbed) is a
+coherent follow-up and deliberately unbuilt.
+
+**Selection state must never reach the playback stack.** On both platforms `clipSel` is kept out of
+the VOD page / signed-URL / player keys. A selection that re-keyed the player would re-prepare and
+re-sign the VOD on every nudge — the same class of bug as the page-turn trap immediately below.
+Both timelines give the handles their own gesture path (`data-clip-handle` on web, a `pickHandle`
+branch in the Compose `awaitEachGesture`) that claims the press, suppresses the recenter effect,
+and returns **without committing a seek** — otherwise letting go of a handle would jump playback to
+wherever it landed.
+
 **A Compose page-turn trap that froze scrubbing (fixed 2026-07-30).** `produceState` does NOT
 reset its value when its keys change — only the producer restarts — so when the playhead crossed
 a VOD page boundary, the signed URL held the *old page's* URL until the new signature arrived,
@@ -937,6 +1007,10 @@ change deploy files, that test is the spec**; update both together.
   ones already shipped (the scene pad is the deepest) has to be placed on a real launcher before it
   can be called working — a green `assembleDebug` proves nothing about it.
 - **HA protocol behavior**: extend `mock-ha/` first, write the failing E2E, then implement.
+  (`mock-ha` gained `auth/sign_path`, `frigate/events/get`, `frigate/recordings/get`, the
+  `/api/frigate/recording/…` export route and a `frigate-camera` scenario on 2026-08-09. Before
+  that it answered none of them — so every signing attempt in the E2E suite sat out the client's
+  full 10 s `SIGN_PATH_TIMEOUT_MS` and then silently fell back to an unsigned URL.)
 - **Deploy changes**: `deploy/` + `deploy.test.ts` together.
 - **Automation-side features** (new sensors, Ring/Z-Wave config): wrong repo — that's
   `hawksnest-automation`; Hawksnest usually just renders the new entities via the domain mapping.
