@@ -144,3 +144,41 @@ export const ringEntities = (): HaStateObj[] => {
     },
   ];
 };
+
+/**
+ * A **Frigate**-recorded camera ("Front Gate"), as the Frigate HA integration reports it.
+ *
+ * The two attributes are the whole point: `lib/frigate.ts` identifies a Frigate camera by requiring
+ * **both** `client_id` and `camera_name`, and fails closed otherwise — so without them the app
+ * resolves this camera's recorded backend as "none" and the clip-export UI never appears.
+ * `camera_name` is also authoritative over the entity slug for URL building.
+ *
+ * Deliberately has no event selector, so `recordedBackendOf` resolves "frigate" rather than "ring"
+ * (Ring wins ties).
+ */
+export const frigateEntities = (): HaStateObj[] => [
+  {
+    entity_id: "camera.front_gate",
+    state: "streaming",
+    attributes: {
+      friendly_name: "Front Gate",
+      icon: "mdi:cctv",
+      entity_picture: "/demo-cam-1.svg",
+      client_id: "frigate",
+      camera_name: "front_gate",
+    },
+    last_changed: ago(1),
+  },
+  {
+    entity_id: "binary_sensor.front_gate_motion",
+    state: "off",
+    attributes: { friendly_name: "Front Gate Motion", device_class: "motion" },
+    last_changed: ago(60),
+  },
+  {
+    entity_id: "sensor.frigate_retention_days",
+    state: "3",
+    attributes: { friendly_name: "Frigate Retention Days" },
+    last_changed: ago(600),
+  },
+];

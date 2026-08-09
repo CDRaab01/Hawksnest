@@ -21,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +41,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hawksnest.core.logic.DEFAULT_SPAN_MS
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.ClipEdge
+import com.hawksnest.core.logic.ClipSelection
+import com.hawksnest.core.logic.pickHandle
+import com.hawksnest.core.logic.setEdge
 import com.hawksnest.core.logic.FootageSpan
 import com.hawksnest.core.logic.TimeWindow
 import com.hawksnest.core.logic.Viewport
@@ -103,6 +108,14 @@ fun Timeline24h(
     onScrub: ((Long) -> Unit)? = null,
     /** Snap back to live — fired when a tap/drag lands in the "Live" region right of now. */
     onLive: () -> Unit = {},
+    /**
+     * The clip-export range being marked, or null when not in clip mode. Drawn as a band with a
+     * draggable handle at each end. Optional so every existing call site is unaffected.
+     */
+    selection: ClipSelection? = null,
+    /** The exportable range a dragged handle is clamped into (`ClipExport.exportBounds`). */
+    selectionBounds: TimeWindow? = null,
+    onSelectionChange: ((ClipSelection) -> Unit)? = null,
 ) {
     val pulse = HawksnestTheme.pulse
     val measurer = rememberTextMeasurer()
@@ -113,6 +126,13 @@ fun Timeline24h(
     // True while a drag is emitting scrubs — suppresses the recenter effect, which would otherwise
     // chase every onScrub-driven playhead change and fight the finger (the web's drag guard).
     var gestureActive by remember { mutableStateOf(false) }
+
+    // Read through `rememberUpdatedState` rather than capturing directly: a handle drag changes
+    // `selection` on every pointer event, and putting it in the `pointerInput` key would tear the
+    // gesture down and restart it mid-drag — the finger would lose the handle on the first move.
+    val currentSelection = rememberUpdatedState(selection)
+    val currentBounds = rememberUpdatedState(selectionBounds)
+    val currentOnSelectionChange = rememberUpdatedState(onSelectionChange)
 
     // The clamp window is padded past *now* by half the visible span, so "now" can sit at CENTER
     // with the "Live" region filling the right half — the Ring layout. (Unpadded, the clamp pins
@@ -168,6 +188,43 @@ fun Timeline24h(
                     if (trackWidth <= 0f) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+
+                        // A press on a selection handle claims the whole gesture: no pan, no zoom,
+                        // and crucially NO commit() on release. Falling through to the normal path
+                        // would seek playback to wherever the handle was let go, which is the
+                        // Android twin of the web's `data-clip-handle` escape hatch.
+                        val sel0 = currentSelection.value
+                        val vp0 = vp
+                        val grabbed: ClipEdge? =
+                            if (sel0 != null && vp0 != null && currentBounds.value != null) {
+                                pickHandle(
+                                    down.position.x,
+                                    timeToX(sel0.startMs, vp0, trackWidth),
+                                    timeToX(sel0.endMs, vp0, trackWidth),
+                                )
+                            } else null
+
+                        if (grabbed != null) {
+                            gestureActive = true
+                            down.consume()
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                if (event.changes.none { it.pressed }) break
+                                val at = event.changes.firstOrNull()?.position?.x
+                                val cur = currentSelection.value
+                                val bounds = currentBounds.value
+                                val v = vp
+                                if (at != null && cur != null && bounds != null && v != null) {
+                                    currentOnSelectionChange.value?.invoke(
+                                        setEdge(cur, grabbed, xToTime(at, v, trackWidth), bounds),
+                                    )
+                                }
+                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            }
+                            gestureActive = false
+                            return@awaitEachGesture
+                        }
+
                         var moved = false
                         var totalDx = 0f
                         while (true) {
@@ -249,6 +306,38 @@ fun Timeline24h(
                     size = Size(w, laneH),
                     cornerRadius = CornerRadius(2f, 2f),
                 )
+            }
+
+            // Clip-export selection — drawn under the event blocks so the chips stay legible over
+            // it, and over the footage lane so the marked range reads against the footage it will
+            // actually cut. Mirrors the web band + two handles.
+            currentSelection.value?.let { sel ->
+                val sx = timeToX(sel.startMs, v, wpx)
+                val ex = timeToX(sel.endMs, v, wpx)
+                // Dim what is NOT selected, the way the Live region dims the future.
+                if (sx > 0f) {
+                    drawRect(Color.Black.copy(alpha = 0.40f), Offset(0f, 0f), Size(sx, size.height))
+                }
+                if (ex < wpx) {
+                    drawRect(
+                        Color.Black.copy(alpha = 0.40f),
+                        Offset(ex, 0f),
+                        Size(wpx - ex, size.height),
+                    )
+                }
+                drawRect(
+                    pulse.recovery.copy(alpha = 0.25f),
+                    Offset(sx, 0f),
+                    Size((ex - sx).coerceAtLeast(2f), size.height),
+                )
+                for (hx in listOf(sx, ex)) {
+                    drawLine(
+                        pulse.recovery,
+                        Offset(hx, 0f),
+                        Offset(hx, size.height),
+                        strokeWidth = 3f,
+                    )
+                }
             }
 
             // Recording blocks — solid effort-blue, tall like Ring's; every block is a playable clip.

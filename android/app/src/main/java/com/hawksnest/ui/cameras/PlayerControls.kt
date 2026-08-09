@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.OpenWith
@@ -165,6 +166,21 @@ private fun QualityChip(label: String, selected: Boolean, onClick: () -> Unit) {
  * Failure is a transient inline state — a snapshot that didn't save is
  * self-evident, not worth a dialog.
  */
+/**
+ * Enters/leaves clip-export mode. Frigate-only and recorded-only; the gate lives at the call site
+ * in [CameraPlayer], not here, so there is exactly one place that decides who gets this control.
+ */
+@Composable
+fun ClipButton(active: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    ChromeButton(
+        icon = { tint -> Icon(Icons.Filled.ContentCut, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp)) },
+        label = "Clip",
+        active = active,
+        onClick = onToggle,
+        modifier = modifier,
+    )
+}
+
 /**
  * Opens the prerecorded-message sheet. A plain chip like its neighbours on purpose — the whole
  * row reads as one set of controls, and the version that gave Reply a taller treatment of its own

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LogicalCamera } from "../../lib/cameraModel";
-import { fetchCameraEvents, fetchCameraFootage, signedRecordingUrlAt } from "../../store/connection";
+import {
+  fetchCameraEvents,
+  fetchCameraFootage,
+  signedClipExportUrl,
+  signedRecordingUrlAt,
+} from "../../store/connection";
 import { resolveRingClipUrl } from "../../store/ringClip";
 import {
   fetchRingDevices,
@@ -19,8 +24,18 @@ import {
   FRIGATE_RETENTION_SENSOR,
   frigateRetentionDays,
   isFrigateCamera,
+  frigateCameraName,
 } from "../../lib/frigate";
 import { retentionRange, vodPageFor, vodPositionSecondsInPage } from "../../lib/vodWindow";
+import {
+  clipFileName,
+  defaultSelection,
+  exportBounds,
+  nudge as nudgeClip,
+  setEdge as setClipEdge,
+  type ClipSelection,
+} from "../../lib/clipExport";
+import { ClipExportBar, type ClipExportState } from "./ClipExportBar";
 import { hasRealRecordings, recordedBackendOf } from "../../lib/recordedBackend";
 import { useEntity } from "../../store/entityStore";
 import type { CameraEvent } from "../../lib/cameraEvents";
@@ -41,7 +56,7 @@ import { EventDescription } from "./EventDescription";
 import { PtzPanel } from "./PtzPanel";
 import { resolvePtz } from "../../lib/cameraPtz";
 import { useEntityStore } from "../../store/entityStore";
-import { Move } from "lucide-react";
+import { Move, Scissors } from "lucide-react";
 import { Timeline24h } from "./Timeline24h";
 import { TransportBar } from "./TransportBar";
 import { ZoomableFrame } from "./ZoomableFrame";
@@ -54,6 +69,20 @@ const SCRUB_CLIP_DEBOUNCE_MS = 300;
 
 function cameraNameOf(camera: LogicalCamera): string {
   return camera.id.split(".")[1] ?? camera.id;
+}
+
+/**
+ * Whether `url` is same-origin with the page — which decides how a clip export is saved.
+ *
+ * The `download` attribute is honoured only same-origin; cross-origin the browser ignores it and,
+ * with no `Content-Disposition` from Frigate, renders the mp4 instead of saving it.
+ */
+function isSameOrigin(url: string): boolean {
+  try {
+    return new URL(url, globalThis.location.href).origin === globalThis.location.origin;
+  } catch {
+    return false;
+  }
 }
 
 /** Where the player is with the selected ring clip's stream URL. `failed` is a
@@ -111,6 +140,9 @@ export function CameraPlayer({
   // (selector resolution, ring-timeline signatures), not "has recordings".
   const isRing = backend === "ring";
   const isFrigate = backend === "frigate";
+  // Frigate's own name for this camera, which is authoritative over the HA slug for URL building
+  // (see `frigate.ts`). They are normally identical; when they are not, the slug 404s.
+  const frigateExportName = frigateCameraName(camera.liveEntity) ?? cameraName;
   const ringSelect = useEntity(camera.eventSelectId ?? "");
 
   // Pin "now" once so the timeline doesn't slide under the user mid-session.
@@ -568,6 +600,90 @@ export function CameraPlayer({
   const ringLane = useMemo(() => (footage ? footageSpans(footage.segments) : []), [footage]);
   const footageLane = isRing ? ringLane : frigateFootage;
 
+  // --- Clip export -----------------------------------------------------------------------
+  // Note what is NOT here: none of this state feeds `vodPage`, `vodSrc` or `recordingSrc`.
+  // Entering clip mode must be invisible to the playback stack — a selection that re-keyed the
+  // player would re-prepare (and re-sign) the VOD on every nudge. See ARCHITECTURE.md's
+  // player-identity trap.
+  const [clipSel, setClipSel] = useState<ClipSelection | null>(null);
+  const [clipState, setClipState] = useState<ClipExportState>("idle");
+  const [clipError, setClipError] = useState<string | null>(null);
+
+  // Live `Date.now()`, deliberately NOT the pinned `nowAnchor` the timeline lays itself out with:
+  // a player left open for hours would otherwise keep offering a start time Frigate has since
+  // rotated out of retention. Recomputed per render; it feeds no effect, so it cannot churn one.
+  const clipBounds = exportBounds({ startMs: window.start, endMs: window.end }, Date.now());
+
+  /**
+   * Apply an edit to the selection.
+   *
+   * Takes an updater rather than a value so *relative* edits compose. The nudge buttons are
+   * `cur + delta`, and two taps landing in one render batch would otherwise both read the same
+   * stale selection and the second would be silently lost — which is exactly what a user doing
+   * "+1s +1s +1s" does. (Handle drags are absolute, so they'd survive either way.)
+   */
+  function editClip(fn: (cur: ClipSelection) => ClipSelection) {
+    setClipSel((cur) => (cur ? fn(cur) : cur));
+    // Any edit invalidates whatever the last attempt said.
+    setClipError(null);
+    setClipState("idle");
+  }
+
+  async function downloadClip() {
+    if (!clipSel) return;
+    setClipState("preparing");
+    setClipError(null);
+    try {
+      const url = await signedClipExportUrl(frigateExportName, clipSel.startMs, clipSel.endMs);
+      if (!url) throw new Error("Couldn't authorise the download. Check the connection to HA.");
+
+      // Probe before handing the URL over. A bare `<a download>` cannot see a failure: a 400 lands
+      // as a silently-failed entry in the browser's download shelf with nothing the app can catch.
+      // Frigate checks its recordings table before spawning ffmpeg, so the failure case is cheap.
+      const probe = new AbortController();
+      const res = await fetch(url, { signal: probe.signal });
+      if (!res.ok) {
+        let message = `Export failed (${res.status}).`;
+        try {
+          const body = (await res.json()) as { message?: string };
+          if (body?.message) message = body.message;
+        } catch {
+          // Non-JSON error body — the status line is all we have to say.
+        }
+        throw new Error(message);
+      }
+
+      const fileName = clipFileName(cameraName, clipSel);
+      const a = document.createElement("a");
+      a.download = fileName;
+
+      if (isSameOrigin(url)) {
+        // Preferred path, and the deployed one (the app is served by the nginx pod that proxies
+        // HA). Navigating hands the transfer to the browser, so a 300 MB export never sits in
+        // memory and gets the native download UI. Costs one extra ffmpeg spin-up, which aborting
+        // the probe cuts short.
+        probe.abort();
+        a.href = url;
+        a.click();
+      } else {
+        // Settings can point straight at HA instead of at the proxy. Cross-origin, the `download`
+        // attribute is IGNORED — and since Frigate sets no `Content-Disposition`, the browser
+        // would open the mp4 in a tab instead of saving it. So stream the response we already have
+        // into a blob and download that, which keeps the filename. Memory cost is real but bounded
+        // by MAX_CLIP_MS, and it is the only way this configuration saves a file at all.
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        a.href = objectUrl;
+        a.click();
+        URL.revokeObjectURL(objectUrl);
+      }
+      setClipState("started");
+    } catch (err) {
+      setClipState("failed");
+      setClipError(err instanceof Error ? err.message : "Export failed.");
+    }
+  }
+
   return (
     <div className="space-y-md">
       {/* ONE row that wraps only when it has to.
@@ -602,6 +718,27 @@ export function CameraPlayer({
             snapshotUrl={snapshotUrl(camera.snapshotEntity)}
             cameraName={cameraName}
           />
+          {/* The one and only gate. Frigate is the only backend that can cut an arbitrary range:
+              Ring exposes whole pre-signed event clips that expire in ~15 min and cannot be
+              trimmed, so offering a range selector there would promise something it can't do.
+              Hidden while live too — there is nothing to export from the future. */}
+          {isFrigate && !isLive && (
+            <button
+              type="button"
+              onClick={() =>
+                setClipSel((cur) => (cur ? null : defaultSelection(headTime, clipBounds)))
+              }
+              aria-pressed={clipSel !== null}
+              aria-label={clipSel ? "Cancel clip export" : "Export a clip"}
+              className={[
+                "flex items-center gap-xs rounded-sm px-sm py-xs caption-label transition-colors duration-fast",
+                clipSel ? "bg-panel-high text-ink" : "bg-panel text-ink-dim hover:text-ink",
+              ].join(" ")}
+            >
+              <Scissors size={14} />
+              Clip
+            </button>
+          )}
           {/* Live only: TalkButton latches the mic open and unmounting it is what
               closes the session, so it must never outlive the live view. */}
           {canReachSpeaker && isLive && <TalkButton src={cameraName} />}
@@ -690,6 +827,9 @@ export function CameraPlayer({
         onSeek={seek}
         onScrub={scrub}
         onLive={goLive}
+        selection={clipSel}
+        selectionBounds={clipBounds}
+        onSelectionChange={(next) => editClip(() => next)}
       />
 
       {/* Between the timeline and the transport on purpose: tapping a chip
@@ -697,16 +837,41 @@ export function CameraPlayer({
           interaction to learn. */}
       <EventDescription event={describedEvent} />
 
-      <TransportBar
-        isLive={isLive}
-        isPaused={paused}
-        canPrev={prev !== null}
-        canNext={next !== null || !isLive}
-        onPrev={() => prev && seek(prev.startMs)}
-        onNext={() => (next ? seek(next.startMs) : goLive())}
-        onTogglePlay={() => setPaused((p) => !p)}
-        onLive={goLive}
-      />
+      {/* Replaces the transport rather than stacking under it: the column is already tight at
+          phone width (pushing the transport off-screen has happened before), and prev/next/play
+          are not what you reach for while marking a range. */}
+      {clipSel ? (
+        <ClipExportBar
+          selection={clipSel}
+          playheadMs={headTime}
+          footage={footageLane}
+          state={clipState}
+          error={clipError}
+          onNudge={(edge, delta) =>
+            editClip((cur) => nudgeClip(cur, edge, delta, clipBounds))
+          }
+          onSetEdgeToPlayhead={(edge) =>
+            editClip((cur) => setClipEdge(cur, edge, headTime, clipBounds))
+          }
+          onCancel={() => {
+            setClipSel(null);
+            setClipError(null);
+            setClipState("idle");
+          }}
+          onDownload={() => void downloadClip()}
+        />
+      ) : (
+        <TransportBar
+          isLive={isLive}
+          isPaused={paused}
+          canPrev={prev !== null}
+          canNext={next !== null || !isLive}
+          onPrev={() => prev && seek(prev.startMs)}
+          onNext={() => (next ? seek(next.startMs) : goLive())}
+          onTogglePlay={() => setPaused((p) => !p)}
+          onLive={goLive}
+        />
+      )}
     </div>
   );
 }

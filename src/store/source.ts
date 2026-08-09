@@ -120,6 +120,26 @@ export interface Source {
   /** A playable URL for one recorded event's clip. Null when unsupported. */
   eventClipUrl?: (eventId: string) => string | null;
   /**
+   * A **downloadable** mp4 of `[startMs, endMs]` for a Frigate `camera` — clip export.
+   *
+   * Its own seam rather than a flag on `signedRecordingUrlAt`, because it differs in all three
+   * things that matter: it addresses the integration's `RecordingProxyView` (`/recording/…`) not
+   * the VOD view, the response is a single progressive mp4 that Frigate generates on demand with
+   * **no `Content-Length`** (so no caller can show progress), and it is consumed by the *browser's
+   * downloader* rather than by a media element — which is why it has to carry its own auth in the
+   * query string.
+   *
+   * Unlike `signedRecordingUrlAt`, this resolves **null** rather than falling back to an unsigned
+   * URL: the proxy 401s an unsigned export, and a 401 handed to a downloader is a silent failure.
+   *
+   * `[startMs, endMs]` must already be validated by `lib/clipExport` — this only builds and signs.
+   */
+  signedClipExportUrl?: (
+    camera: string,
+    startMs: number,
+    endMs: number,
+  ) => Promise<string | null>;
+  /**
    * Begin a WebRTC live session for a camera. Sends the browser's SDP `offer`
    * to HA (`camera/webrtc/offer`, a subscribe-style command served by go2rtc)
    * and streams the negotiation back through `onSignal` (session id, answer,

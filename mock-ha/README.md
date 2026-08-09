@@ -38,6 +38,7 @@ Named, requested via the control API. Each is a fresh, isolated copy on reset.
 | `lock-jam` | `lock.lock` echoes `jammed` — never reaches `locked`. |
 | `bad-token` | Auth always fails → app shows "Invalid access token." |
 | `ring-camera` | Adds a ring-mqtt split camera (Front Gate: `_live`/`_snapshot`/`_event` + event selector + motion/ding) for recorded-playback specs. Pair with `/stream-outcome` to script failures. |
+| `frigate-camera` | Adds a Frigate-recorded camera (Front Gate) carrying the `client_id` + `camera_name` attributes `isFrigateCamera` requires — the backend clip export needs. No event selector, so the backend resolves `frigate` rather than `ring`. |
 
 ## Control API
 
@@ -51,6 +52,7 @@ origin can reach the REST endpoints.
 | `POST /state` | `{entity_id, state, attributes?}` | Push one state change over the live subscription (e.g. fire a doorbell `_ding`). |
 | `POST /service-outcome` | `{domain, service, entity_id?, outcome, delayMs?, state?}` | Script how the next matching `call_service` resolves. |
 | `POST /stream-outcome` | `{entity_id?, outcome, delayMs?}` | Script how `camera/stream` resolves for an entity (omit `entity_id` to apply to all). |
+| `POST /clip-outcome` | `{outcome}` | `"ok"` serves an mp4; `"empty"` returns Frigate's "no recordings found" 400 for the clip-export route. |
 | `POST /disconnect` | — | Drop all live sockets; the app auto-reconnects. |
 | `GET /calls` | — | The recorded `call_service` log (round-trip assertions). |
 | `GET /stats` | — | `{connections, sessions, streamRequests}` — reconnect + stream-retry assertions. |
@@ -74,3 +76,13 @@ in-flight echo can never land in the next test's scenario.
   over the entity subscription is what drives the non-optimistic lock UI.
 - REST: automation config (`GET`→404 / writes→200), `frigate/events`→`[]`, a stub
   HLS playlist. Live video is never exercised headless.
+- `auth/sign_path` returns the path with `?authSig=mock-sig` appended. Its absence used to make
+  every signing attempt burn the client's full 10 s timeout before falling back to unsigned.
+- `frigate/events/get` and `frigate/recordings/get` are **websocket** commands (the REST
+  `/api/frigate/events` route does not exist on a real HA) and answer with an **undecoded JSON
+  string**, exactly as the integration does — replying with an array would exercise a branch
+  production never takes. The recordings set contains a deliberate 10-minute gap two hours back,
+  which is what makes the clip-export coverage check testable.
+- `/api/frigate/recording/<cam>/start/<s>/end/<e>` is the clip-export route: 401 without
+  `authSig`, Frigate's "no recordings" 400 under `/__scenario/clip-outcome`, otherwise chunked
+  `video/mp4` with **no `Content-Length`** — the reason no client can show export progress.

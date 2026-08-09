@@ -281,6 +281,11 @@ export function createFixtureSource(): Source {
     eventClipUrl() {
       return DEMO_CLIP_URL;
     },
+    async signedClipExportUrl() {
+      // Demo has nothing to sign and nothing to trim — an export downloads the bundled clip. The
+      // seam is implemented anyway so the whole download path is exercisable without a real HA.
+      return DEMO_CLIP_URL;
+    },
     async getAutomationConfig(id) {
       return configs.get(id) ?? null;
     },

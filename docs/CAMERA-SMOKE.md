@@ -7,8 +7,9 @@ tile/lightbox layout, the doorbell banner, lock flows, reconnect — is covered 
 + the Android instrumented tests. This checklist is the manual gate for what they can't reach.
 
 **Run it before cutting a release that touched anything under** `src/components/camera/`,
-`src/lib/cameraModel.ts`, `src/components/{LivePlayer,WebRtcPlayer,HlsPlayer}.tsx`, the Android
-camera stack, or the nginx camera proxy in `deploy/nginx.conf`. It takes ~5 minutes against the
+`src/lib/cameraModel.ts`, `src/lib/clipExport.ts` / `core/logic/ClipExport.kt`,
+`src/components/{LivePlayer,WebRtcPlayer,HlsPlayer}.tsx`, the Android camera stack, or the nginx
+camera proxy in `deploy/nginx.conf`. It takes ~5 minutes against the
 live Ring/go2rtc backend (a real doorbell + one other camera is enough).
 
 ## Preconditions
@@ -76,6 +77,35 @@ the **Move** button in the player chrome, live view only.
       seconds; **View** opens that camera's live player.
 - [ ] **Push fires** (once Gate 3 ships): with the app closed, the ntfy push arrives and tapping it
       deep-links to the camera.
+
+## Clip export (Frigate only — run on BOTH platforms)
+
+Automated tests cover the selection maths, the signing, the URL shape and the download handoff
+against `mock-ha`. What they cannot cover is whether the bytes Frigate actually produces are a
+playable clip of the right moment.
+
+- [ ] **Gate.** The **Clip** chip appears on the Reolinks once scrubbed back, and is **absent**
+      while live, on every Ring camera, and on the doorbell.
+- [ ] **Mark and save.** Scrub to a known event → **Start here** → scrub forward → **End here** →
+      Download. The file lands (browser downloads / `Movies/Hawksnest`), plays in VLC and in the
+      system player, is the right camera, the right ~30 s, **with audio**.
+- [ ] **Trim accuracy.** The clip's real start can be up to one GOP *after* the requested second
+      (`-c copy` cannot cut mid-GOP). Confirm that is seconds, not tens of seconds — if it is the
+      latter, the cameras' keyframe interval is the thing to look at, not this app.
+- [ ] **Record the wall-clock time and file size of a 10-minute export here: ______**. This is the
+      only real evidence for whether `MAX_CLIP_MS` is set right; re-tune the constant from it.
+- [ ] **`bedroom` retains 1 day, not 3** (a per-camera override the retention sensor does not
+      expose). Drag the selection to two days back: Download must be blocked by the footage-coverage
+      check with "No recording exists for this range" — **not** by a server 400.
+- [ ] **Gap.** A range straddling a Frigate restart warns ("Part of this range wasn't recorded")
+      and still exports the footage that exists.
+- [ ] **Android share.** After a save, **Share** opens the sheet and the clip sends intact.
+- [ ] **Android backgrounding.** Start an export and leave the camera screen (not the app): it
+      still completes. Leaving the *app* during a long export is a known limitation.
+- [ ] **Signature is real.** The URL in the browser's download list carries `authSig`; re-opening
+      it an hour later 401s (expiry is not decorative).
+- [ ] **App stays responsive** while an export runs — entities keep updating and live view still
+      paints. This is the check on an export occupying the HA connection.
 
 ## If something fails
 

@@ -95,6 +95,21 @@ fun vodPositionMs(headMs: Long, windowStartMs: Long): Long = (headMs - windowSta
 fun eventClipUrl(eventId: String, base: String = FRIGATE_BASE): String =
     "$base/notifications/$eventId/clip.mp4"
 
+/**
+ * The downloadable clip (mp4) for an **arbitrary** `[startSec, endSec]` range on [camera] — the
+ * clip-export feature, as opposed to [eventClipUrl], which can only address a whole event.
+ *
+ * Frigate generates it on demand (ffmpeg concat over the recording segments, stream copy) and
+ * streams the result, so there is no `Content-Length` and no progress to report. The HA Frigate
+ * integration exposes it as `RecordingProxyView` — note the path segment is `recording`, singular,
+ * and that the `/clip.mp4` suffix is Frigate's, not HA's: the proxy appends it upstream.
+ *
+ * Seconds, not ms, because that is what Frigate's route takes. Use [clipRangeSeconds] to derive
+ * them — it rounds outwards to match ffmpeg's whole-second in/out points.
+ */
+fun clipExportUrl(camera: String, startSec: Long, endSec: Long, base: String = FRIGATE_BASE): String =
+    "$base/recording/$camera/start/$startSec/end/$endSec"
+
 /** The snapshot (jpg) for a single recorded event. Pure builder. */
 fun eventSnapshotUrl(eventId: String, base: String = FRIGATE_BASE): String =
     "$base/notifications/$eventId/snapshot.jpg"

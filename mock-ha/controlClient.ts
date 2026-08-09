@@ -49,6 +49,11 @@ export class MockControl {
     return this.post("/__scenario/stream-outcome", input);
   }
 
+  /** Script whether the clip-export route serves a file or Frigate's "no recordings" 400. */
+  setClipOutcome(outcome: "ok" | "empty"): Promise<void> {
+    return this.post("/__scenario/clip-outcome", { outcome });
+  }
+
   /** Close all live sockets; the app auto-reconnects. */
   disconnect(): Promise<void> {
     return this.post("/__scenario/disconnect");

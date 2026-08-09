@@ -213,6 +213,22 @@ class CameraEventTest {
     }
 
     @Test
+    fun `builds the arbitrary-range export URL`() {
+        // `recording` (singular) is the HA integration's RecordingProxyView; it appends Frigate's
+        // own `/clip.mp4` upstream, so this URL deliberately has no extension.
+        assertEquals(
+            "$FRIGATE_BASE/recording/front/start/1700000000/end/1700000050",
+            clipExportUrl("front", 1_700_000_000L, 1_700_000_050L),
+        )
+
+        val base = "http://ha.local:8123/api/frigate"
+        assertEquals(
+            "$base/recording/front/start/1700000000/end/1700000050",
+            clipExportUrl("front", 1_700_000_000L, 1_700_000_050L, base),
+        )
+    }
+
+    @Test
     fun `marks snapshot URLs only when has_snapshot is set`() {
         val withSnap = normalizeFrigateEvents(listOf(raw(id = "s", hasSnapshot = true)))[0]
         assertTrue(withSnap.snapshotUrl != null)

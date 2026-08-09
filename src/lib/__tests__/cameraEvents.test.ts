@@ -4,6 +4,7 @@ import {
   parseFrigateWsEvents,
   recordingUrlAt,
   vodPositionSeconds,
+  clipExportUrl,
   eventClipUrl,
   eventSnapshotUrl,
   FRIGATE_BASE,
@@ -175,6 +176,19 @@ describe("cameraEvents", () => {
     const base = "http://ha.local:8123/api/frigate";
     expect(recordingUrlAt("front", 1_700_000_000_000, 1_700_000_600_000, base)).toBe(
       `${base}/vod/front/start/1700000000/end/1700000600/master.m3u8`,
+    );
+  });
+
+  it("builds the arbitrary-range export URL", () => {
+    // `recording` (singular) is the HA integration's RecordingProxyView; it appends Frigate's
+    // own `/clip.mp4` upstream, so this URL deliberately has no extension.
+    expect(clipExportUrl("front", 1_700_000_000, 1_700_000_050)).toBe(
+      `${FRIGATE_BASE}/recording/front/start/1700000000/end/1700000050`,
+    );
+
+    const base = "http://ha.local:8123/api/frigate";
+    expect(clipExportUrl("big room", 1_700_000_000, 1_700_000_050, base)).toBe(
+      `${base}/recording/big%20room/start/1700000000/end/1700000050`,
     );
   });
 

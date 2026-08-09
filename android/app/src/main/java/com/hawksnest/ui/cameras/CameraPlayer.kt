@@ -37,6 +37,15 @@ import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.canReachSpeaker
 import com.hawksnest.core.logic.NO_ZOOM
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
+import com.hawksnest.core.logic.ClipSelection
+import com.hawksnest.core.logic.TimeWindow
+import com.hawksnest.core.logic.defaultSelection
+import com.hawksnest.core.logic.exportBounds
+import com.hawksnest.core.logic.frigateCameraName
+import com.hawksnest.core.logic.nudge as nudgeClip
+import com.hawksnest.core.logic.setEdge as setClipEdge
 import com.hawksnest.core.logic.RecordedBackend
 import com.hawksnest.core.logic.RecordedSource
 import com.hawksnest.core.logic.RingFootage
@@ -99,6 +108,12 @@ fun CameraPlayer(
         )
     }
     val isRing = backend == RecordedBackend.RING
+    // Named alongside isRing so the two platforms read identically at the clip-export gate below.
+    val isFrigate = backend == RecordedBackend.FRIGATE
+    // Frigate's own name for this camera, authoritative over the HA slug for URL building (see
+    // Frigate.kt). Normally identical; when they are not, the slug 404s.
+    val frigateExportName =
+        remember(cam.id) { frigateCameraName(viewModel.entity(cam.entityId)) ?: cameraName }
     // Pin "now" once so the timeline doesn't slide under the user mid-session.
     val nowAnchor = remember(cam.id) { System.currentTimeMillis() }
     // How far back the timeline reaches. Ring stays at 24h — its recorded path is the last handful
@@ -295,6 +310,21 @@ fun CameraPlayer(
 
     val isLive = playhead == null
     val headTime = playhead ?: endMs
+
+    // --- Clip export ---------------------------------------------------------------------
+    // Note what is NOT here: none of this feeds `vodPage`, the signed VOD URL, or the VideoPlayer
+    // keys. Entering clip mode must be invisible to the playback stack — a selection that re-keyed
+    // the player would re-prepare (and re-sign) the VOD on every nudge. See ARCHITECTURE.md's
+    // player-identity trap.
+    val context = LocalContext.current
+    var clipSel by remember(cam.id) { mutableStateOf<ClipSelection?>(null) }
+    var clipState by remember(cam.id) { mutableStateOf(ClipExportState.Idle) }
+    var clipError by remember(cam.id) { mutableStateOf<String?>(null) }
+    var clipUri by remember(cam.id) { mutableStateOf<Uri?>(null) }
+    // Live `System.currentTimeMillis()`, deliberately NOT the pinned `nowAnchor` the timeline lays
+    // itself out with: a player left open for hours would otherwise keep offering a start time
+    // Frigate has since rotated out of retention.
+    val clipBounds = exportBounds(TimeWindow(startMs, endMs), System.currentTimeMillis())
     val prev = events.lastOrNull { it.startMs < headTime }
     val next = events.firstOrNull { it.startMs > headTime }
     // The clip under the playhead (containment, not nearest): scrubbing can rest anywhere, and
@@ -466,6 +496,21 @@ fun CameraPlayer(
             MuteButton(muted = muted, onToggle = { muted = !muted })
             FullscreenButton(active = fullscreen, onToggle = { fullscreen = !fullscreen })
             SnapshotButton(snapshotUrl = cam.snapshotUrl, cameraName = cameraName)
+            // The one and only gate. Frigate is the only backend that can cut an arbitrary range:
+            // Ring exposes whole pre-signed event clips that expire in ~15 min and cannot be
+            // trimmed, so offering a range selector there would promise something it can't do.
+            // Hidden while live too — there is nothing to export from the future.
+            if (isFrigate && !isLive) {
+                ClipButton(
+                    active = clipSel != null,
+                    onToggle = {
+                        clipSel =
+                            if (clipSel != null) null else defaultSelection(headTime, clipBounds)
+                        clipError = null
+                        clipState = ClipExportState.Idle
+                    },
+                )
+            }
             // LIVE ONLY, and the gate is load-bearing rather than cosmetic: TalkButton latches the
             // mic open until tapped again, and unmounting it is what closes the session. Offering
             // it over recorded footage would be both meaningless (there is nothing to talk to) and
@@ -683,6 +728,13 @@ fun CameraPlayer(
                     playhead = ms.coerceIn(startMs, endMs)
                 },
                 onLive = ::goLive,
+                selection = clipSel,
+                selectionBounds = clipBounds,
+                onSelectionChange = { next ->
+                    clipSel = next
+                    clipError = null
+                    clipState = ClipExportState.Idle
+                },
             )
 
             // Between the timeline and the transport on purpose: tapping a chip
@@ -690,16 +742,63 @@ fun CameraPlayer(
             // interaction to learn.
             EventDescription(describedEvent)
 
-            TransportBar(
-                isLive = isLive,
-                isPaused = paused,
-                canPrev = prev != null,
-                canNext = next != null || !isLive,
-                onPrev = { prev?.let { seek(it.startMs) } },
-                onNext = { if (next != null) seek(next.startMs) else goLive() },
-                onTogglePlay = { paused = !paused },
-                onLive = ::goLive,
-            )
+            // Replaces the transport rather than stacking under it: the column is already tight
+            // at phone width (pushing the transport off-screen has happened before), and
+            // prev/next/play are not what you reach for while marking a range.
+            val sel = clipSel
+            if (sel != null) {
+                ClipExportBar(
+                    selection = sel,
+                    playheadMs = headTime,
+                    footage = footageLane,
+                    state = clipState,
+                    error = clipError,
+                    onNudge = { edge, delta ->
+                        clipSel = nudgeClip(sel, edge, delta, clipBounds)
+                        clipError = null
+                        clipState = ClipExportState.Idle
+                    },
+                    onSetEdgeToPlayhead = { edge ->
+                        clipSel = setClipEdge(sel, edge, headTime, clipBounds)
+                        clipError = null
+                        clipState = ClipExportState.Idle
+                    },
+                    onCancel = {
+                        clipSel = null
+                        clipError = null
+                        clipState = ClipExportState.Idle
+                    },
+                    onShare = clipUri?.let { uri -> { shareClip(context, uri) } },
+                    onDownload = {
+                        clipState = ClipExportState.Preparing
+                        clipError = null
+                        clipUri = null
+                        viewModel.exportClip(context, frigateExportName, cameraName, sel) { result ->
+                            when (result) {
+                                is ClipSaveResult.Saved -> {
+                                    clipUri = result.uri
+                                    clipState = ClipExportState.Started
+                                }
+                                is ClipSaveResult.Failed -> {
+                                    clipError = result.message
+                                    clipState = ClipExportState.Failed
+                                }
+                            }
+                        }
+                    },
+                )
+            } else {
+                TransportBar(
+                    isLive = isLive,
+                    isPaused = paused,
+                    canPrev = prev != null,
+                    canNext = next != null || !isLive,
+                    onPrev = { prev?.let { seek(it.startMs) } },
+                    onNext = { if (next != null) seek(next.startMs) else goLive() },
+                    onTogglePlay = { paused = !paused },
+                    onLive = ::goLive,
+                )
+            }
         }
     }
 }

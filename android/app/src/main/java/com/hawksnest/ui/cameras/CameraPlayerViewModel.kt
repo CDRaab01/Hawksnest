@@ -1,6 +1,9 @@
 package com.hawksnest.ui.cameras
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.ServiceData
@@ -8,6 +11,8 @@ import com.hawksnest.core.ha.WebRtcHandle
 import com.hawksnest.core.ha.WebRtcSignal
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.ClipSelection
+import com.hawksnest.core.logic.clipFileName
 import com.hawksnest.core.logic.PtzControls
 import com.hawksnest.core.logic.QuickReply
 import com.hawksnest.core.logic.quickReplyPath
@@ -208,6 +213,35 @@ class CameraPlayerViewModel @Inject constructor(
      */
     suspend fun signedRecordingUrl(camera: String, startMs: Long, endMs: Long): String? =
         connection.signedRecordingUrlAt(camera, startMs, endMs)
+
+    /**
+     * Sign, download and save a clip export, reporting the outcome through [onResult].
+     *
+     * Runs in `viewModelScope`, **not** a composition scope: an export can take tens of seconds and
+     * a `rememberCoroutineScope()` dies the moment the user leaves the camera screen, which would
+     * silently bin a partly-downloaded clip. This survives navigation within the activity.
+     *
+     * [frigateName] is Frigate's own camera name (for the URL); [displayName] is what the file gets
+     * called. They are normally the same and occasionally are not.
+     */
+    fun exportClip(
+        context: Context,
+        frigateName: String,
+        displayName: String,
+        selection: ClipSelection,
+        onResult: (ClipSaveResult) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val url = connection.signedClipExportUrl(frigateName, selection.startMs, selection.endMs)
+            if (url == null) {
+                // Null means the signature could not be minted, and an unsigned export 401s at the
+                // proxy — so this refuses rather than downloading a guaranteed error body.
+                onResult(ClipSaveResult.Failed("Couldn't authorise the download. Check the connection to HA."))
+                return@launch
+            }
+            onResult(saveClipExport(context, url, clipFileName(displayName, selection)))
+        }
+    }
 
     /** Days of continuous recording Frigate keeps for [camera] — drives how far back the timeline
      *  reaches. Null when unknown; the caller falls back rather than guessing. */

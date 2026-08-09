@@ -175,6 +175,7 @@ export class MockHub {
   private logbookData!: unknown[];
   private outcomes = new Map<string, ServiceOutcome>();
   private streamOutcomes = new Map<string, StreamOutcome>();
+  private clipOutcome: "ok" | "empty" = "ok";
   private defaultDelayMs = 600;
   /** Echo timers in flight — cleared on load so a delayed echo from one test
    *  can't fire into the next test's freshly-reset scenario. */
@@ -211,6 +212,7 @@ export class MockHub {
     this.logbookData = structuredClone(scenario.logbook);
     this.outcomes = new Map(Object.entries(scenario.outcomes ?? {}));
     this.streamOutcomes = new Map(Object.entries(scenario.streamOutcomes ?? {}));
+    this.clipOutcome = "ok";
     this.defaultDelayMs = scenario.defaultDelayMs ?? 600;
     this.calls.length = 0;
     this.streamRequests.length = 0;
@@ -240,6 +242,52 @@ export class MockHub {
   }
   history(): Record<string, RawHistorySample[]> {
     return this.historyData;
+  }
+
+  /**
+   * Frigate's recording rows for the continuous lane, as epoch **seconds**.
+   *
+   * Generated relative to a live `Date.now()` rather than pinned in a fixture, because the app
+   * derives its timeline window and its export ceiling from the real clock — a fixed timestamp
+   * would fall outside the window and the lane would render empty.
+   *
+   * Deliberately contains a **10-minute hole** two hours back. That hole is the only way to test
+   * the coverage validator, which is the thing standing between the user and a server-side 400.
+   */
+  frigateRecordings(): Array<{ start_time: number; end_time: number }> {
+    const now = Date.now();
+    const sec = (ms: number) => Math.floor(ms / 1000);
+    const gapStart = now - 2 * 3_600_000;
+    const gapEnd = gapStart + 10 * 60_000;
+    return [
+      { start_time: sec(now - 3 * 86_400_000), end_time: sec(gapStart) },
+      // …10-minute gap…
+      { start_time: sec(gapEnd), end_time: sec(now - 90_000) },
+    ];
+  }
+
+  /** Frigate's event rows (epoch seconds), a small believable spread over the last hour. */
+  frigateEvents(): Array<Record<string, unknown>> {
+    const now = Date.now();
+    const sec = (ms: number) => Math.floor(ms / 1000);
+    return [45, 30, 12].map((minsAgo, i) => ({
+      id: `mock-event-${i}`,
+      camera: "front_gate",
+      label: i === 0 ? "car" : "person",
+      start_time: sec(now - minsAgo * 60_000),
+      end_time: sec(now - minsAgo * 60_000 + 25_000),
+      has_clip: true,
+      has_snapshot: true,
+    }));
+  }
+
+  /** Control API: script whether the clip-export route produces a file or Frigate's 400. */
+  setClipOutcome(outcome: "ok" | "empty"): void {
+    this.clipOutcome = outcome;
+  }
+
+  clipOutcomeFor(): "ok" | "empty" {
+    return this.clipOutcome;
   }
   logbook(): unknown[] {
     return this.logbookData;
@@ -359,7 +407,21 @@ interface Msg {
   event_type?: string;
   /** `camera/stream` carries the camera entity here. */
   entity_id?: string;
+  /** `auth/sign_path` carries the server-relative path to sign. */
+  path?: string;
+  /** The `frigate/…/get` commands carry the camera name and an epoch-seconds window. */
+  camera?: string;
+  after?: number;
+  before?: number;
 }
+
+/**
+ * The signature `auth/sign_path` hands back, and the one the export route insists on.
+ *
+ * Exported so the E2E spec can assert the download URL actually carries a signature rather than
+ * merely 200ing — an unsigned export is the exact failure this whole seam exists to prevent.
+ */
+export const MOCK_AUTH_SIG = "mock-sig";
 
 export class Session {
   private authed = false;
@@ -470,6 +532,28 @@ export class Session {
         break;
       case "camera/stream":
         this.handleCameraStream(msg);
+        break;
+      case "auth/sign_path":
+        // HA mints a JWT whose `path` claim it later checks against the request path. The app only
+        // ever cares that a signature came back and rode along in the query string, so a fixed
+        // marker is enough — `server.ts` checks for exactly this on the export route.
+        //
+        // This case being ABSENT is why every signing attempt in the E2E suite used to sit out the
+        // client's full 10s SIGN_PATH_TIMEOUT_MS before falling back to an unsigned URL.
+        this.result(msg.id, { path: `${msg.path ?? ""}?authSig=${MOCK_AUTH_SIG}` });
+        break;
+      case "frigate/events/get":
+      case "frigate/recordings/get":
+        // Both are **websocket** commands, not REST routes (`GET /api/frigate/events` genuinely
+        // 404s against a real HA — see ARCHITECTURE.md). And both answer with an *undecoded JSON
+        // string*: the integration hands the payload straight through without parsing it. Replying
+        // with an array here would exercise a branch the real backend never takes.
+        this.result(
+          msg.id,
+          JSON.stringify(
+            msg.type === "frigate/events/get" ? this.hub.frigateEvents() : this.hub.frigateRecordings(),
+          ),
+        );
         break;
       case "call_service":
         this.handleCallService(msg);
