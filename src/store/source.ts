@@ -9,7 +9,7 @@ export type ServiceData = { entity_id?: string } & Record<string, unknown>;
 /**
  * One historical sample for an entity. `t` is epoch milliseconds; `state` is the
  * raw HA state string at that time (parse to a number for charting where it makes
- * sense — see Sparkline). Returned oldest-first.
+ * sense — see `lib/chart.ts`). Returned oldest-first.
  */
 export interface HistoryPoint {
   t: number;

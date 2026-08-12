@@ -7,7 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-/** The light pillar's feel — drag mapping, haptic ticks, warmth, and the release commit. */
+/** The light control's feel — haptic ticks, warmth, the level wash, and the release commit. */
 class LightFeelTest {
 
     private fun attrs(vararg pairs: Pair<String, Any>): JsonObject = JsonObject(
@@ -19,26 +19,6 @@ class LightFeelTest {
             }
         },
     )
-
-    // dragToPct
-
-    @Test
-    fun `dragging up brightens, dragging down dims`() {
-        // Compose deltas grow downward; -100px on a 400px track = +25 points.
-        assertEquals(75, dragToPct(50, -100f, 400f))
-        assertEquals(25, dragToPct(50, 100f, 400f))
-    }
-
-    @Test
-    fun `drag clamps to 0 and 100`() {
-        assertEquals(100, dragToPct(90, -400f, 400f))
-        assertEquals(0, dragToPct(10, 400f, 400f))
-    }
-
-    @Test
-    fun `an unmeasured track leaves the value unchanged`() {
-        assertEquals(50, dragToPct(50, -100f, 0f))
-    }
 
     // tickCrossed
 

@@ -7,7 +7,7 @@ import com.hawksnest.config.overrides
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ServiceData
 import com.hawksnest.core.ha.domainOf
-import com.hawksnest.core.ha.historyLevels
+import com.hawksnest.core.ha.HistoryPoint
 import com.hawksnest.core.logic.NON_DEVICE_DOMAINS
 import com.hawksnest.core.logic.domainToCard
 import com.hawksnest.core.logic.isNoiseEntity
@@ -26,12 +26,16 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** History fetch UI state for the entity-detail chart. */
+/**
+ * History fetch UI state for the entity-detail chart. [Data] carries the raw samples, not
+ * pre-flattened levels: the chart plots against time and names discrete states on its value axis,
+ * and both need the timestamps and state strings the levels threw away.
+ */
 sealed interface HistoryUi {
     data object Loading : HistoryUi
     data object Empty : HistoryUi
     data object Error : HistoryUi
-    data class Data(val levels: List<Float>) : HistoryUi
+    data class Data(val points: List<HistoryPoint>) : HistoryUi
 }
 
 /**
@@ -121,8 +125,8 @@ class EntityDetailViewModel @Inject constructor(
     private suspend fun loadHistory(h: Int) {
         _history.value = HistoryUi.Loading
         _history.value = try {
-            val levels = historyLevels(connection.fetchHistory(entityId, h))
-            if (levels.size < 2) HistoryUi.Empty else HistoryUi.Data(levels)
+            val points = connection.fetchHistory(entityId, h)
+            if (points.size < 2) HistoryUi.Empty else HistoryUi.Data(points)
         } catch (_: Exception) {
             HistoryUi.Error
         }

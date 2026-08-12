@@ -38,7 +38,7 @@ import com.hawksnest.ui.components.ArmSegments
 import com.hawksnest.ui.components.ConnectionPill
 import com.hawksnest.ui.components.DeviceControlCard
 import com.hawksnest.ui.components.DeviceUi
-import com.hawksnest.ui.components.LightPillar
+import com.hawksnest.ui.components.LightControl
 import com.hawksnest.ui.components.LockVault
 import com.hawksnest.ui.components.MediaTransport
 import com.hawksnest.ui.components.PanelCard
@@ -151,7 +151,7 @@ fun SecurityHeroScene() {
  * Area detail — device controls and sensor stats: the kind of mixed-density content Sift's contrast,
  * touch-target, and type-hierarchy rules care about. Mirrors `ui/area/AreaDetailScreen.kt`, and
  * renders the **real** `DeviceControlCard` so the audit sees the widgets users actually touch —
- * the light pillar and the lock vault.
+ * the light control and the lock vault.
  */
 @Composable
 fun ControlsScene() {
@@ -195,7 +195,7 @@ fun ControlsScene() {
 }
 
 /**
- * The premium control widgets, one of each in a deterministic state: the dimmer pillar warm at
+ * The premium control widgets, one of each in a deterministic state: the light control warm at
  * 62%, the rocker on and off, the vault locked and jammed, the thermostat dial mid-heat, the arm
  * segments and the media transport. Static props only — no pending spinners or infinite
  * animations — so the Robolectric render is stable for the token/contrast/touch-target rules.
@@ -205,7 +205,7 @@ fun WidgetsScene() {
     Surface(color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             SectionHeader(title = "Controls")
-            LightPillar(
+            LightControl(
                 on = true,
                 dimmable = true,
                 pct = 62,

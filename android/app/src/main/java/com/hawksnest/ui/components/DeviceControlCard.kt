@@ -70,7 +70,7 @@ private val DOOR_CLASSES = setOf("door", "window", "opening", "garage_door", "co
  * the finger, the echo reconciles, a failure snaps back). Shared by the Devices tab and per-room
  * Area detail.
  *
- * The hero domains render the premium widgets — [LightPillar] (drag-anywhere dimmer),
+ * The hero domains render the premium widgets — [LightControl] (switch + brightness slider),
  * [RockerSwitch], [LockVault] (the vault around [SlideToAct]), [ThermostatDial], [ArmSegments]
  * and [MediaTransport] — each committing exactly one service call per gesture. Fans and covers
  * keep the original compact controls.
@@ -116,21 +116,19 @@ fun DeviceControlCard(
                 enabled = device.rawState != "unavailable",
                 onToggle = { onCall(if (it) "turn_on" else "turn_off", emptyMap()) },
             )
-            CardType.LIGHT -> Box(Modifier.padding(top = HawksnestTheme.spacing.sm)) {
-                LightPillar(
-                    on = device.rawState == "on",
-                    dimmable = isDimmableLight(device.attributes),
-                    pct = brightnessPct(device.attributes),
-                    warmth = lightWarmth(device.attributes),
-                    pending = pending,
-                    enabled = device.rawState != "unavailable",
-                    onToggle = { onCall(if (it) "turn_on" else "turn_off", emptyMap()) },
-                    onCommitPct = {
-                        val (service, extra) = dimCommit(it)
-                        onCall(service, extra)
-                    },
-                )
-            }
+            CardType.LIGHT -> LightControl(
+                on = device.rawState == "on",
+                dimmable = isDimmableLight(device.attributes),
+                pct = brightnessPct(device.attributes),
+                warmth = lightWarmth(device.attributes),
+                pending = pending,
+                enabled = device.rawState != "unavailable",
+                onToggle = { onCall(if (it) "turn_on" else "turn_off", emptyMap()) },
+                onCommitPct = {
+                    val (service, extra) = dimCommit(it)
+                    onCall(service, extra)
+                },
+            )
             CardType.FAN -> {
                 val on = device.rawState == "on"
                 ToggleRow(on, pending, haptics, onCall)

@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -27,7 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.logic.isLockEntity
@@ -35,10 +33,10 @@ import com.hawksnest.core.logic.isZWaveDiagnostic
 import com.hawksnest.core.logic.relativeTime
 import com.hawksnest.core.logic.zwaveHealth
 import com.hawksnest.ui.components.DeviceControlCard
+import com.hawksnest.ui.components.HistoryChart
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.PulseButton
 import com.hawksnest.ui.components.SectionHeader
-import com.hawksnest.ui.components.Sparkline
 import com.hawksnest.ui.theme.HawksnestTheme
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonPrimitive
@@ -166,10 +164,11 @@ fun EntityDetailScreen(
                     is HistoryUi.Loading -> ChartMessage("Loading history…")
                     is HistoryUi.Error -> ChartMessage("History isn't available for this device.")
                     is HistoryUi.Empty -> ChartMessage("Not enough history yet for this range.")
-                    is HistoryUi.Data -> Sparkline(
-                        points = h.levels,
+                    is HistoryUi.Data -> HistoryChart(
+                        points = h.points,
                         channel = channel,
-                        modifier = Modifier.fillMaxWidth().height(96.dp),
+                        unit = (current.attributes["unit_of_measurement"] as? JsonPrimitive)?.contentOrNull,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }

@@ -7,7 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/** Covers the pure history parse + level-mapping helpers (no socket). */
+/** Covers the pure history parse helpers (no socket). The level mapping moved to `logic.chartSeries`. */
 class HistoryTest {
 
     private fun obj(json: String): JsonObject = Json.parseToJsonElement(json).jsonObject
@@ -48,20 +48,4 @@ class HistoryTest {
         assertTrue(parseHistory(result, "sensor.absent").isEmpty())
     }
 
-    @Test
-    fun `historyLevels passes numeric series through`() {
-        val pts = listOf(HistoryPoint(1, "21.0"), HistoryPoint(2, "22.5"))
-        assertEquals(listOf(21.0f, 22.5f), historyLevels(pts))
-    }
-
-    @Test
-    fun `historyLevels maps discrete states to evenly-spaced indices`() {
-        val pts = listOf(
-            HistoryPoint(1, "locked"),
-            HistoryPoint(2, "unlocked"),
-            HistoryPoint(3, "locked"),
-        )
-        // distinct order: locked=0, unlocked=1
-        assertEquals(listOf(0f, 1f, 0f), historyLevels(pts))
-    }
 }
