@@ -14,6 +14,8 @@ class ControlDeckTest {
         val deviceId: String? = null,
         val attention: Boolean = false,
         val offline: Boolean = false,
+        /** Entity id, for the search cases; defaults to something derived from the name. */
+        val id: String = "x." + name.lowercase().replace(' ', '_'),
     )
 
     private val deviceNames = mapOf("cam1" to "Nursery Camera", "sc1" to "Scene Controller")
@@ -30,6 +32,7 @@ class ControlDeckTest {
             query = query,
             deviceKeyOf = { it.deviceId },
             deviceNameOf = { deviceNames[it] ?: it },
+            idOf = { it.id },
         )
 
     private val house = listOf(
@@ -149,5 +152,45 @@ class ControlDeckTest {
         assertTrue(needsAttention("on", 5.0))
         assertEquals(false, needsAttention("on", 21.0))
         assertEquals(false, needsAttention("off", null))
+    }
+
+    /**
+     * A query that matched nothing rendered NOTHING.
+     *
+     * Every other field of the deck is empty for a non-blank query, and the screen keyed its
+     * "am I searching" branch off `searchResults.isNotEmpty()` — so a search with no hits showed
+     * a bare search box over blank space, indistinguishable from a house with no devices.
+     */
+    @Test
+    fun `a search that matches nothing is still a search`() {
+        val d = deck(house, query = "zzzz")
+        assertTrue(d.searchResults.isEmpty())
+        assertTrue(d.isSearch)
+        // And it does not fall back to rendering the deck underneath.
+        assertTrue(d.security.isEmpty())
+        assertTrue(d.lights.isEmpty())
+    }
+
+    @Test
+    fun `search matches the entity id, not only the display name`() {
+        // "what was that thing called" is half of what a search box is for. The web's Devices
+        // search has always matched id and area as well as name; this only matched name.
+        val d = deck(
+            listOf(D("Tower Fan", "Nursery", CardType.FAN, id = "fan.nursery_tower")),
+            query = "nursery_tower",
+        )
+        assertEquals(listOf("Tower Fan"), d.searchResults.map { it.name })
+    }
+
+    @Test
+    fun `search matches the area`() {
+        val d = deck(
+            listOf(
+                D("Lamp", "Basement", CardType.LIGHT, id = "light.lamp"),
+                D("Tower Fan", "Nursery", CardType.FAN, id = "fan.tower"),
+            ),
+            query = "basement",
+        )
+        assertEquals(listOf("Lamp"), d.searchResults.map { it.name })
     }
 }

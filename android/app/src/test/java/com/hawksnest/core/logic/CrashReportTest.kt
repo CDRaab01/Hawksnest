@@ -132,4 +132,27 @@ class CrashReportTest {
         assertEquals(10, trimToMostRecent((1..40).toList()).size)
         assertEquals(listOf(1, 2, 3), trimToMostRecent(listOf(1, 2, 3), 10))
     }
+
+    /**
+     * The `.sent` marker is a SIBLING file (`crash-123.txt.sent`), so it shares the `crash-`
+     * prefix. A prefix-only filter therefore counted every marker as a report: the uploader
+     * re-POSTed markers (blank, then marked with their own `.sent.sent`), the 10-file prune cap
+     * held roughly five real reports instead of ten, and the Settings panel listed blank rows.
+     */
+    @Test
+    fun `sent markers are not crash reports`() {
+        assertTrue(isCrashReportName("crash-1754870400000.txt"))
+        assertFalse(isCrashReportName("crash-1754870400000.txt.sent"))
+        assertFalse(isCrashReportName("crash-1754870400000.txt.sent.sent"))
+        // Nothing else in the directory counts either.
+        assertFalse(isCrashReportName("notes.txt"))
+        assertFalse(isCrashReportName("crash-"))
+    }
+
+    @Test
+    fun `a report and its marker agree on the name`() {
+        val report = "$CRASH_FILE_PREFIX" + "1754870400000" + CRASH_FILE_SUFFIX
+        assertTrue(isCrashReportName(report))
+        assertFalse(isCrashReportName(report + SENT_MARKER_SUFFIX))
+    }
 }

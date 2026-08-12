@@ -134,9 +134,22 @@ class DevicesViewModel @Inject constructor(
             } else {
                 e.attributes.num("battery_level")
             }
+
+        // HA's OTHER battery signal, which reads backwards: a `binary_sensor` with
+        // `device_class: battery` uses `on` to mean LOW. `batteryOf` matches the device_class and
+        // then parses the state as a number, so "on" became null and the device was reported
+        // healthy — a device whose only battery signal is a binary sensor (common on Z-Wave and
+        // Zigbee) could never reach this rail however flat its cell was. Web's twin is
+        // `deviceHealth.isLowBatteryBinary`.
+        fun isLowBatteryBinary(e: HassEntity): Boolean =
+            e.entityId.startsWith("binary_sensor.") &&
+                (e.attributes["device_class"] as? JsonPrimitive)?.content == "battery" &&
+                e.state.equals("on", ignoreCase = true)
+
         val lowBatteryDevices = entities.values.mapNotNullTo(HashSet()) { e ->
             val level = batteryOf(e)
-            if (level != null && level <= 20.0) deviceIndex.deviceByEntity[e.entityId] else null
+            val low = (level != null && level <= 20.0) || isLowBatteryBinary(e)
+            if (low) deviceIndex.deviceByEntity[e.entityId] else null
         }
 
         val deck = buildControlDeck(
@@ -154,6 +167,7 @@ class DevicesViewModel @Inject constructor(
             },
             offlineOf = { it.rawState == "unavailable" },
             query = query,
+            idOf = { it.entityId },
             // Read-only entities sharing a physical device collapse into one group row —
             // the registry's device id is the grouping key, its name the row title.
             deviceKeyOf = { deviceIndex.deviceByEntity[it.entityId] },

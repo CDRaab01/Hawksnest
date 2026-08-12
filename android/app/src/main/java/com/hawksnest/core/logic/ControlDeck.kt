@@ -30,8 +30,17 @@ data class ControlDeck<T>(
     val sensorSections: List<DeviceSection<T>> = emptyList(),
     /** Flat matches when [buildControlDeck]'s query is non-blank; all else empty then. */
     val searchResults: List<T> = emptyList(),
+    /**
+     * True whenever a query is in effect — **including a query that matched nothing**.
+     *
+     * Separate from `searchResults.isNotEmpty()` on purpose. A non-blank query empties every
+     * other field, so "searching" and "found something" are different questions, and answering
+     * the first with the second left a query with no matches rendering a bare search box over an
+     * entirely blank screen: no results, no deck, and no explanation.
+     */
+    val searching: Boolean = false,
 ) {
-    val isSearch: Boolean get() = searchResults.isNotEmpty()
+    val isSearch: Boolean get() = searching || searchResults.isNotEmpty()
 }
 
 /**
@@ -70,13 +79,23 @@ fun <T> buildControlDeck(
     query: String = "",
     deviceKeyOf: (T) -> String? = { null },
     deviceNameOf: (String) -> String = { it },
+    /** The entity id, for search. Defaults to the name so existing callers keep working. */
+    idOf: (T) -> String = nameOf,
 ): ControlDeck<T> {
     val q = query.trim()
     if (q.isNotEmpty()) {
         return ControlDeck(
+            // Name, entity id AND area — the same three the web's Devices search has always
+            // matched. Name alone missed the two things people actually reach for a search box
+            // with: "what was that entity called" and "show me everything in the basement".
             searchResults = devices
-                .filter { nameOf(it).contains(q, ignoreCase = true) }
+                .filter {
+                    nameOf(it).contains(q, ignoreCase = true) ||
+                        idOf(it).contains(q, ignoreCase = true) ||
+                        areaOf(it)?.contains(q, ignoreCase = true) == true
+                }
                 .sortedBy { nameOf(it).lowercase() },
+            searching = true,
         )
     }
 

@@ -156,6 +156,20 @@ fun DevicesScreen(
                         }
                     }
                 }
+            } else {
+                // A query that matches nothing used to render NOTHING: the deck's other sections
+                // are empty for any non-blank query, so the screen was a bare search box over
+                // blank space with no indication whether the search had run or the house was
+                // gone. Same copy as the web's Devices screen.
+                item(key = "search-empty") {
+                    PanelCard {
+                        Text(
+                            "No devices match “$query”.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         } else {
             // ── Needs attention — offline / low battery; absent when the house is healthy ──
