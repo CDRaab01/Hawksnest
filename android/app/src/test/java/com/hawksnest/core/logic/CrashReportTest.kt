@@ -151,7 +151,7 @@ class CrashReportTest {
 
     @Test
     fun `a report and its marker agree on the name`() {
-        val report = "$CRASH_FILE_PREFIX" + "1754870400000" + CRASH_FILE_SUFFIX
+        val report = CRASH_FILE_PREFIX + "1754870400000" + CRASH_FILE_SUFFIX
         assertTrue(isCrashReportName(report))
         assertFalse(isCrashReportName(report + SENT_MARKER_SUFFIX))
     }
