@@ -302,3 +302,25 @@ describe("Timeline24h keyboard", () => {
     expect(onSelectionChange.mock.calls[0][0].endMs).toBe(selection.endMs + 15_000);
   });
 });
+
+describe("Timeline24h event virtualisation", () => {
+  it("renders only the blocks near the visible range", () => {
+    // A Frigate camera's window spans its whole retention and the event fetch is capped at 500,
+    // so mapping every event into an absolutely-positioned node — and re-laying them out on each
+    // pan frame — was hundreds of elements the user can never see.
+    // Evenly across the whole 24h window, so plenty fall inside the opening ~1h view and the
+    // vast majority do not.
+    const spread = Array.from({ length: 400 }, (_, i) => clip(`e${i}`, NOW - DAY + i * (DAY / 400)));
+    renderTimeline({ events: spread });
+    const chips = document.querySelectorAll("[data-chip]");
+    expect(chips.length).toBeGreaterThan(0);
+    expect(chips.length).toBeLessThan(spread.length);
+  });
+
+  it("still renders a block that is on screen", () => {
+    const onScreen = clip("here", NOW - 60_000);
+    renderTimeline({ events: [onScreen, clip("far", NOW - DAY + 1000)] });
+    expect(screen.getByLabelText(new RegExp(`motion at`))).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-chip]").length).toBe(1);
+  });
+});

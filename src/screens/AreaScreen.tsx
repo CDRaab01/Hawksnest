@@ -1,5 +1,5 @@
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { useParams } from "react-router-dom";
+import { BackLink } from "../components/BackLink";
 import { EntityCard } from "../components/EntityCard";
 import { CardLink } from "../components/CardLink";
 import { PanelCard } from "../components/PanelCard";
@@ -19,12 +19,9 @@ export function AreaScreen() {
 
   return (
     <div className="space-y-md">
-      <Link
-        to="/"
-        className="inline-flex items-center gap-xs text-body text-ink-dim transition-colors duration-fast hover:text-ink"
-      >
-        <ArrowLeft size={16} /> Home
-      </Link>
+      {/* A room is reached from the Rooms grid far more often than from the Dashboard, so that
+          is the fallback when there is no history to go back to. */}
+      <BackLink fallback="/rooms" />
       <SectionHeader label={decoded} channel="recovery" />
       {group ? (
         <div className="grid grid-cols-1 gap-md sm:grid-cols-2">

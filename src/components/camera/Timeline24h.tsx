@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CameraEvent } from "../../lib/cameraEvents";
 import type { FootageSpan } from "../../lib/ringFootage";
 import { clockTime } from "../../lib/relativeTime";
@@ -19,6 +19,7 @@ import {
   timeToX,
   ticks,
   viewportForSpan,
+  visibleRange,
   visibleSpanMs,
   xToTime,
   zoom,
@@ -366,6 +367,18 @@ export function Timeline24h({
   const nowX = vp ? timeToX(endMs, vp, width) : width;
   const tickTimes = vp ? ticks(vp, width) : [];
 
+  // Events overlapping the visible range, padded by one screen either side. An event with a null
+  // end is drawn 30s wide (see below), so use the same assumption when deciding visibility —
+  // otherwise a long-running event scrolled past its start would vanish mid-drag.
+  const visibleEvents = useMemo(() => {
+    if (!vp || width <= 0) return events;
+    const { startMs: from, endMs: to } = visibleRange(vp, width);
+    const pad = (to - from) || 0;
+    const lo = from - pad;
+    const hi = to + pad;
+    return events.filter((ev) => (ev.endMs ?? ev.startMs + 30_000) >= lo && ev.startMs <= hi);
+  }, [events, vp, width]);
+
   return (
     <div className="space-y-xs">
       <div className="text-center font-display text-body font-bold tracking-wide text-ink">
@@ -494,9 +507,13 @@ export function Timeline24h({
         )}
 
         {/* Recording blocks — solid effort-blue, tall like Ring's; every block is a
-            playable clip. (All rendered; off-screen ones are clipped by overflow-hidden.) */}
+            playable clip. Only the ones on (or just off) screen are rendered: a Frigate camera's
+            window spans its whole retention and the fetch is capped at 500 events, so mapping the
+            lot into absolutely-positioned nodes to let `overflow-hidden` clip them meant a few
+            hundred DOM elements the user can never see — re-laid-out on every pan frame. One
+            screen of padding either side keeps a block from popping in at the edge of a drag. */}
         {vp &&
-          events.map((ev) => {
+          visibleEvents.map((ev) => {
             const left = timeToX(ev.startMs, vp, width);
             const end = ev.endMs ?? ev.startMs + 30_000;
             const w = Math.max(3, timeToX(end, vp, width) - left);

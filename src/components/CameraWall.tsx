@@ -32,10 +32,13 @@ export function CameraWall() {
     );
   }
 
-  const ordered = [...cameras].sort(
-    (a, b) =>
-      Number(isCameraLive(b.snapshotEntity)) - Number(isCameraLive(a.snapshotEntity)),
-  );
+  // Order is FIXED, not live-first.
+  //
+  // Sorting by availability re-ranked the grid every time a camera flipped state, which on
+  // battery cameras is often — so tiles moved under a finger already on its way down and the tap
+  // landed on a different camera. `resolveCameras` already sorts by id, so this is stable across
+  // renders and across sessions, and the wall becomes something you can learn the shape of.
+  // Which cameras are live is still said, once, in the header count.
   const liveCount = cameras.filter((c) => isCameraLive(c.snapshotEntity)).length;
 
   return (
@@ -51,7 +54,7 @@ export function CameraWall() {
       />
       {/* Ring-style: two side-by-side tiles on phones, more on wider screens. */}
       <div className="grid grid-cols-2 gap-sm lg:grid-cols-3 xl:grid-cols-4">
-        {ordered.map((cam) => (
+        {cameras.map((cam) => (
           <button
             key={cam.id}
             type="button"
