@@ -2,12 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import type { CameraEvent } from "../../lib/cameraEvents";
 import type { FootageSpan } from "../../lib/ringFootage";
 import { clockTime } from "../../lib/relativeTime";
-import { setEdge, type ClipEdge, type ClipSelection } from "../../lib/clipExport";
+import {
+  NUDGE_COARSE_MS,
+  NUDGE_FINE_MS,
+  setEdge,
+  type ClipEdge,
+  type ClipSelection,
+} from "../../lib/clipExport";
 import {
   DEFAULT_SPAN_MS,
+  MINUTE_MS,
   type TimeWindow,
   type Viewport,
   pan,
+  tickIntervalMs,
   timeToX,
   ticks,
   viewportForSpan,
@@ -18,6 +26,37 @@ import {
 
 /** Movement under this many px counts as a tap (seek), not a pan. */
 const TAP_SLOP_PX = 6;
+
+/**
+ * How far one key press moves something, or null for a key this control ignores.
+ *
+ * Shared by the track and the clip handles because the *grammar* is the same — arrows step,
+ * Page/Shift steps further, Home/End go to the ends — while the distances differ. `sign` is
+ * separated from the magnitudes so each caller supplies its own pair without restating the
+ * key mapping, which is the part that would drift.
+ */
+function keyStep(
+  e: React.KeyboardEvent,
+): { sign: -1 | 1; coarse: boolean } | "start" | "end" | null {
+  switch (e.key) {
+    case "ArrowLeft":
+    case "ArrowDown":
+      return { sign: -1, coarse: e.shiftKey };
+    case "ArrowRight":
+    case "ArrowUp":
+      return { sign: 1, coarse: e.shiftKey };
+    case "PageDown":
+      return { sign: -1, coarse: true };
+    case "PageUp":
+      return { sign: 1, coarse: true };
+    case "Home":
+      return "start";
+    case "End":
+      return "end";
+    default:
+      return null;
+  }
+}
 
 /**
  * The clamp window, padded past *now* by half the visible span, so "now" can sit at CENTER with
@@ -281,6 +320,48 @@ export function Timeline24h({
     }
   }
 
+  /**
+   * Keyboard scrubbing on the track.
+   *
+   * This control has advertised `role="slider"` with `aria-valuemin/max/now` since it shipped and
+   * had no key handling at all, so Tab landed on something screen readers announce as operable and
+   * nothing responded. The pointer gestures (drag to pan, pinch/wheel to zoom) have no keyboard
+   * equivalent and don't need one — what a slider promises is *move the value*, which is the
+   * playhead.
+   *
+   * The step is the on-screen tick interval rather than a constant, so one press moves by
+   * whatever the strip is currently labelled in: about a minute zoomed in, hours zoomed out. A
+   * fixed step would be unusably slow at one end and unusably coarse at the other.
+   */
+  function onTrackKeyDown(e: React.KeyboardEvent) {
+    const step = keyStep(e);
+    if (!step) return;
+    e.preventDefault();
+    if (step === "start") return onSeek(startMs);
+    // End means "now", and at/past now the commit grammar is already "snap back to live".
+    if (step === "end") return commit(endMs);
+    const fine = vp && width > 0 ? tickIntervalMs(visibleSpanMs(vp, width)) : MINUTE_MS;
+    const delta = (step.coarse ? fine * 4 : fine) * step.sign;
+    commit(Math.min(endMs, Math.max(startMs, scrubTime + delta)));
+  }
+
+  /** Keyboard adjust for one selection handle — same grammar, clip-sized steps. */
+  function onHandleKeyDown(e: React.KeyboardEvent, edge: ClipEdge) {
+    if (!selection || !onSelectionChange || !selectionBounds) return;
+    const step = keyStep(e);
+    if (!step) return;
+    e.preventDefault();
+    // The handles sit INSIDE the track, so without this the same press would also scrub the
+    // playhead — moving the thing the user is measuring against while they measure.
+    e.stopPropagation();
+    const at = edge === "start" ? selection.startMs : selection.endMs;
+    if (step === "start") return onSelectionChange(setEdge(selection, edge, selectionBounds.startMs, selectionBounds));
+    if (step === "end") return onSelectionChange(setEdge(selection, edge, selectionBounds.endMs, selectionBounds));
+    // The same ±1s / ±15s the ClipExportBar's buttons use — one instrument, two ways to reach it.
+    const delta = (step.coarse ? NUDGE_COARSE_MS : NUDGE_FINE_MS) * step.sign;
+    onSelectionChange(setEdge(selection, edge, at + delta, selectionBounds));
+  }
+
   const scrubX = vp ? timeToX(scrubTime, vp, width) : width / 2;
   const nowX = vp ? timeToX(endMs, vp, width) : width;
   const tickTimes = vp ? ticks(vp, width) : [];
@@ -303,7 +384,8 @@ export function Timeline24h({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        className="relative h-16 w-full cursor-ew-resize touch-none select-none overflow-hidden rounded-md bg-panel-high"
+        onKeyDown={onTrackKeyDown}
+        className="relative h-16 w-full cursor-ew-resize touch-none select-none overflow-hidden rounded-md bg-panel-high focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-effort"
       >
         {/* Hour/minute ticks */}
         {vp &&
@@ -395,10 +477,14 @@ export function Timeline24h({
                   aria-valuenow={at}
                   aria-valuetext={clockTime(at)}
                   tabIndex={0}
+                  onKeyDown={(e) => onHandleKeyDown(e, edge)}
                   style={{ left: `${timeToX(at, vp, width)}px` }}
-                  // w-6 is the invisible touch target (matching HANDLE_HIT_SLOP_PX either side of
-                  // the hairline); the visible bar is the inner div.
-                  className="absolute top-0 flex h-full w-6 -translate-x-1/2 cursor-ew-resize touch-none items-center justify-center"
+                  // w-10 is the invisible touch target: 40px, i.e. HANDLE_HIT_SLOP_PX (20) either
+                  // side of the hairline, which is what that constant promises both platforms.
+                  // It was w-6 — 12px a side — so a handle Android considered grabbed was a miss
+                  // on the web, and the shared constant documented a contract nothing honoured.
+                  // The visible bar is the inner div.
+                  className="absolute top-0 flex h-full w-10 -translate-x-1/2 cursor-ew-resize touch-none items-center justify-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-recovery"
                 >
                   <div className="h-full w-0.5 bg-recovery" />
                 </div>

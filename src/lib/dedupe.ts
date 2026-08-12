@@ -29,12 +29,16 @@ export function dedupeRingMqtt(
     if (platforms[e.entity_id] === MQTT_PLATFORM) mqttIdentities.add(identityOf(e));
   }
 
-  const out: Record<string, HassEntity> = {};
-  for (const [id, e] of Object.entries(entities)) {
-    const isShadowedRing =
-      platforms[id] === RING_PLATFORM && mqttIdentities.has(identityOf(e));
-    if (!isShadowedRing) out[id] = e;
-  }
+  const shadowed = Object.entries(entities).filter(
+    ([id, e]) => platforms[id] === RING_PLATFORM && mqttIdentities.has(identityOf(e)),
+  );
+  // Hand BACK the same map when nothing is shadowed, which is the overwhelmingly common case.
+  // This runs on every websocket push, and a rebuilt map defeats `toEntityRecord`'s
+  // identity preservation one layer above it — see the note there on why that matters.
+  if (shadowed.length === 0) return entities;
+
+  const out: Record<string, HassEntity> = { ...entities };
+  for (const [id] of shadowed) delete out[id];
   return out;
 }
 

@@ -115,12 +115,14 @@ describe("CameraPlayer (Frigate camera)", () => {
     slider.focus();
     await user.keyboard("{ArrowLeft}");
 
-    await waitFor(() => {
-      const video = document.querySelector("video");
-      expect(video).not.toBeNull();
-      // A real recording is finite — looping it would replay the past forever.
-      expect((video as HTMLVideoElement).loop).toBe(false);
-    });
+    // Find the RECORDED player by its own label, not `querySelector("video")`.
+    // Before the timeline had key handling this press did nothing, so the loose query matched
+    // the still-mounted LIVE go2rtc video — which is also `loop=false`, so the assertion passed
+    // without the scrub ever happening. Naming the element is what makes the test about
+    // recorded playback.
+    const video = (await screen.findByLabelText("Camera footage")) as HTMLVideoElement;
+    // A real recording is finite — looping it would replay the past forever.
+    expect(video.loop).toBe(false);
   });
 
   /**

@@ -227,6 +227,7 @@ export function CameraPlayer({
   // Reset playback state when the camera changes (the component is reused).
   // ringClip must reset too: ring-mqtt option ids ("Motion 1"…) repeat across
   // cameras, so a cached ready URL from the last camera would otherwise match.
+  // (Clip-export state resets alongside this, in its own effect down in the clip section.)
   useEffect(() => {
     setPlayhead("live");
     setPaused(false);
@@ -485,21 +486,32 @@ export function CameraPlayer({
   // `Source.signedRecordingUrlAt`. Signing is a websocket round trip, so it resolves in an effect
   // rather than during render. Keyed on the page, so it re-signs exactly when the page turns.
   const [vodSrc, setVodSrc] = useState<string | null>(null);
+  // Depend on the page's NUMBERS, never on the page object.
+  //
+  // `vodPage` is rebuilt by its useMemo whenever `headTime` moves — i.e. on every pointer move of
+  // a scrub — and React compares deps with `Object.is`, so including the object made this effect
+  // re-run per frame: `setVodSrc(null)` blanked the player to the placeholder and a fresh
+  // `auth/sign_path` round trip went out, every frame. That is exactly the reload `vodWindow.ts`
+  // grid-aligns pages to avoid ("scrubbing within a page keeps the same URL and the player does
+  // not reload"). Android never had it only because Compose keys `produceState` by `equals` and
+  // `TimeRange` is a data class.
+  const pageStartMs = vodPage?.startMs ?? null;
+  const pageEndMs = vodPage?.endMs ?? null;
   useEffect(() => {
     // Reset first, not just on the null branch: state would otherwise hold the PREVIOUS page's
     // URL while the new signature resolves, and the player would briefly play the old page with a
     // seek computed against the new page's origin — a plausible-but-wrong moment. (The Android
     // player had the worse version of this: its page-turn swap leaked the old ExoPlayer entirely.)
     setVodSrc(null);
-    if (!vodPage) return;
+    if (pageStartMs === null || pageEndMs === null) return;
     let active = true;
-    void signedRecordingUrlAt(cameraName, vodPage.startMs, vodPage.endMs)
+    void signedRecordingUrlAt(cameraName, pageStartMs, pageEndMs)
       .then((url) => active && setVodSrc(url))
       .catch(() => active && setVodSrc(null));
     return () => {
       active = false;
     };
-  }, [cameraName, vodPage?.startMs, vodPage?.endMs, vodPage]);
+  }, [cameraName, pageStartMs, pageEndMs]);
 
   const recordingSrc = isLive
     ? null
@@ -608,6 +620,29 @@ export function CameraPlayer({
   const [clipSel, setClipSel] = useState<ClipSelection | null>(null);
   const [clipState, setClipState] = useState<ClipExportState>("idle");
   const [clipError, setClipError] = useState<string | null>(null);
+
+  // A selection belongs to ONE camera's timeline, so it cannot survive a camera change. Left
+  // alive it did real damage rather than merely looking odd: the export bar replaces the
+  // transport bar, so switching cameras mid-selection removed prev/next/play, and Download then
+  // asked Frigate to cut that range out of the NEW camera — which Frigate may not record at all.
+  // Its own effect rather than a line in the reset above, so the clip state stays declared and
+  // managed in one place (see the note at the top of this section).
+  useEffect(() => {
+    setClipSel(null);
+    setClipState("idle");
+    setClipError(null);
+  }, [camera.id]);
+
+  /**
+   * Whether clip mode may be ON SCREEN right now — the single gate every clip surface reads.
+   *
+   * It repeats the Clip *button*'s own condition on purpose. The button being hidden is not the
+   * same as the mode being off: going Live (or landing on a Ring camera) hides the button while
+   * `clipSel` is still set, and the export bar used to render anyway — replacing the transport
+   * bar with a range editor for a range that cannot be exported, and leaving no play/prev/next.
+   * Deriving the gate once means the button, the timeline band and the bar cannot disagree.
+   */
+  const clipMode = isFrigate && !isLive;
 
   // Live `Date.now()`, deliberately NOT the pinned `nowAnchor` the timeline lays itself out with:
   // a player left open for hours would otherwise keep offering a start time Frigate has since
@@ -722,7 +757,7 @@ export function CameraPlayer({
               Ring exposes whole pre-signed event clips that expire in ~15 min and cannot be
               trimmed, so offering a range selector there would promise something it can't do.
               Hidden while live too — there is nothing to export from the future. */}
-          {isFrigate && !isLive && (
+          {clipMode && (
             <button
               type="button"
               onClick={() =>
@@ -827,7 +862,7 @@ export function CameraPlayer({
         onSeek={seek}
         onScrub={scrub}
         onLive={goLive}
-        selection={clipSel}
+        selection={clipMode ? clipSel : null}
         selectionBounds={clipBounds}
         onSelectionChange={(next) => editClip(() => next)}
       />
@@ -840,7 +875,7 @@ export function CameraPlayer({
       {/* Replaces the transport rather than stacking under it: the column is already tight at
           phone width (pushing the transport off-screen has happened before), and prev/next/play
           are not what you reach for while marking a range. */}
-      {clipSel ? (
+      {clipMode && clipSel ? (
         <ClipExportBar
           selection={clipSel}
           playheadMs={headTime}

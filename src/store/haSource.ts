@@ -9,6 +9,7 @@ import {
   type HassEntities,
 } from "home-assistant-js-websocket";
 import { useEntityStore } from "./entityStore";
+import type { HassEntity } from "../lib/ha";
 import type { HistoryPoint, Source, WebRtcSignal } from "./source";
 import type { AutomationConfig } from "../lib/automations";
 import { capLogbook, normalizeLogbook, type LogEvent, type RawLogbookEntry } from "../lib/logbook";
@@ -334,6 +335,10 @@ export function createHaSource(
   let conn: Connection | null = null;
   let unsub: (() => void) | null = null;
   let stopped = false;
+  // The last UN-deduped narrowing, kept so `toEntityRecord` can reuse unchanged entity objects
+  // (see the identity note there). Deliberately not `store().entities`: that map has already had
+  // the shadowed ring twins removed, so feeding it back would rebuild those every push.
+  let lastRecord: Record<string, HassEntity> = {};
 
   const store = () => useEntityStore.getState();
 
@@ -397,9 +402,8 @@ export function createHaSource(
       unsub = deps.subscribe(conn, (entities) => {
         // Central dedupe: every consumer (Home, Devices, camera wall) sees one
         // entity per physical device even while Ring + ring-mqtt are both live.
-        store().setEntities(
-          dedupeRingMqtt(toEntityRecord(entities), store().entityPlatforms),
-        );
+        lastRecord = toEntityRecord(entities, lastRecord);
+        store().setEntities(dedupeRingMqtt(lastRecord, store().entityPlatforms));
       });
 
       store().setStatus("connected");
@@ -411,6 +415,7 @@ export function createHaSource(
       unsub = null;
       conn?.close();
       conn = null;
+      lastRecord = {};
     },
     async callService(domain, service, data = {}) {
       if (!conn) throw new Error("Not connected to Home Assistant.");
