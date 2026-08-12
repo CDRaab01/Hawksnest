@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import App from "../App";
 import { useEntityStore } from "../store/entityStore";
+import { usePrefsStore } from "../store/prefsStore";
 
 beforeEach(() => {
   useEntityStore.setState({
@@ -93,5 +94,43 @@ describe("Entity detail", () => {
     const sixHour = within(main).getByRole("button", { name: "6h" });
     await user.click(sixHour);
     expect(sixHour).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+/**
+ * Pinning used to be a no-op you could perform, save and reorder.
+ *
+ * The Devices row said "Pin to dashboard", Customize said "pin it to Home", `config/favorites.ts`
+ * documented "the entities surfaced at the top of the Home screen", and README §Screens described
+ * "pinned favorites (large cards) above an area hub" — while `DashboardScreen` rendered the
+ * security hero, the camera wall and a Rooms link, and nothing else.
+ */
+describe("Home — pinned favorites", () => {
+  it("renders a card for each pinned entity", async () => {
+    renderAt("/");
+    const main = screen.getByRole("main");
+    expect(await within(main).findByText("Pinned")).toBeInTheDocument();
+    // The seed pins the two door locks; the demo source supplies both.
+    const pinnedSection = within(main).getByText("Pinned").closest("section")!;
+    expect(within(pinnedSection).getAllByText(/Locked|Unlocked/).length).toBeGreaterThan(0);
+  });
+
+  it("does not pin the alarm — the security hero is already its control", async () => {
+    renderAt("/");
+    const main = screen.getByRole("main");
+    await within(main).findByText("Pinned");
+    const pinnedSection = within(main).getByText("Pinned").closest("section")!;
+    // A pinned AlarmCard would put a second Off/Home/Away right under the hero's arm discs.
+    expect(within(pinnedSection).queryByRole("button", { name: "Away" })).toBeNull();
+  });
+
+  it("shows no Pinned section at all when nothing is pinned", async () => {
+    usePrefsStore.setState({ favorites: [], hidden: [] });
+    renderAt("/");
+    const main = screen.getByRole("main");
+    // Wait for the source to populate, so this can't pass by asserting before first paint.
+    await within(main).findByText("Cameras");
+    expect(within(main).queryByText("Pinned")).toBeNull();
+    usePrefsStore.setState({ favorites: null, hidden: [] });
   });
 });

@@ -58,7 +58,11 @@ is same-origin locally too. See `deploy/README.md`.
 The real blended UI (dark-only), all rendering the owner's "Security" scene with **resolved
 labels** (HA's raw "Lock Current status …" → "Front Door"):
 
-- **Home** (`/`) — pinned favorites (large cards) above an **area hub** (`src/config/favorites.ts`).
+- **Home** (`/`) — the security hero (arm discs + a plain-language secure/at-risk line), the
+  **camera wall**, and a compact **Rooms** entry. Above all of it, a **Pinned** section renders a
+  full control card for each pinned entity (seed in `src/config/favorites.ts`, user list in
+  `prefsStore`); it disappears entirely when nothing is pinned. The seed is the two door locks —
+  deliberately *not* the alarm, whose control the hero already is.
 - **Cameras** — a **Ring-style player** (tap any camera): on-demand low-latency live
   (**WebRTC** via `camera/webrtc/offer` → HLS → MJPEG → snapshot), a **live-scrub timeline** of
   recorded events (dragging previews the footage in real time, forward and reverse; every block
@@ -78,8 +82,9 @@ labels** (HA's raw "Lock Current status …" → "Front Door"):
   comfortable, read-only sensors render compact (`src/lib/density.ts`).
 - **Settings** (`/settings`) — connection status + the "Connect to Home Assistant" form, plus a
   **Personalization** link into the Customize editor.
-- **Customize** (`/customize`) — reorder/unpin the Home favorites and pin/hide any device. Edits
-  write through to localStorage immediately (no explicit save); "Reset to defaults" forgets them.
+- **Customize** (`/customize`) — reorder/unpin the entities pinned to Home and pin/hide any
+  device. Edits write through to localStorage immediately (no explicit save); "Reset to defaults"
+  forgets them.
 
 Data flows through `src/store/` (Zustand): a `Source` populates the store
 (`fixtureSource` now, `haSource` later) and screens read it via selector hooks. The

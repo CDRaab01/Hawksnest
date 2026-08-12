@@ -29,10 +29,12 @@ describe("togglePin", () => {
 describe("moveFavorite", () => {
   it("swaps with the neighbor in the given direction", () => {
     usePrefsStore.getState().moveFavorite(seed[0], 1);
+    // Derived from the seed rather than spelling out three ids — the seed shrank when the alarm
+    // came off it (the Dashboard's security hero already IS the alarm control).
     expect(usePrefsStore.getState().favorites).toEqual([
       seed[1],
       seed[0],
-      seed[2],
+      ...seed.slice(2),
     ]);
   });
 
@@ -47,13 +49,14 @@ describe("moveFavorite", () => {
 
 describe("reorderFavorites", () => {
   it("moves an item from one index to another and persists", () => {
-    usePrefsStore.getState().reorderFavorites(0, 2);
-    expect(usePrefsStore.getState().favorites).toEqual([
-      seed[1],
-      seed[2],
-      seed[0],
-    ]);
-    expect(loadPreferences()?.favorites).toEqual([seed[1], seed[2], seed[0]]);
+    // Derived from the seed's length rather than assuming three: the seed shrank when the
+    // alarm came off it (the Dashboard's security hero is the alarm control), and a test that
+    // hardcodes its size fails for a reason that has nothing to do with reordering.
+    const last = seed.length - 1;
+    usePrefsStore.getState().reorderFavorites(0, last);
+    const expected = [...seed.slice(1), seed[0]];
+    expect(usePrefsStore.getState().favorites).toEqual(expected);
+    expect(loadPreferences()?.favorites).toEqual(expected);
   });
 
   it("is a no-op for an unchanged or out-of-range move", () => {

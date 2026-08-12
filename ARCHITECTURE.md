@@ -37,6 +37,26 @@ Channel hues intentionally shift between themes so a vivid accent still clears c
 | `src/config/` | Entity/room overrides |
 | `public/` + service worker (vite config) | PWA shell. **The SW never caches `/api` and never touches the HA token** — offline = shell + Offline/Demo state, never stale entity data. Updates are **prompt**, not silent (`registerType:"prompt"`): `UpdateToast` (useRegisterSW) surfaces a "reload" prompt when a new shell is waiting, so a wall tablet that never navigates isn't stranded on a stale build |
 
+**Home's Pinned section** (`DashboardScreen`, over `useFavorites()`) renders a full control card
+per pinned entity above the security hero, and vanishes when nothing is pinned. It is the web twin
+of Android's pinned rail and follows the same rule — a shortcut, not a re-org, so pinned entities
+still appear in their rooms. It existed everywhere except on screen for a while: the Devices row's
+"Pin to dashboard" button, Customize's drag-and-drop reorder, `config/favorites.ts`'s docstring and
+README §Screens all described it while `DashboardScreen` rendered hero → wall → Rooms and nothing
+else, so pinning was a no-op you could perform, persist and reorder. The seed lost the alarm panel
+at the same time: `SecurityStatusBar`'s three arm discs *are* the alarm control, so pinning it put a
+second Off/Home/Away directly underneath. The locks stay, because the hero only summarizes them.
+
+**Every domain in `density.ts`'s `CONTROL_DOMAINS` must have an entry in `cards.ts`.** A domain in
+one and not the other renders a comfortable, control-sized card that is actually the read-only
+`GenericCard` — a control you cannot operate, which is a worse failure than an obviously missing
+one. `switch` sat there for the app's whole life (the only way to flip one anywhere in the web app
+was the Devices list's inline `QuickControl`, so a room's lamp switch was a read-only row), and
+`scene` rendered its last-run ISO timestamp as though that were a reading. `SwitchCard` mirrors
+`LightCard`'s on/off half — optimistic, like every non-security control — and `SceneCard` is a Run
+button, since a scene has no state to toggle. `cards.test.ts` holds the two lists against each
+other so the next control domain cannot repeat it.
+
 **Entity identity is part of the store's contract** (`store/ha/registry.ts toEntityRecord`, and
 `lib/dedupe.ts` handing back the same map when nothing is shadowed). `subscribeEntities` fires on
 every state change anywhere in HA — this instance records ~98k state rows a day — and preserves

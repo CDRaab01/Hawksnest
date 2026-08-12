@@ -1,13 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { SectionHeader } from "../components/SectionHeader";
 import { PanelCard } from "../components/PanelCard";
+import { CardLink } from "../components/CardLink";
+import { EntityCard } from "../components/EntityCard";
 import { SecurityStatusBar } from "../components/SecurityStatusBar";
 import { CameraWall } from "../components/CameraWall";
 import { OfflineState, ReconnectingBanner } from "../components/OfflineState";
-import { useConnection, useEntitiesByArea } from "../store/entityStore";
+import { useConnection, useEntitiesByArea, useEntityStore } from "../store/entityStore";
+import { useFavorites } from "../store/prefsStore";
+import { overrides } from "../config/overrides";
+import { cardDensityFor, isFeature } from "../lib/density";
 import { offlinePhase } from "../lib/offline";
+import type { HassEntity } from "../lib/ha";
 
 /**
  * Dashboard — a glanceable, camera-forward landing screen (Ring-style). Security posture up top
@@ -25,6 +31,16 @@ export function DashboardScreen() {
   const { status, staleSince, lastConnectedAt } = useConnection();
   const areas = useEntitiesByArea();
   const preview = areas.map((a) => a.area).slice(0, 4).join(" · ");
+
+  // Pinned favorites, in the user's stored order. Ids the store doesn't have are skipped —
+  // `config/favorites.ts` seeds this before any entity has arrived, and a device can be renamed
+  // or removed in HA long after it was pinned.
+  const entities = useEntityStore((s) => s.entities);
+  const favorites = useFavorites();
+  const pinned = useMemo(
+    () => favorites.map((id) => entities[id]).filter((e): e is HassEntity => Boolean(e)),
+    [favorites, entities],
+  );
 
   // 1s heartbeat while a drop is in progress so the grace window actually expires on screen.
   const [, setTick] = useState(0);
@@ -49,6 +65,34 @@ export function DashboardScreen() {
         aria-disabled={phase === "grace" || undefined}
       >
         <SecurityStatusBar />
+
+        {/* Pinned — the user's own shortcuts, above the wall because that is what "pinned to
+            Home" has always meant here. Three things promised this section and nothing rendered
+            it: the Devices row's "Pin to dashboard" button, Customize's "pin it to Home", and
+            `config/favorites.ts`'s own docstring. Pinning was a no-op you could perform, save and
+            reorder. Like the room grid it is a shortcut, not a re-org — pinned entities still
+            appear in their rooms. Absent entirely when nothing is pinned, so an unused feature
+            costs no space. */}
+        {pinned.length > 0 && (
+          <section className="space-y-md">
+            <SectionHeader label="Pinned" channel="strength" />
+            <div className="grid grid-cols-1 gap-md sm:grid-cols-2">
+              {pinned.map((entity) => (
+                <CardLink
+                  key={entity.entity_id}
+                  to={`/entity/${encodeURIComponent(entity.entity_id)}`}
+                  className={isFeature(entity.entity_id) ? "sm:col-span-2" : ""}
+                >
+                  <EntityCard
+                    entity={entity}
+                    overrides={overrides}
+                    density={cardDensityFor(entity.entity_id)}
+                  />
+                </CardLink>
+              ))}
+            </div>
+          </section>
+        )}
 
         <CameraWall />
 
