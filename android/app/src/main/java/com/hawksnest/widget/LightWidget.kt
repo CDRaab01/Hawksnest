@@ -53,11 +53,11 @@ import kotlinx.serialization.json.Json
  * A light or switch on the home screen: tap to toggle, and — where the light can actually dim —
  * two step buttons.
  *
- * The in-app control is `LightPillar`, whose whole surface is a drag-to-dim gesture. Glance has no
- * drag and no slider; RemoteViews only offer taps. Rather than fake a slider that can't be
- * dragged, the dimmer steps along `WIDGET_DIM_STOPS` — a ladder geared like a real dimmer, tight
- * at the bottom where the eye notices and wide at the top where it doesn't. Each step commits
- * through the same `dimCommit` the pillar uses on release: one gesture, one service call.
+ * The in-app control is `LightControl`, a brightness slider. Glance has no slider; RemoteViews
+ * only offer taps. Rather than fake a slider that can't be dragged, the dimmer steps along
+ * `WIDGET_DIM_STOPS` — a ladder geared like a real dimmer, tight at the bottom where the eye
+ * notices and wide at the top where it doesn't. Each step commits through the same `dimCommit`
+ * the in-app slider uses on release: one gesture, one service call.
  *
  * A thin bar under the name shows the level. It is deliberately not tappable: a home screen is
  * ~250dp wide, so a bar split into enough zones to beat the step buttons would have targets around

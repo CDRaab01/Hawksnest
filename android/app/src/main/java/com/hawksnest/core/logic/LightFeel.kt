@@ -12,17 +12,7 @@ private fun JsonObject.num(key: String): Double? = (this[key] as? JsonPrimitive)
 fun brightnessPct(attributes: JsonObject): Int =
     attributes.num("brightness")?.let { (it / 2.55).roundToInt() } ?: 0
 
-/**
- * Map a vertical drag on the light pillar to a brightness percent. Dragging up brightens, so a
- * negative Compose delta (y grows downward) raises the value. The full track height spans the
- * full 0–100 range; a zero-height track (not yet measured) leaves the value unchanged.
- */
-fun dragToPct(startPct: Int, dragDeltaPx: Float, trackHeightPx: Float): Int {
-    if (trackHeightPx <= 0f) return startPct
-    return (startPct - dragDeltaPx / trackHeightPx * 100f).roundToInt().coerceIn(0, 100)
-}
-
-/** Brightness levels that tick a haptic as the dim gesture crosses them. */
+/** Brightness levels that tick a haptic as the brightness slider crosses them. */
 val LIGHT_TICKS = listOf(0, 25, 50, 75, 100)
 
 /**
@@ -67,8 +57,8 @@ private const val WASH_MAX = 0.16f
 private const val WASH_NON_DIMMABLE = 0.09f
 
 /**
- * Alpha for the pillar's glow wash at a given level — brighter light, stronger wash. Constants
- * mirror the web LightCard's warmth wash exactly so both clients glow alike.
+ * Alpha for the light panel's glow wash at a given level — brighter light, stronger wash.
+ * Constants mirror the web LightCard's warmth wash exactly so both clients glow alike.
  */
 fun washAlpha(on: Boolean, dimmable: Boolean, pct: Int): Float = when {
     !on -> 0f

@@ -9,9 +9,9 @@ import java.time.Instant
 import java.time.OffsetDateTime
 
 /**
- * Pure parse + shape helpers for `history/history_during_period` — no socket, so the time math and
- * numeric mapping are unit-tested in isolation. Mirrors the web `fetchEntityHistory` (`sampleTime`)
- * and the `Sparkline` numeric/discrete level mapping in `src/`.
+ * Pure parse + shape helpers for `history/history_during_period` — no socket, so the time math is
+ * unit-tested in isolation. Mirrors the web `fetchEntityHistory` (`sampleTime`). Turning the parsed
+ * samples into plottable levels is the chart's job — see `core/logic/Chart.kt`.
  */
 
 private fun JsonObject.prim(key: String): JsonPrimitive? = this[key] as? JsonPrimitive
@@ -58,15 +58,3 @@ fun parseAttributeHistory(result: JsonObject, entityId: String, attr: String): L
     }.sortedBy { it.first }
 }
 
-/**
- * Map a state series to chart levels (mirrors the web `Sparkline`): an all-numeric series renders
- * its numbers directly; a discrete series (lock/binary/cover/…) maps each distinct state to an
- * evenly-spaced index, so on/off/open/locked still draw a readable step line.
- */
-fun historyLevels(points: List<HistoryPoint>): List<Float> {
-    if (points.isEmpty()) return emptyList()
-    val numbers = points.map { it.state.toFloatOrNull() }
-    if (numbers.all { it != null }) return numbers.map { it!! }
-    val index = points.map { it.state }.distinct().withIndex().associate { (i, s) -> s to i.toFloat() }
-    return points.map { index[it.state] ?: 0f }
-}

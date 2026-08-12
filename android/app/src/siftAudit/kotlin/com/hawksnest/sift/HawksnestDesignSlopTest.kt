@@ -31,6 +31,8 @@ class HawksnestDesignSlopTest : DesignSlopSuite(
         scene("controls", dark = false) { HawksnestTheme(darkTheme = false) { ControlsScene() } }
         scene("widgets", dark = true) { HawksnestTheme(darkTheme = true) { WidgetsScene() } }
         scene("widgets", dark = false) { HawksnestTheme(darkTheme = false) { WidgetsScene() } }
+        scene("widgets-transport", dark = true) { HawksnestTheme(darkTheme = true) { WidgetsTransportScene() } }
+        scene("widgets-transport", dark = false) { HawksnestTheme(darkTheme = false) { WidgetsTransportScene() } }
         scene("settings", dark = true) { HawksnestTheme(darkTheme = true) { SettingsScene() } }
         scene("settings", dark = false) { HawksnestTheme(darkTheme = false) { SettingsScene() } }
     }

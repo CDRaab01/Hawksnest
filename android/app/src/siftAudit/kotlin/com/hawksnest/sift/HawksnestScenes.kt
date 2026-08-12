@@ -38,7 +38,7 @@ import com.hawksnest.ui.components.ArmSegments
 import com.hawksnest.ui.components.ConnectionPill
 import com.hawksnest.ui.components.DeviceControlCard
 import com.hawksnest.ui.components.DeviceUi
-import com.hawksnest.ui.components.LightPillar
+import com.hawksnest.ui.components.LightControl
 import com.hawksnest.ui.components.LockVault
 import com.hawksnest.ui.components.MediaTransport
 import com.hawksnest.ui.components.PanelCard
@@ -151,7 +151,7 @@ fun SecurityHeroScene() {
  * Area detail — device controls and sensor stats: the kind of mixed-density content Sift's contrast,
  * touch-target, and type-hierarchy rules care about. Mirrors `ui/area/AreaDetailScreen.kt`, and
  * renders the **real** `DeviceControlCard` so the audit sees the widgets users actually touch —
- * the light pillar and the lock vault.
+ * the light control and the lock vault.
  */
 @Composable
 fun ControlsScene() {
@@ -195,17 +195,23 @@ fun ControlsScene() {
 }
 
 /**
- * The premium control widgets, one of each in a deterministic state: the dimmer pillar warm at
- * 62%, the rocker on and off, the vault locked and jammed, the thermostat dial mid-heat, the arm
- * segments and the media transport. Static props only — no pending spinners or infinite
- * animations — so the Robolectric render is stable for the token/contrast/touch-target rules.
+ * The premium control widgets, one of each in a deterministic state. Static props only — no pending
+ * spinners or infinite animations — so the Robolectric render is stable for the
+ * token/contrast/touch-target rules.
+ *
+ * **Split across two scenes on purpose.** Sift captures a node's bounds clamped to the rendered
+ * bitmap (a Pixel 5, ~830dp tall), so anything below the fold is captured at 0×0 — silently
+ * unaudited — and anything straddling the edge is captured as a sliver that trips
+ * `tiny-touch-target` with a height the widget does not actually have. One column of every widget
+ * overflowed; two columns fit, and the transport and arm segments are genuinely audited for the
+ * first time. Keep each scene short enough to fit when adding a widget.
  */
 @Composable
 fun WidgetsScene() {
     Surface(color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             SectionHeader(title = "Controls")
-            LightPillar(
+            LightControl(
                 on = true,
                 dimmable = true,
                 pct = 62,
@@ -218,6 +224,16 @@ fun WidgetsScene() {
             RockerSwitch(on = false, pending = false, onToggle = {})
             LockVault(view = lockVaultView("locked"), pending = false, onCommit = {})
             LockVault(view = lockVaultView("jammed"), pending = false, onCommit = {})
+        }
+    }
+}
+
+/** The rest of the widget set — see [WidgetsScene] for why this is a second scene. */
+@Composable
+fun WidgetsTransportScene() {
+    Surface(color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            SectionHeader(title = "Transport")
             ThermostatDial(
                 view = thermostatView(
                     JsonObject(

@@ -463,6 +463,17 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   mirroring the web) and the Devices sectioning model (`DeviceSections.kt`: per-room three-tier
   rhythm — FEATURED lock/climate/alarm cards, CONTROL rows with inline switches, READONLY rows).
 - `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
+- **The entity-history chart carries axes** (`lib/chart.ts` ⇄ `core/logic/Chart.kt`, ported 1:1 and
+  tested on both; drawn by `components/HistoryChart.tsx` ⇄ `ui/components/HistoryChart.kt`). The
+  pure half owns every decision worth testing: numeric-vs-discrete series mapping, a 1/2/5×10ⁿ
+  "nice" value scale whose ticks land at even fractions of the plot height (which is what lets the
+  renderers place labels without measuring text), and clock/date time ticks on a human step. Two
+  rules the axes forced: **x is time, not sample index** — HA history is event-driven, so index
+  spacing put a quiet hour and a busy minute the same distance apart, a lie a labelled clock axis
+  can't tell; and a discrete series (`locked`/`unlocked`, `on`/`off`) names its states on the value
+  axis instead of plotting nameless levels. `Sparkline` survives on Android for stat tiles and
+  record rows, deliberately bare — a chart big enough to read numbers off is a chart that owes the
+  reader its axes; the web's axis-less twin is gone.
 - **The history feed is capped and lazy** (`lib/logbook.ts` ↔ `core/logic/Logbook.kt`,
   `capLogbook`/`LOGBOOK_MAX_EVENTS`). This instance's recorder logs **~98,000 state rows a day**
   (measured against the live MariaDB), and `logbook/get_events` was asked for up to 30 days of them
@@ -623,12 +634,17 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
 - **Control interaction model** (`ui/components/`): the hero domains render premium PULSE
   widgets, each committing **exactly one service call per gesture** with live-local preview
   (no mid-drag calls, so no `awaitEcho` plumbing):
-  - **Lights — `LightPillar`**: the whole surface is the dimmer. A warmth-tinted glow fill
-    (scalar warmth from `core/logic/LightFeel.kt lightWarmth` — kelvin/rgb attrs → 0..1, lerped
-    between effort/streak channels in the composable so no raw color originates in logic) rises
-    to the level; drag anywhere to dim with a haptic tick per quarter (`tickCrossed`), tap to
-    toggle, release commits once (`dimCommit` — the floor sends a real `turn_off`). Optimistic.
-    Non-dimmable lights are tap-only (`isDimmableLight` still gates, same as the old slider).
+  - **Lights — `LightControl`**: a switch for on/off and a full-width brightness slider — the
+    same shape the fan uses, and the same shape as the web `LightCard`. The panel behind it
+    carries a warmth-tinted glow wash (scalar warmth from `core/logic/LightFeel.kt lightWarmth`
+    — kelvin/rgb attrs → 0..1, lerped between effort/streak channels in the composable so no raw
+    color originates in logic) at the current level, so a room's lights still read at a glance.
+    Dragging ticks a haptic per quarter (`tickCrossed`) and release commits once (`dimCommit` —
+    the floor sends a real `turn_off`). Optimistic. Non-dimmable lights get the switch only
+    (`isDimmableLight` gates the slider). **This replaced a drag-anywhere vertical "pillar"
+    (2026-08-12):** it mapped 0–100% onto ~148dp of travel with no thumb to grab, so small
+    corrections were impossible and every touch was a commit. If an ambient level surface comes
+    back, keep the discrete toggle and the thumb — the touchiness was the gesture, not the visual.
   - **Switches — `RockerSwitch`**: full-width spring rocker (tap anywhere or drag the thumb past
     the midpoint), optimistic via `rememberOptimisticOnOff`.
   - **Locks — `LockVault`** around the unchanged `SlideToAct`: the drag is still the
@@ -812,7 +828,7 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     5 s; lock and arm are one tap. Glance can draw neither `SlideToAct` nor a drag, so the confirm
     tap is the substitute for the deliberate gesture those controls exist to require. For the same
     reason the dimmer is discrete steps rather than a fake slider — each step still commits
-    through `dimCommit`, one service call per gesture, as `LightPillar` does on release.
+    through `dimCommit`, one service call per gesture, as `LightControl` does on release.
   - **The dim steps walk a ladder (`WIDGET_DIM_STOPS`), not a fixed percentage.** A fixed step is
     wrong at both ends: the eye reads brightness roughly logarithmically, so 80→65 is barely
     visible while 20→10 halves the room. The stops are tight at the bottom and wide at the top,

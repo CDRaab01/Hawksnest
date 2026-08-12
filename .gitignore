@@ -16,3 +16,8 @@ yarn-error.log*
 
 # Machine-specific Android emulator env (lib paths, JAVA_HOME) — not portable
 scripts/android-local-env.sh
+
+# The Sift auditor, checked out here to run the design audit locally
+# (`./gradlew :app:testDebugUnitTest --tests "*HawksnestDesignSlopTest" -PsiftDir=sift-src`).
+# CI clones it fresh into the same path; it is never part of this repo.
+android/sift-src/

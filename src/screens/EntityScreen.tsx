@@ -5,7 +5,7 @@ import { EntityCard } from "../components/EntityCard";
 import { PanelCard } from "../components/PanelCard";
 import { SectionHeader } from "../components/SectionHeader";
 import { Skeleton } from "../components/Skeleton";
-import { Sparkline } from "../components/Sparkline";
+import { HistoryChart } from "../components/HistoryChart";
 import type { Channel } from "../components/PanelCard";
 import { overrides } from "../config/overrides";
 import { resolveIcon, resolveName } from "../lib/resolve";
@@ -191,9 +191,9 @@ export function EntityScreen() {
         />
         <PanelCard className="p-lg">
           {loading ? (
-            // Chart-shaped skeleton (matches the Sparkline's 96px height) so the
-            // panel doesn't jump when the series lands.
-            <Skeleton className="h-[96px] rounded-sm" label="Loading history" />
+            // Chart-shaped skeleton (matches the chart's 96px plot + axis row) so
+            // the panel doesn't jump when the series lands.
+            <Skeleton className="h-[116px] rounded-sm" label="Loading history" />
           ) : historyError ? (
             <p className="font-body text-body text-ink-dim">{historyError}</p>
           ) : points.length < 2 ? (
@@ -201,7 +201,16 @@ export function EntityScreen() {
               Not enough history yet for this range.
             </p>
           ) : (
-            <Sparkline points={points} channel={channel} height={96} />
+            <HistoryChart
+              points={points}
+              channel={channel}
+              unit={
+                typeof entity.attributes.unit_of_measurement === "string"
+                  ? entity.attributes.unit_of_measurement
+                  : undefined
+              }
+              height={96}
+            />
           )}
         </PanelCard>
       </section>

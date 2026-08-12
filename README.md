@@ -7,9 +7,9 @@ WebSocket + REST APIs.
 
 > **Status: 1.0 shipped.** The web app carries the live HA connection, the blended area-hub layout,
 > the personalization editor (pin/unpin, reorder, hide), **entity detail** screens with a
-> **state-history chart** (6h/24h/7d), **first-class cards** for cover, climate, media_player and
-> fan, **drag-and-drop** favorites reordering, light/dark themes, and an installable **PWA** with a
-> prompt-to-update toast. Since 1.0: the go2rtc-direct live tier, the `ring-timeline` recorded
+> **state-history chart** (6h/24h/7d, with labelled value + time axes), **first-class cards** for
+> cover, climate, media_player and fan, **drag-and-drop** favorites reordering, light/dark themes,
+> and an installable **PWA** with a prompt-to-update toast. Since 1.0: the go2rtc-direct live tier, the `ring-timeline` recorded
 > backend, and **Frigate** as a second recorded backend (live with 7 Reolink cameras since
 > 2026-07-29). With no token saved it falls back to demo fixtures.
 
