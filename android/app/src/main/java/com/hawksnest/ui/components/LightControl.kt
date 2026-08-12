@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material3.CircularProgressIndicator
@@ -130,6 +131,9 @@ fun LightControl(
             Switch(
                 checked = shownOn,
                 enabled = enabled,
+                // M3 draws the switch 52×32dp; the tappable node inherits that, which is under
+                // the 48dp a11y floor. sizeIn grows the touch target without moving the artwork.
+                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
                 onCheckedChange = {
                     if (it) haptics.toggleOn() else haptics.toggleOff()
                     setOnTarget(it)

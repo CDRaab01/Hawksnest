@@ -195,10 +195,16 @@ fun ControlsScene() {
 }
 
 /**
- * The premium control widgets, one of each in a deterministic state: the light control warm at
- * 62%, the rocker on and off, the vault locked and jammed, the thermostat dial mid-heat, the arm
- * segments and the media transport. Static props only — no pending spinners or infinite
- * animations — so the Robolectric render is stable for the token/contrast/touch-target rules.
+ * The premium control widgets, one of each in a deterministic state. Static props only — no pending
+ * spinners or infinite animations — so the Robolectric render is stable for the
+ * token/contrast/touch-target rules.
+ *
+ * **Split across two scenes on purpose.** Sift captures a node's bounds clamped to the rendered
+ * bitmap (a Pixel 5, ~830dp tall), so anything below the fold is captured at 0×0 — silently
+ * unaudited — and anything straddling the edge is captured as a sliver that trips
+ * `tiny-touch-target` with a height the widget does not actually have. One column of every widget
+ * overflowed; two columns fit, and the transport and arm segments are genuinely audited for the
+ * first time. Keep each scene short enough to fit when adding a widget.
  */
 @Composable
 fun WidgetsScene() {
@@ -218,6 +224,16 @@ fun WidgetsScene() {
             RockerSwitch(on = false, pending = false, onToggle = {})
             LockVault(view = lockVaultView("locked"), pending = false, onCommit = {})
             LockVault(view = lockVaultView("jammed"), pending = false, onCommit = {})
+        }
+    }
+}
+
+/** The rest of the widget set — see [WidgetsScene] for why this is a second scene. */
+@Composable
+fun WidgetsTransportScene() {
+    Surface(color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            SectionHeader(title = "Transport")
             ThermostatDial(
                 view = thermostatView(
                     JsonObject(

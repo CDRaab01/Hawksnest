@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Icon
@@ -29,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CardType
 import com.hawksnest.core.logic.brightnessPct
 import com.hawksnest.core.logic.dimCommit
@@ -225,6 +227,9 @@ private fun ToggleRow(
             modifier = Modifier.weight(1f),
         )
         Switch(
+            // Same 48dp touch-target floor as the light control's switch — M3's 52×32dp
+            // artwork is the tappable node unless it is grown here.
+            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
             checked = shown,
             onCheckedChange = {
                 if (it) haptics.toggleOn() else haptics.toggleOff()
