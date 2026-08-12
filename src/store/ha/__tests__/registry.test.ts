@@ -147,3 +147,67 @@ describe("buildDeviceIndex", () => {
     expect(index.entityToDevice["light.loose"]).toBeUndefined();
   });
 });
+
+/**
+ * `toEntityRecord` is where the app's render stability is won or lost.
+ *
+ * `subscribeEntities` fires on every state change anywhere in HA and preserves identity for
+ * entities that did not change. Narrowing them into fresh objects throws that away, and
+ * everything downstream compares by reference: `useEntity` is an `Object.is` selector, and
+ * `resolveCameras` / `groupByArea` / the Devices chain are all `useMemo([entities])`. The
+ * observable symptom was live HLS restarting mid-stream because `camera.liveEntity` re-keyed
+ * the player's source effect.
+ */
+describe("toEntityRecord identity", () => {
+  const raw = (state: string, attributes: Record<string, unknown> = {}) =>
+    ({
+      entity_id: "light.front",
+      state,
+      attributes,
+      last_changed: "2026-08-12T10:00:00Z",
+      last_updated: "2026-08-12T10:00:00Z",
+      context: { id: "c1", user_id: null, parent_id: null },
+    }) as unknown as HassEntities[string];
+
+  it("reuses the previous object when nothing it carries has changed", () => {
+    const attributes = { friendly_name: "Front" };
+    const first = toEntityRecord({ "light.front": raw("on", attributes) });
+    const second = toEntityRecord({ "light.front": raw("on", attributes) }, first);
+    expect(second["light.front"]).toBe(first["light.front"]);
+  });
+
+  it("makes a new object when the state changes", () => {
+    const attributes = { friendly_name: "Front" };
+    const first = toEntityRecord({ "light.front": raw("on", attributes) });
+    const second = toEntityRecord({ "light.front": raw("off", attributes) }, first);
+    expect(second["light.front"]).not.toBe(first["light.front"]);
+    expect(second["light.front"].state).toBe("off");
+  });
+
+  it("makes a new object when attributes are replaced", () => {
+    // Compared by reference, matching how the websocket library hands them back: a fresh
+    // attributes object means something in there changed.
+    const first = toEntityRecord({ "light.front": raw("on", { brightness: 10 }) });
+    const second = toEntityRecord({ "light.front": raw("on", { brightness: 10 }) }, first);
+    expect(second["light.front"]).not.toBe(first["light.front"]);
+  });
+
+  it("leaves untouched entities alone while one of their neighbours changes", () => {
+    const frontAttrs = { friendly_name: "Front" };
+    const backAttrs = { friendly_name: "Back" };
+    const back = (state: string) =>
+      ({ ...raw(state, backAttrs), entity_id: "light.back" }) as unknown as HassEntities[string];
+
+    const first = toEntityRecord({
+      "light.front": raw("on", frontAttrs),
+      "light.back": back("on"),
+    });
+    const second = toEntityRecord(
+      { "light.front": raw("on", frontAttrs), "light.back": back("off") },
+      first,
+    );
+    // The whole point: one entity moving must not invalidate the other 300.
+    expect(second["light.front"]).toBe(first["light.front"]);
+    expect(second["light.back"]).not.toBe(first["light.back"]);
+  });
+});

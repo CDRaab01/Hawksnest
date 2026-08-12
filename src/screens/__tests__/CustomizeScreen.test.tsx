@@ -44,10 +44,10 @@ describe("Customize", () => {
   it("unpins a favorite, removing it from the Favorites panel", async () => {
     const user = userEvent.setup();
     renderCustomize();
-    expect(await screen.findAllByLabelText("Unpin")).toHaveLength(3);
+    expect(await screen.findAllByLabelText("Unpin")).toHaveLength(seedFavorites.length);
 
     await user.click(screen.getAllByLabelText("Unpin")[0]);
-    expect(screen.getAllByLabelText("Unpin")).toHaveLength(2);
+    expect(screen.getAllByLabelText("Unpin")).toHaveLength(seedFavorites.length - 1);
   });
 
   it("pins a previously-unpinned device from the catalog", async () => {
@@ -78,7 +78,7 @@ describe("Customize", () => {
 
     await user.click(screen.getAllByLabelText("Move down")[0]);
 
-    // Seed [front, back, alarm] → first row moved down → [back, front, alarm].
+    // First row moved down: [front, back, …] → [back, front, …].
     const expected = [seedFavorites[1], seedFavorites[0], ...seedFavorites.slice(2)];
     expect(usePrefsStore.getState().favorites).toEqual(expected);
   });
@@ -88,13 +88,14 @@ describe("Customize", () => {
     renderCustomize();
     await screen.findAllByLabelText("Unpin");
 
-    // Remove two favorites, then reset.
-    await user.click(screen.getAllByLabelText("Unpin")[0]);
-    await user.click(screen.getAllByLabelText("Unpin")[0]);
-    expect(screen.getAllByLabelText("Unpin")).toHaveLength(1);
+    // Remove every favorite, then reset.
+    for (let i = 0; i < seedFavorites.length; i += 1) {
+      await user.click(screen.getAllByLabelText("Unpin")[0]);
+    }
+    expect(screen.queryAllByLabelText("Unpin")).toHaveLength(0);
 
     await user.click(screen.getByRole("button", { name: /Reset to defaults/ }));
-    expect(await screen.findAllByLabelText("Unpin")).toHaveLength(3);
+    expect(await screen.findAllByLabelText("Unpin")).toHaveLength(seedFavorites.length);
     expect(usePrefsStore.getState().favorites).toBeNull();
   });
 });

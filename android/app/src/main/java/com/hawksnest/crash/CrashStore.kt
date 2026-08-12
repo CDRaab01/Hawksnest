@@ -1,7 +1,11 @@
 package com.hawksnest.crash
 
 import android.content.Context
+import com.hawksnest.core.logic.CRASH_FILE_PREFIX
+import com.hawksnest.core.logic.CRASH_FILE_SUFFIX
 import com.hawksnest.core.logic.MAX_STORED_CRASHES
+import com.hawksnest.core.logic.SENT_MARKER_SUFFIX
+import com.hawksnest.core.logic.isCrashReportName
 import com.hawksnest.core.logic.trimToMostRecent
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -27,9 +31,14 @@ class CrashStore @Inject constructor(
 ) {
     private val dir: File get() = File(context.filesDir, "crashes").apply { mkdirs() }
 
-    /** Newest first. Filenames are `crash-<epochMillis>.txt`, so name order is time order. */
+    /**
+     * Newest first. Filenames are `crash-<epochMillis>.txt`, so name order is time order.
+     *
+     * Reports only — [isCrashReportName] excludes the `.sent` markers, which share the prefix.
+     * See the note there for what including them did.
+     */
     fun list(): List<File> =
-        dir.listFiles { f -> f.isFile && f.name.startsWith("crash-") }
+        dir.listFiles { f -> f.isFile && isCrashReportName(f.name) }
             ?.sortedByDescending { it.name }
             ?: emptyList()
 
@@ -38,7 +47,7 @@ class CrashStore @Inject constructor(
     /** Called from the dying process — synchronous, no coroutines, swallows its own failures. */
     fun write(whenMs: Long, body: String) {
         runCatching {
-            File(dir, "crash-$whenMs.txt").writeText(body)
+            File(dir, "$CRASH_FILE_PREFIX$whenMs$CRASH_FILE_SUFFIX").writeText(body)
             prune()
         }
     }
@@ -54,7 +63,7 @@ class CrashStore @Inject constructor(
         runCatching { dir.listFiles()?.forEach { it.delete() } }
     }
 
-    private fun sentMarker(f: File) = File(f.parentFile, "${f.name}.sent")
+    private fun sentMarker(f: File) = File(f.parentFile, f.name + SENT_MARKER_SUFFIX)
 
     private fun prune() {
         val keep = trimToMostRecent(list(), MAX_STORED_CRASHES).toSet()

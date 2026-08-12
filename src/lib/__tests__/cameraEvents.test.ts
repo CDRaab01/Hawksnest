@@ -214,3 +214,20 @@ describe("cameraEvents", () => {
     });
   });
 });
+
+describe("recordingUrlAt rounding", () => {
+  it("rounds the range OUTWARDS, like clipRangeSeconds", () => {
+    // Frigate's ranges are whole seconds. Rounding inwards asks for slightly less footage than
+    // the caller described, so the last fraction of a second of a window is unreachable — and
+    // the two URL builders disagreeing about it is invisible in review and sub-second in use.
+    expect(recordingUrlAt("front", 1_700_000_000_400, 1_700_000_600_600)).toBe(
+      "/api/frigate/vod/front/start/1700000000/end/1700000601/master.m3u8",
+    );
+  });
+
+  it("is unchanged for whole-second bounds", () => {
+    expect(recordingUrlAt("front", 1_700_000_000_000, 1_700_000_600_000)).toBe(
+      "/api/frigate/vod/front/start/1700000000/end/1700000600/master.m3u8",
+    );
+  });
+});

@@ -53,3 +53,30 @@ describe("dedupeRingMqtt", () => {
     expect(dedupeRingMqtt(entities, {})).toEqual(entities);
   });
 });
+
+describe("dedupeRingMqtt identity", () => {
+  it("hands back the SAME map when nothing is shadowed", () => {
+    // This runs on every websocket push. A rebuilt map would defeat `toEntityRecord`'s
+    // identity preservation one layer above it, which is what keeps the render tree stable.
+    const entities = {
+      "light.front": light("light.front", "Front Light"),
+      "light.hall": light("light.hall", "Hall"),
+    };
+    const platforms = { "light.front": MQTT_PLATFORM, "light.hall": "zwave_js" };
+    expect(dedupeRingMqtt(entities, platforms)).toBe(entities);
+  });
+
+  it("preserves each surviving entity's identity when it does drop a twin", () => {
+    const entities = {
+      "light.front": light("light.front", "Front Light"),
+      "light.front_ring": light("light.front_ring", "Front Light"),
+    };
+    const platforms = {
+      "light.front": MQTT_PLATFORM,
+      "light.front_ring": RING_PLATFORM,
+    };
+    const out = dedupeRingMqtt(entities, platforms);
+    expect(out["light.front_ring"]).toBeUndefined();
+    expect(out["light.front"]).toBe(entities["light.front"]);
+  });
+});

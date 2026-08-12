@@ -207,3 +207,120 @@ describe("Timeline24h clip selection", () => {
     expect(onSelectionChange).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The track and both clip handles have carried `role="slider"` + `tabIndex={0}` +
+ * `aria-valuenow` since they shipped, with no key handling anywhere in the file. Tab landed on
+ * three controls a screen reader announces as operable and nothing answered.
+ */
+describe("Timeline24h keyboard", () => {
+  it("steps the playhead back and forth with the arrow keys", () => {
+    const { onSeek, track } = renderTimeline({ playhead: NOW - 3600_000 });
+
+    fireEvent.keyDown(track, { key: "ArrowLeft" });
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    const back = onSeek.mock.calls[0][0] as number;
+    expect(back).toBeLessThan(NOW - 3600_000);
+
+    onSeek.mockClear();
+    fireEvent.keyDown(track, { key: "ArrowRight" });
+    const forward = onSeek.mock.calls[0][0] as number;
+    expect(forward).toBeGreaterThan(NOW - 3600_000);
+  });
+
+  it("steps further with Shift and PageUp/PageDown than with a bare arrow", () => {
+    const from = NOW - 6 * 3600_000;
+    const { onSeek, track } = renderTimeline({ playhead: from });
+
+    fireEvent.keyDown(track, { key: "ArrowLeft" });
+    const fine = from - (onSeek.mock.calls[0][0] as number);
+    onSeek.mockClear();
+    fireEvent.keyDown(track, { key: "ArrowLeft", shiftKey: true });
+    const coarse = from - (onSeek.mock.calls[0][0] as number);
+    onSeek.mockClear();
+    fireEvent.keyDown(track, { key: "PageDown" });
+    const page = from - (onSeek.mock.calls[0][0] as number);
+
+    expect(coarse).toBeGreaterThan(fine);
+    expect(page).toBe(coarse);
+  });
+
+  it("Home goes to the start of the window and End snaps back to live", () => {
+    const { onSeek, onLive, track } = renderTimeline({ playhead: NOW - 3600_000 });
+
+    fireEvent.keyDown(track, { key: "Home" });
+    expect(onSeek).toHaveBeenCalledWith(NOW - DAY);
+
+    // End means "now", and the commit grammar already treats at-or-past-now as the Live region.
+    fireEvent.keyDown(track, { key: "End" });
+    expect(onLive).toHaveBeenCalled();
+  });
+
+  it("ignores keys it has no business claiming", () => {
+    const { onSeek, onLive, track } = renderTimeline({ playhead: NOW - 3600_000 });
+    fireEvent.keyDown(track, { key: "a" });
+    fireEvent.keyDown(track, { key: "Tab" });
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(onLive).not.toHaveBeenCalled();
+  });
+
+  it("nudges a clip handle without also scrubbing the playhead", () => {
+    const selection = { startMs: NOW - 3600_000, endMs: NOW - 3570_000 };
+    const onSelectionChange = vi.fn();
+    const { onSeek } = renderTimeline({
+      playhead: NOW - 3600_000,
+      selection,
+      selectionBounds: { startMs: NOW - DAY, endMs: NOW - 60_000 },
+      onSelectionChange,
+    });
+
+    const startHandle = screen.getByRole("slider", { name: "Clip start" });
+    fireEvent.keyDown(startHandle, { key: "ArrowLeft" });
+
+    // ±1s — the same NUDGE_FINE_MS the export bar's buttons use.
+    expect(onSelectionChange).toHaveBeenCalledTimes(1);
+    expect(onSelectionChange.mock.calls[0][0].startMs).toBe(selection.startMs - 1_000);
+    // The handles sit INSIDE the track: without stopPropagation the same press would move the
+    // playhead too, sliding the thing being measured against out from under the measurement.
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("moves a clip handle by the coarse step with Shift", () => {
+    const selection = { startMs: NOW - 3600_000, endMs: NOW - 3000_000 };
+    const onSelectionChange = vi.fn();
+    renderTimeline({
+      playhead: NOW - 3600_000,
+      selection,
+      selectionBounds: { startMs: NOW - DAY, endMs: NOW - 60_000 },
+      onSelectionChange,
+    });
+
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Clip end" }), {
+      key: "ArrowRight",
+      shiftKey: true,
+    });
+    expect(onSelectionChange.mock.calls[0][0].endMs).toBe(selection.endMs + 15_000);
+  });
+});
+
+describe("Timeline24h event virtualisation", () => {
+  it("renders only the blocks near the visible range", () => {
+    // A Frigate camera's window spans its whole retention and the event fetch is capped at 500,
+    // so mapping every event into an absolutely-positioned node — and re-laying them out on each
+    // pan frame — was hundreds of elements the user can never see.
+    // Evenly across the whole 24h window, so plenty fall inside the opening ~1h view and the
+    // vast majority do not.
+    const spread = Array.from({ length: 400 }, (_, i) => clip(`e${i}`, NOW - DAY + i * (DAY / 400)));
+    renderTimeline({ events: spread });
+    const chips = document.querySelectorAll("[data-chip]");
+    expect(chips.length).toBeGreaterThan(0);
+    expect(chips.length).toBeLessThan(spread.length);
+  });
+
+  it("still renders a block that is on screen", () => {
+    const onScreen = clip("here", NOW - 60_000);
+    renderTimeline({ events: [onScreen, clip("far", NOW - DAY + 1000)] });
+    expect(screen.getByLabelText(new RegExp(`motion at`))).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-chip]").length).toBe(1);
+  });
+});

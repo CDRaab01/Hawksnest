@@ -1,8 +1,14 @@
 import { domainOf } from "./ha";
 import type { Density } from "../cards/types";
 
-// Interactive control domains get the comfortable, one-primary-action card.
-const CONTROL_DOMAINS = new Set([
+/**
+ * Interactive control domains get the comfortable, one-primary-action card.
+ *
+ * Exported so `cards.test.ts` can hold this list and `cards.ts`'s `CARD_BY_DOMAIN` against each
+ * other. A domain here without a card there renders a control-shaped card that cannot be
+ * operated — which is what `switch` and `scene` silently did.
+ */
+export const CONTROL_DOMAINS = new Set([
   "lock",
   "light",
   "switch",

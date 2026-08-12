@@ -139,9 +139,12 @@ export function DevicesScreen() {
     });
   }, [all, areas, query]);
 
+  // Derived from `all`, NOT `filtered`: a warning rail that narrows as you type is a warning
+  // rail that disappears exactly when you're busy looking for something else. Searching filters
+  // the list you're browsing; it should not change what the house is telling you is wrong.
   const attention = useMemo(
-    () => filtered.filter((e) => entityHealth(e).needsAttention),
-    [filtered],
+    () => all.filter((e) => entityHealth(e).needsAttention),
+    [all],
   );
 
   const groups = useMemo(

@@ -138,3 +138,44 @@ describe("summarizeHealth", () => {
     expect(summary).toEqual({ total: 3, online: 2, offline: 1, lowBattery: 1 });
   });
 });
+
+/**
+ * HA's binary battery signal reads backwards: `binary_sensor` + `device_class: battery` uses
+ * `on` to mean LOW. `batteryOf` matched the device_class and then parsed the state as a number,
+ * so `"on"` became NaN and the device was silently reported healthy — for the whole life of the
+ * "Needs attention" rail, on both platforms.
+ */
+describe("binary battery sensors", () => {
+  const binary = (state: string): HassEntity => ({
+    entity_id: "binary_sensor.upstairs_motion_battery",
+    state,
+    attributes: { device_class: "battery", friendly_name: "Upstairs Motion Battery" },
+  });
+
+  it("treats `on` as low battery and flags it for attention", () => {
+    const h = entityHealth(binary("on"));
+    expect(h.lowBattery).toBe(true);
+    expect(h.needsAttention).toBe(true);
+  });
+
+  it("treats `off` as a healthy battery", () => {
+    const h = entityHealth(binary("off"));
+    expect(h.lowBattery).toBe(false);
+    expect(h.needsAttention).toBe(false);
+  });
+
+  it("does not invent a percentage for a signal that has none", () => {
+    // One bit is all the sensor knows; a fake number would show up in the battery read-out.
+    expect(entityHealth(binary("on")).battery).toBeNull();
+  });
+
+  it("leaves an ordinary `on` binary sensor alone", () => {
+    // Only device_class `battery` means this — a motion sensor reading `on` is just motion.
+    const motion: HassEntity = {
+      entity_id: "binary_sensor.hall_motion",
+      state: "on",
+      attributes: { device_class: "motion" },
+    };
+    expect(entityHealth(motion).lowBattery).toBe(false);
+  });
+});

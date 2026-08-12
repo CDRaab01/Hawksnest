@@ -63,6 +63,14 @@ export function HlsPlayer({
   const ref = useRef<HTMLVideoElement>(null);
   // Ref'd so a new callback identity per render can't re-init the source effect.
   const onDurationRef = useRef(onDuration);
+  // `onError` needs the SAME treatment, and for a sharper reason than `onDuration` does: callers
+  // pass an inline arrow (`onError={() => stepDownFrom("video")}` in LivePlayer), so its identity
+  // changes on every render of the parent. With it in the source effect's dep array, every parent
+  // re-render ran `hls.destroy()` + `removeAttribute("src")` + `new Hls()` — restarting live video
+  // mid-stream. Reffing it is what lets the deps be `[src, authToken]`: the only two things that
+  // genuinely describe *which media is loaded*.
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   // React applies the `muted` attribute only at mount; live toggles must go
   // through the DOM property (same workaround as the WebRTC players).
@@ -132,7 +140,7 @@ export function HlsPlayer({
           if (cancelled) return;
           const Hls = mod.default;
           if (!Hls?.isSupported?.()) {
-            onError?.();
+            onErrorRef.current?.();
             return;
           }
           // Frigate VOD needs BOTH credentials on derived requests, for different reasons:
@@ -165,13 +173,13 @@ export function HlsPlayer({
           hls.loadSource(src);
           hls.attachMedia(video);
           hls.on(Hls.Events.ERROR, (_e: unknown, data: { fatal?: boolean }) => {
-            if (data?.fatal) onError?.();
+            if (data?.fatal) onErrorRef.current?.();
           });
           destroy = () => hls.destroy();
         })
         .catch(() => {
           // hls.js not installed yet (pre-Frigate) — fall back gracefully.
-          if (!cancelled) onError?.();
+          if (!cancelled) onErrorRef.current?.();
         });
     } else {
       video.src = src;
@@ -186,7 +194,7 @@ export function HlsPlayer({
       // (and load() is unimplemented in jsdom, so calling it just adds noise).
       video.removeAttribute("src");
     };
-  }, [src, onError, authToken]);
+  }, [src, authToken]);
 
   return (
     <video

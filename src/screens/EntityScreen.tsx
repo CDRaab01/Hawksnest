@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { useParams } from "react-router-dom";
+import { BackLink } from "../components/BackLink";
 import { EntityCard } from "../components/EntityCard";
 import { PanelCard } from "../components/PanelCard";
 import { SectionHeader } from "../components/SectionHeader";
@@ -107,14 +107,9 @@ export function EntityScreen() {
     };
   }, [decoded, hours, exists]);
 
-  const back = (
-    <Link
-      to="/"
-      className="inline-flex items-center gap-xs text-body text-ink-dim transition-colors duration-fast hover:text-ink"
-    >
-      <ArrowLeft size={16} /> Home
-    </Link>
-  );
+  // An entity is reached from Devices, from a room, and from Home's pinned cards — three
+  // different "wheres". Going back is the only answer that is right for all of them.
+  const back = <BackLink />;
 
   if (!entity) {
     return (

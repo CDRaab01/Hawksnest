@@ -87,6 +87,26 @@ private const val MAX_NOTIFICATION_CHARS = 300
 fun <T> trimToMostRecent(items: List<T>, keep: Int = MAX_STORED_CRASHES): List<T> =
     items.take(keep.coerceAtLeast(0))
 
+/** Report filenames are `crash-<epochMillis>.txt` — so lexical name order is time order. */
+const val CRASH_FILE_PREFIX = "crash-"
+const val CRASH_FILE_SUFFIX = ".txt"
+
+/** A published report is marked by a SIBLING file, not by editing the report. */
+const val SENT_MARKER_SUFFIX = ".sent"
+
+/**
+ * Whether a filename in the crash directory is a crash REPORT, as opposed to a sent-marker.
+ *
+ * Pure, and here rather than inline in `CrashStore`, because getting it wrong is invisible and
+ * the class itself needs a `Context` to test. The marker for `crash-123.txt` is
+ * `crash-123.txt.sent` — which also starts with `crash-`, so a prefix-only check counted every
+ * marker as a report. That fed markers to the uploader (POSTed blank, then given their own
+ * `.sent.sent`), halved effective retention because the prune cap counted them, and put empty
+ * rows in the Settings crash panel.
+ */
+fun isCrashReportName(name: String): Boolean =
+    name.startsWith(CRASH_FILE_PREFIX) && name.endsWith(CRASH_FILE_SUFFIX)
+
 /**
  * Ten is enough to see a pattern and small enough that a tight crash loop cannot fill the disk.
  * A crash loop writes one file per launch, so this is also the blast radius of a boot loop.

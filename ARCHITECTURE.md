@@ -32,10 +32,45 @@ Channel hues intentionally shift between themes so a vivid accent still clears c
 | Area | Responsibility |
 |---|---|
 | `src/lib/` | The domain kernel. `cameraModel.ts` collapses ring-mqtt's split entities (`_snapshot` + selectors/ding/motion, plus `_live`/`_event` cameras on ring-mqtt 4.x) into one logical camera; `cards.ts` maps HA domains → card components (**must never throw** — unknown domains render `GenericCard`); `resolve.ts` centralizes label/icon resolution (per-entity overrides go in `src/config/overrides.ts`, never in components) |
-| `src/store/` | Client state: HA WebSocket connection, auth, entity registry, reconnect logic. The entity sink dedupes the Ring-vs-ring-mqtt double exposure centrally (`src/lib/dedupe.ts`, platform map from the registry): when both integrations expose the same light, the ring-platform twin is dropped so every consumer sees one entity per physical device. The store also keeps the offline bookkeeping (`lastConnectedAt`/`staleSince`, stamped on leaving `connected`) and masks lock/alarm states to `unavailable` at the drop moment (`lib/offline.ts` — see the offline invariant below); `retryConnection()` restarts the source to skip the websocket lib's internal backoff |
+| `src/store/` | Client state: HA WebSocket connection, auth, entity registry, reconnect logic. The entity sink dedupes the Ring-vs-ring-mqtt double exposure centrally (`src/lib/dedupe.ts`, platform map from the registry): when both integrations expose the same light, the ring-platform twin is dropped so every consumer sees one entity per physical device. The store also keeps the offline bookkeeping (`lastConnectedAt`/`staleSince`, stamped on leaving `connected`) and masks lock/alarm states to `unavailable` at the drop moment (`lib/offline.ts` — see the offline invariant below); `retryConnection()` restarts the source to skip the websocket lib's internal backoff. **The sink is identity-preserving** — see below |
 | `src/screens/` + `src/cards/` + `src/components/` | Presentation; no raw hex — PULSE tokens only. Loading states use the shared `Skeleton` (one hairline-strong shimmer sweep — camera first-frame decode, history fetch); the dashboard arm discs activate via a channel fill-sweep, still non-optimistic (the sweep follows HA's echo, pinned in tests) |
 | `src/config/` | Entity/room overrides |
 | `public/` + service worker (vite config) | PWA shell. **The SW never caches `/api` and never touches the HA token** — offline = shell + Offline/Demo state, never stale entity data. Updates are **prompt**, not silent (`registerType:"prompt"`): `UpdateToast` (useRegisterSW) surfaces a "reload" prompt when a new shell is waiting, so a wall tablet that never navigates isn't stranded on a stale build |
+
+**Home's Pinned section** (`DashboardScreen`, over `useFavorites()`) renders a full control card
+per pinned entity above the security hero, and vanishes when nothing is pinned. It is the web twin
+of Android's pinned rail and follows the same rule — a shortcut, not a re-org, so pinned entities
+still appear in their rooms. It existed everywhere except on screen for a while: the Devices row's
+"Pin to dashboard" button, Customize's drag-and-drop reorder, `config/favorites.ts`'s docstring and
+README §Screens all described it while `DashboardScreen` rendered hero → wall → Rooms and nothing
+else, so pinning was a no-op you could perform, persist and reorder. The seed lost the alarm panel
+at the same time: `SecurityStatusBar`'s three arm discs *are* the alarm control, so pinning it put a
+second Off/Home/Away directly underneath. The locks stay, because the hero only summarizes them.
+
+**Every domain in `density.ts`'s `CONTROL_DOMAINS` must have an entry in `cards.ts`.** A domain in
+one and not the other renders a comfortable, control-sized card that is actually the read-only
+`GenericCard` — a control you cannot operate, which is a worse failure than an obviously missing
+one. `switch` sat there for the app's whole life (the only way to flip one anywhere in the web app
+was the Devices list's inline `QuickControl`, so a room's lamp switch was a read-only row), and
+`scene` rendered its last-run ISO timestamp as though that were a reading. `SwitchCard` mirrors
+`LightCard`'s on/off half — optimistic, like every non-security control — and `SceneCard` is a Run
+button, since a scene has no state to toggle. `cards.test.ts` holds the two lists against each
+other so the next control domain cannot repeat it.
+
+**Entity identity is part of the store's contract** (`store/ha/registry.ts toEntityRecord`, and
+`lib/dedupe.ts` handing back the same map when nothing is shadowed). `subscribeEntities` fires on
+every state change anywhere in HA — this instance records ~98k state rows a day — and preserves
+object identity for entities that did not change. The sink must preserve it too: `useEntity` is an
+`Object.is` zustand selector, and `resolveCameras`, `groupByArea`, `useDeviceDiagnostics` and the
+Devices filter chain are all `useMemo([entities])`. Narrowing into fresh objects made every one of
+those recompute per push, and — because `camera.liveEntity` changed identity with them — re-keyed
+`HlsPlayer`'s source effect, tearing down and rebuilding hls.js **mid-stream** on live video. So
+`toEntityRecord` takes the previous record and reuses the existing object when `state`,
+`attributes` and `last_updated` are unchanged; `haSource` keeps the last **un-deduped** narrowing
+for that purpose (feeding the deduped store map back would rebuild the shadowed twins every push).
+The paired rule in the players: a callback prop must never key a media-source effect —
+`HlsPlayer` refs both `onDuration` and `onError`, so its source effect depends on `[src, authToken]`
+and nothing else.
 
 Camera streaming: the live transport ladder (`LivePlayer`) is **go2rtc-direct → HA WebRTC → HLS →
 MJPEG → snapshot-poll**. The top tier (`Go2rtcPlayer`) negotiates WebRTC straight with the dedicated
@@ -270,6 +305,15 @@ that expire in ~15 minutes with no trim capability, so a range selector would pr
 backend can't keep. A one-tap "save this event" for Ring (`eventClipUrl`, already plumbed) is a
 coherent follow-up and deliberately unbuilt.
 
+That check is **one derived value** (`clipMode` on web), read by all three clip surfaces — the
+toggle button, the timeline band and the export bar. It used to gate the button only, and the
+button being hidden is not the same as the mode being off: going live, or landing on a camera
+Frigate doesn't record, hid the button while the selection lived on, so the bar kept rendering.
+Since the bar *replaces* the transport, that left no play/prev/next and no way back except Cancel.
+The selection is also cleared on camera change — a range belongs to one camera's timeline, and
+carried across, Download asked Frigate to cut that range out of a camera it may not even record.
+Pinned by `CameraPlayerVodPaging.test.tsx`.
+
 **Selection state must never reach the playback stack.** On both platforms `clipSel` is kept out of
 the VOD page / signed-URL / player keys. A selection that re-keyed the player would re-prepare and
 re-sign the VOD on every nudge — the same class of bug as the page-turn trap immediately below.
@@ -345,6 +389,19 @@ which on a phone-width track put a 30 s event under one pixel: adjacent events m
 bar and the strip only ever said "something was recorded today". The zoom range is unchanged
 (10 min – full retention) and pinch reaches all of it. Anything that needs to click an event chip —
 E2E specs especially — must now assume only the last ~30 minutes are on screen.
+
+**The web timeline is keyboard-operable**, which for a long time it only *claimed* to be: the track
+and both clip handles carried `role="slider"` + `tabIndex={0}` + `aria-valuenow` with no key
+handling at all, so Tab landed on three controls a screen reader announces as operable and nothing
+answered. Arrows step, Shift/Page steps coarser, Home/End go to the ends. The track's step is the
+**on-screen tick interval**, not a constant — one press should move by whatever the strip is
+currently labelled in, since a fixed step is unusable at one end of a 10 min – 3 day zoom range or
+the other. The handles use the `NUDGE_FINE_MS` / `NUDGE_COARSE_MS` the export bar's buttons already
+use, and stop propagation so adjusting a handle doesn't also scrub the playhead out from under the
+range being measured. Pan and pinch have no keyboard equivalent and need none — what a slider
+promises is that you can move the value. (This also made an existing test honest: the Frigate
+"plays recorded footage without looping it" case pressed ArrowLeft, got nothing, and asserted
+against the still-mounted *live* video, which is likewise `loop=false`.)
 
 **Pinch-to-zoom over the picture** is `lib/videoZoom.ts` ↔ `core/logic/VideoZoom.kt` (clamping and
 focal-point math, tested on both) behind the `ZoomableFrame` component/composable. It wraps the

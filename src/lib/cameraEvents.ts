@@ -110,8 +110,13 @@ export function recordingUrlAt(
   endMs: number,
   base: string = FRIGATE_BASE,
 ): string {
+  // Rounded OUTWARDS, matching `clipExport.clipRangeSeconds` — Frigate's ranges are whole
+  // seconds, and rounding a range inwards asks for slightly less footage than the caller
+  // described. This floored both ends, so a page could come back a fraction short at its tail
+  // and the last frame of a window was unreachable. Sub-second and invisible, which is precisely
+  // why the two builders had drifted: nothing about the symptom points at the rounding.
   const start = Math.floor(startMs / 1000);
-  const end = Math.floor(endMs / 1000);
+  const end = Math.ceil(endMs / 1000);
   return `${base}/vod/${encodeURIComponent(camera)}/start/${start}/end/${end}/master.m3u8`;
 }
 

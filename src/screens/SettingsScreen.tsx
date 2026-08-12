@@ -12,7 +12,7 @@ import {
   clearCredentials,
 } from "../store/credentials";
 import { startConnection } from "../store/connection";
-import { defaultHaUrl } from "../lib/haUrl";
+import { defaultHaUrl, isBlockedMixedContent } from "../lib/haUrl";
 import { useThemeStore, type ThemePref } from "../store/theme";
 
 const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
@@ -73,7 +73,11 @@ export function SettingsScreen() {
   const [url, setUrl] = useState(saved?.url ?? defaultHaUrl());
   const [token, setToken] = useState("");
 
-  const canConnect = url.trim().length > 0 && token.trim().length > 0;
+  // A cleartext HA URL from a TLS-served page is blocked by the browser before a request leaves,
+  // and the resulting failure names neither the scheme nor the reason. Say it here, where it can
+  // be fixed, rather than letting it come back as "Can't reach Home Assistant at that URL."
+  const mixedContent = isBlockedMixedContent(url);
+  const canConnect = url.trim().length > 0 && token.trim().length > 0 && !mixedContent;
 
   function connect() {
     saveCredentials({ url: url.trim(), token: token.trim() });
@@ -159,9 +163,25 @@ export function SettingsScreen() {
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="http://homeassistant.local:8123"
+              // The deployed front is TLS (Tailscale Serve), where an `http://` HA URL is blocked
+              // as mixed content — so don't suggest one. This origin is the answer that works.
+              placeholder={defaultHaUrl() || "https://homeassistant.local:8123"}
+              aria-invalid={mixedContent || undefined}
+              aria-describedby={mixedContent ? "ha-url-error" : undefined}
               className="mt-xs w-full rounded-sm border border-hairline bg-bg px-md py-sm font-body text-body text-ink outline-none focus:border-hairline-strong"
             />
+            {mixedContent && (
+              <span
+                id="ha-url-error"
+                role="alert"
+                className="mt-xs block font-body text-caption text-streak"
+              >
+                This page is served over HTTPS, so the browser blocks a plain{" "}
+                <span className="font-mono">http://</span> address before it is even tried. Use{" "}
+                <span className="font-mono">https://</span> — or leave the field as this site to
+                go through the built-in proxy.
+              </span>
+            )}
           </label>
           <label className="block">
             <span className="caption-label">Long-lived access token</span>
@@ -184,9 +204,10 @@ export function SettingsScreen() {
             )}
           </div>
           <p className="font-body text-caption text-ink-faint">
-            Leave the URL as this site to use the built-in proxy; or point it
-            directly at Home Assistant (e.g. http://192.168.4.34:8123). Create a
-            token in HA under your profile → Long-lived access tokens. It's stored
+            Leave the URL as this site to use the built-in proxy — the normal setup, and the only
+            one that works when this page is served over HTTPS. Pointing straight at Home
+            Assistant (e.g. https://homeassistant.local:8123) must match this page's scheme.
+            Create a token in HA under your profile → Long-lived access tokens. It's stored
             locally on this device.
           </p>
         </PanelCard>

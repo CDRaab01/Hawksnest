@@ -14,3 +14,21 @@ export function defaultHaUrl(): string {
   }
   return "";
 }
+
+/**
+ * Whether `url` is a cleartext HA address the page's own origin will refuse.
+ *
+ * A TLS-served page cannot open `http://` or `ws://` to anywhere: the browser blocks it as mixed
+ * content before a request is made, and all the app ever sees is a generic connect failure. That
+ * matters here because the deployed front IS TLS — Tailscale Serve at `https://<host>.ts.net:8443`
+ * — while the Settings form's own placeholder suggested `http://homeassistant.local:8123` and its
+ * help text `http://192.168.4.34:8123`. Both are correct for a LAN page and impossible for the
+ * shipped one, and the resulting error names neither the scheme nor the reason.
+ *
+ * The same class of trap as the Android placeholder fixed in #112 — an in-app hint contradicting
+ * the shipped transport policy.
+ */
+export function isBlockedMixedContent(url: string): boolean {
+  if (typeof window === "undefined" || window.location?.protocol !== "https:") return false;
+  return /^(http|ws):\/\//i.test(url.trim());
+}

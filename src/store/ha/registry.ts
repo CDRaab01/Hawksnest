@@ -96,13 +96,45 @@ export interface DeviceIndex {
 /**
  * Narrow the library's HassEntities (which carry context/last_changed/etc.) to
  * the minimal HassEntity shape the store and cards use.
+ *
+ * ## Identity is part of the contract
+ *
+ * `previous` is not an optimization — it is what makes the whole render tree stable, and leaving
+ * it out has a cost far out of proportion to the line that omits it.
+ *
+ * `subscribeEntities` fires on **every** state change anywhere in HA (this instance records ~98k
+ * state rows a day), and hands back a collection where unchanged entities keep their object
+ * identity. Rebuilding every entity unconditionally throws that away, and everything downstream
+ * compares by reference:
+ *
+ *  - `useEntity(id)` is an `Object.is` zustand selector, so every consumer re-renders per push;
+ *  - every `useMemo([entities])` recomputes per push — `resolveCameras`, `groupByArea`,
+ *    `useDeviceDiagnostics`, the Devices filter/group chain;
+ *  - `camera.liveEntity` changes identity, which used to re-key `HlsPlayer`'s source effect and
+ *    tear down and rebuild hls.js mid-stream (see the note in `HlsPlayer`).
+ *
+ * So: reuse the previous object whenever nothing we actually carry has changed. Attributes are
+ * compared by reference because the library already gives a fresh object only when they change; a
+ * false "changed" there costs one allocation, which is the safe direction to be wrong in.
  */
 export function toEntityRecord(
   entities: HassEntities,
+  previous: Record<string, HassEntity> = {},
 ): Record<string, HassEntity> {
   const out: Record<string, HassEntity> = {};
   for (const id in entities) {
     const e = entities[id];
+    const prev = previous[id];
+    if (
+      prev &&
+      prev.state === e.state &&
+      prev.attributes === e.attributes &&
+      prev.last_changed === e.last_changed &&
+      prev.last_updated === e.last_updated
+    ) {
+      out[id] = prev;
+      continue;
+    }
     out[id] = {
       entity_id: e.entity_id,
       state: e.state,

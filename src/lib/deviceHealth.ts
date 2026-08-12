@@ -27,6 +27,25 @@ function batteryOf(entity: HassEntity): number | null {
   return null;
 }
 
+/**
+ * HA's **binary** battery signal: `binary_sensor` + `device_class: battery`, where `on` means
+ * LOW, not "present".
+ *
+ * It reads backwards and it is easy to miss, which is exactly what happened: `batteryOf` above
+ * matches on `device_class === "battery"` and then parses the state as a number, so `"on"` became
+ * `NaN` → null → not low. A device whose only battery signal is a binary sensor — which is how
+ * plenty of Z-Wave and Zigbee devices report it — could therefore never reach "Needs attention",
+ * no matter how flat its cell was. Kept separate from `batteryOf` because there is no percentage
+ * to return: the sensor knows one bit, and pretending it knows a number would be worse.
+ */
+export function isLowBatteryBinary(entity: HassEntity): boolean {
+  return (
+    entity.entity_id.startsWith("binary_sensor.") &&
+    entity.attributes.device_class === "battery" &&
+    entity.state.toLowerCase() === "on"
+  );
+}
+
 function lastChangedMs(entity: HassEntity): number | null {
   const raw = entity.last_changed ?? entity.last_updated;
   if (!raw) return null;
@@ -38,7 +57,10 @@ function lastChangedMs(entity: HassEntity): number | null {
 export function entityHealth(entity: HassEntity): EntityHealth {
   const online = !OFFLINE_STATES.has(entity.state.toLowerCase());
   const battery = batteryOf(entity);
-  const lowBattery = battery !== null && battery <= LOW_BATTERY_PCT;
+  // Two ways a device says "my battery is flat", and both have to count: a percentage at or under
+  // the threshold, or HA's binary battery sensor reading `on`.
+  const lowBattery =
+    (battery !== null && battery <= LOW_BATTERY_PCT) || isLowBatteryBinary(entity);
   return {
     online,
     battery,

@@ -125,5 +125,16 @@ share of it:
   `GenericCard`.
 - Label/icon resolution is centralized (`src/lib/resolve.ts` + `src/config/overrides.ts`);
   add per-entity overrides there, not in components.
-- Phase 4 web shipped (entity detail/history, cover/climate/media_player/fan, drag-and-drop,
-  PWA + prompt-to-update, light theme). Next web idea: OAuth to HA (replace the long-lived token).
+- Phase 4 web shipped (entity detail/history, cover/climate/media_player/fan, drag-and-drop
+  reordering of the **Pinned** section on Home, PWA + prompt-to-update, light theme). Next web
+  idea: OAuth to HA (replace the long-lived token).
+- **Known divergence, deliberate, not yet closed: the Devices tab and room detail.** Android's
+  were rebuilt over `core/logic/ControlDeck.kt` + `DeviceSections.kt` + `Pins.kt` (function-first
+  grouping, a pinned rail, read-only entities aggregated per physical device, device-level
+  attention). Those three have **no `src/lib` twins** — web's `DevicesScreen` is still a flat
+  per-area list and `AreaScreen` a flat grid. This breaks the 1:1 port rule above and is tracked
+  as its own piece of work; don't assume parity on those two surfaces when changing either.
+- **React compares by identity, so identity is a contract here.** Two rules the camera stack
+  learned the hard way (details in ARCHITECTURE.md): the entity sink must reuse unchanged entity
+  objects (`toEntityRecord`), and a callback prop must never key a media-source effect. Breaking
+  either is silent in tests and visible as live video that restarts every second.
