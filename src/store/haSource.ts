@@ -7,6 +7,7 @@ import {
   ERR_CANNOT_CONNECT,
   type Connection,
   type HassEntities,
+  type UnsubscribeFunc,
 } from "home-assistant-js-websocket";
 import { useEntityStore } from "./entityStore";
 import type { HassEntity } from "../lib/ha";
@@ -56,6 +57,26 @@ const defaultDeps: HaSourceDeps = {
     }),
   subscribe: (conn, cb) => subscribeEntities(conn, cb),
 };
+
+/**
+ * HA events that invalidate anything `fetchRegistry` derives. Entity *states* stream in over
+ * `subscribe_entities`, but area/device/category/platform metadata does not — without these a
+ * device added mid-session shows up with no room (grouped under "Unassigned") until the socket
+ * happens to reconnect. That is exactly what a new Z-Wave node looks like: present in Devices,
+ * missing from its room.
+ */
+const REGISTRY_EVENTS = [
+  "area_registry_updated",
+  "device_registry_updated",
+  "entity_registry_updated",
+] as const;
+
+/**
+ * Adding one device fires a burst (one device event + one entity event per entity it owns, and
+ * an area event if it was placed). Coalesce them so a 35-entity Z-Wave node costs one registry
+ * refetch rather than 36.
+ */
+const REGISTRY_REFRESH_DEBOUNCE_MS = 500;
 
 /**
  * Pull the three registries once and resolve BOTH the entity → area-name map and
@@ -334,6 +355,8 @@ export function createHaSource(
 ): Source {
   let conn: Connection | null = null;
   let unsub: (() => void) | null = null;
+  let registryUnsubs: UnsubscribeFunc[] = [];
+  let registryTimer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
   // The last UN-deduped narrowing, kept so `toEntityRecord` can reuse unchanged entity objects
   // (see the identity note there). Deliberately not `store().entities`: that map has already had
@@ -358,6 +381,49 @@ export function createHaSource(
       // Registry unavailable (older HA / limited token) — keep entities,
       // they group under "Unassigned" rather than failing the connection.
     }
+  }
+
+  /** Coalesce a burst of registry events into one refetch. */
+  function scheduleRegistryRefresh() {
+    if (stopped) return;
+    if (registryTimer) clearTimeout(registryTimer);
+    registryTimer = setTimeout(() => {
+      registryTimer = null;
+      void loadAreas();
+    }, REGISTRY_REFRESH_DEBOUNCE_MS);
+  }
+
+  /**
+   * Keep the registries live for the life of the connection. `subscribeEvents` re-subscribes
+   * itself across auto-reconnects, so this is set up once per `start()`.
+   */
+  async function subscribeRegistryUpdates() {
+    if (!conn || registryUnsubs.length) return;
+    try {
+      const subs = await Promise.all(
+        REGISTRY_EVENTS.map((type) =>
+          conn!.subscribeEvents(scheduleRegistryRefresh, type),
+        ),
+      );
+      // `stop()` may have run while we were awaiting — don't leak the subscriptions.
+      if (stopped) {
+        subs.forEach((u) => void u());
+        return;
+      }
+      registryUnsubs = subs;
+    } catch {
+      // Older HA or a restricted token — fall back to the previous behaviour, where the
+      // registries refresh only on (re)connect. Entities still stream normally.
+    }
+  }
+
+  function teardownRegistryUpdates() {
+    if (registryTimer) {
+      clearTimeout(registryTimer);
+      registryTimer = null;
+    }
+    registryUnsubs.forEach((u) => void u());
+    registryUnsubs = [];
   }
 
   // The Frigate `instance_id` the websocket query commands require — the same `client_id` the
@@ -408,9 +474,11 @@ export function createHaSource(
 
       store().setStatus("connected");
       await loadAreas();
+      await subscribeRegistryUpdates();
     },
     stop() {
       stopped = true;
+      teardownRegistryUpdates();
       unsub?.();
       unsub = null;
       conn?.close();
