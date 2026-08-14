@@ -54,6 +54,8 @@ const STREAM: Record<string, unknown> = {
 
 function makeFakeConn() {
   const listeners: Record<string, Array<() => void>> = {};
+  const eventListeners: Record<string, Array<() => void>> = {};
+  const eventUnsubs: string[] = [];
   const sent: Array<Record<string, unknown>> = [];
   const conn = {
     addEventListener: (ev: string, cb: () => void) => {
@@ -73,12 +75,25 @@ function makeFakeConn() {
       sent.push(msg as Record<string, unknown>);
       return () => {};
     },
+    subscribeEvents: async (cb: () => void, eventType: string) => {
+      (eventListeners[eventType] ||= []).push(cb);
+      eventUnsubs.push(eventType);
+      return () => {
+        eventListeners[eventType] = (eventListeners[eventType] || []).filter(
+          (f) => f !== cb,
+        );
+      };
+    },
     close: () => {},
   } as unknown as Connection;
   return {
     conn,
     sent,
     emit: (ev: string) => (listeners[ev] || []).forEach((f) => f()),
+    emitEvent: (ev: string) => (eventListeners[ev] || []).forEach((f) => f()),
+    subscribedEvents: () => eventUnsubs,
+    liveEventSubs: () =>
+      Object.values(eventListeners).reduce((n, l) => n + l.length, 0),
   };
 }
 
@@ -108,6 +123,71 @@ describe("createHaSource", () => {
     expect(s.entities["lock.front"].state).toBe("locked");
     expect(s.areas["lock.front"]).toBe("Front Door");
     expect(s.areas["sensor.x"]).toBe("Front Door"); // via device d1
+  });
+
+  it("subscribes to the three registry-updated events", async () => {
+    const { conn, subscribedEvents } = makeFakeConn();
+    const deps: HaSourceDeps = {
+      connect: async () => conn,
+      subscribe: (_c, cb) => {
+        cb(ENTITIES);
+        return () => {};
+      },
+    };
+    await createHaSource({ url: "http://ha", token: "t" }, deps).start();
+
+    expect(subscribedEvents()).toEqual([
+      "area_registry_updated",
+      "device_registry_updated",
+      "entity_registry_updated",
+    ]);
+  });
+
+  it("refetches the registries when a device is added mid-session", async () => {
+    vi.useFakeTimers();
+    try {
+      const { conn, sent, emitEvent } = makeFakeConn();
+      const deps: HaSourceDeps = {
+        connect: async () => conn,
+        subscribe: (_c, cb) => {
+          cb(ENTITIES);
+          return () => {};
+        },
+      };
+      await createHaSource({ url: "http://ha", token: "t" }, deps).start();
+
+      const listCalls = () =>
+        sent.filter((m) => m.type === "config/area_registry/list").length;
+      const before = listCalls();
+
+      // A new Z-Wave node fires a burst: one device event plus one per entity it owns.
+      emitEvent("device_registry_updated");
+      emitEvent("entity_registry_updated");
+      emitEvent("entity_registry_updated");
+      expect(listCalls()).toBe(before); // debounced, nothing yet
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(listCalls()).toBe(before + 1); // ...and coalesced into ONE refetch
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tears down the registry subscriptions on stop", async () => {
+    const { conn, liveEventSubs } = makeFakeConn();
+    const deps: HaSourceDeps = {
+      connect: async () => conn,
+      subscribe: (_c, cb) => {
+        cb(ENTITIES);
+        return () => {};
+      },
+    };
+    const source = createHaSource({ url: "http://ha", token: "t" }, deps);
+    await source.start();
+    expect(liveEventSubs()).toBe(3);
+
+    source.stop();
+    expect(liveEventSubs()).toBe(0);
   });
 
   it("retains device records resolved from the registries", async () => {

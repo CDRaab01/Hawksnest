@@ -57,6 +57,21 @@ was the Devices list's inline `QuickControl`, so a room's lamp switch was a read
 button, since a scene has no state to toggle. `cards.test.ts` holds the two lists against each
 other so the next control domain cannot repeat it.
 
+**The registries are live, not connect-time snapshots** (`haSource.ts subscribeRegistryUpdates`,
+Kotlin twin `core/ha/HaSource.kt`). `subscribe_entities` streams entity *states*, and a brand-new
+entity does appear mid-session through it — but nothing in a state push carries the area, device,
+`entity_category` or platform that `fetchRegistry`/`loadAreas` derive. Those three
+`config/*_registry/list` calls used to run **once per connection**, so a device added while the app
+was open had no room and grouped under "Unassigned" until the socket happened to reconnect. Both
+platforms now also subscribe to `area_registry_updated`, `device_registry_updated` and
+`entity_registry_updated` and refetch on any of them. The refetch is **debounced 500 ms** because
+adding one device fires a burst — one device event plus one entity event per entity it owns, so a
+35-entity Z-Wave node would otherwise cost 36 refetches of three list calls each. Subscribing is
+best-effort: an older HA or a restricted token falls back to the old refresh-on-reconnect
+behaviour rather than failing the connection, matching how `loadAreas` already degrades. On web
+`subscribeEvents` re-subscribes itself across auto-reconnects so it is set up once per `start()`;
+on Android subscriptions die with the socket, so it re-runs per connect beside `loadAreas`.
+
 **Entity identity is part of the store's contract** (`store/ha/registry.ts toEntityRecord`, and
 `lib/dedupe.ts` handing back the same map when nothing is shadowed). `subscribeEntities` fires on
 every state change anywhere in HA — this instance records ~98k state rows a day — and preserves

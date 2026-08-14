@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.hawksnest.core.logic.CameraEvent
@@ -99,6 +100,9 @@ class HaSource(
 
     /** True while a reachability probe is in flight, so cheap early backoffs don't stack them. */
     @Volatile private var probing = false
+
+    /** In-flight debounced registry refetch (see [scheduleRegistryRefresh]); one at a time. */
+    private var registryRefreshJob: Job? = null
 
     override suspend fun start() {
         if (job?.isActive == true) return
@@ -479,6 +483,9 @@ class HaSource(
                 c.subscribeEntities()
                 loadAreas(c)
                 state.setStatus(ConnectionStatus.CONNECTED)
+                // After CONNECTED on purpose: `loadAreas` has already populated the maps, so
+                // these three acked subscribes would only delay the status the UI waits on.
+                subscribeRegistryUpdates(c)
                 backoff = 1_000L
                 while (coroutineContext.isActive && !closed.isCompleted) {
                     // Race the ping interval against the close signal so a dead socket flips the
@@ -496,6 +503,10 @@ class HaSource(
             } catch (_: Exception) {
                 // unreachable / dropped — fall through to backoff + reconnect
             } finally {
+                // A pending refetch is bound to the connection we're dropping — let the next
+                // connect's loadAreas() do the work instead of racing a dead socket.
+                registryRefreshJob?.cancel()
+                registryRefreshJob = null
                 c.close()
                 // Stop handing this (now-closed) connection to History/camera callers; until the next
                 // socket authenticates they get a clean "Not connected" instead of awaiting forever.
@@ -526,6 +537,40 @@ class HaSource(
         }
     }
 
+    /**
+     * Keep the registries live for the life of this connection. Entity *states* stream over
+     * `subscribe_entities`, but area/device/category/platform metadata does not — without this a
+     * device added mid-session has no room and groups under "Unassigned" until the socket happens
+     * to reconnect. Subscriptions die with the connection, so this is re-run on every connect
+     * alongside [loadAreas].
+     */
+    private suspend fun subscribeRegistryUpdates(c: HaConnection) {
+        for (type in REGISTRY_EVENTS) {
+            try {
+                c.subscribe("subscribe_events", { put("event_type", type) }) {
+                    scheduleRegistryRefresh(c)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Older HA or a restricted token — fall back to refreshing on reconnect only.
+            }
+        }
+    }
+
+    /**
+     * Coalesce a burst of registry events into one refetch: adding a single device fires one
+     * device event plus one entity event per entity it owns, so a 35-entity Z-Wave node would
+     * otherwise cost 36 round-trips of three list calls each.
+     */
+    private fun scheduleRegistryRefresh(c: HaConnection) {
+        registryRefreshJob?.cancel()
+        registryRefreshJob = scope.launch {
+            delay(REGISTRY_REFRESH_DEBOUNCE_MS)
+            loadAreas(c)
+        }
+    }
+
     private suspend fun loadAreas(c: HaConnection) {
         try {
             val areas = c.request("config/area_registry/list")["result"] as? JsonArray ?: return
@@ -543,6 +588,17 @@ class HaSource(
         }
     }
 
+    private companion object {
+        /** HA events that invalidate anything [loadAreas] derives. */
+        val REGISTRY_EVENTS = listOf(
+            "area_registry_updated",
+            "device_registry_updated",
+            "entity_registry_updated",
+        )
+
+        /** Burst-coalescing window for [scheduleRegistryRefresh]. */
+        const val REGISTRY_REFRESH_DEBOUNCE_MS = 500L
+    }
 }
 
 /**
