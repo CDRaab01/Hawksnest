@@ -68,12 +68,16 @@ fun WebRtcPlayer(
     /** Audio gate: the received AudioTrack is disabled while true. Defaults muted —
      *  org.webrtc plays remote audio automatically otherwise (see Go2rtcPlayer). */
     muted: Boolean = true,
+    /** Reports the source video's (width, height) — post-rotation — when known/changed. Feeds
+     *  the PiP window's aspect ratio (see Go2rtcPlayer). */
+    onVideoSize: ((width: Int, height: Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // Keep the step-down callback current without restarting the negotiation each recomposition.
     val currentOnFail = rememberUpdatedState(onFail)
+    val currentOnVideoSize = rememberUpdatedState(onVideoSize)
     // Process-wide EGL context + PeerConnectionFactory, created once and never disposed (WebRtcCore).
     remember(context) { WebRtcCore.init(context) }
     // True until the first video frame actually renders. Drives the "Connecting…" overlay so the user
@@ -86,7 +90,12 @@ fun WebRtcPlayer(
                 WebRtcCore.eglBase.eglBaseContext,
                 object : RendererCommon.RendererEvents {
                     override fun onFirstFrameRendered() { scope.launch { connecting.value = false } }
-                    override fun onFrameResolutionChanged(w: Int, h: Int, rotation: Int) {}
+                    override fun onFrameResolutionChanged(w: Int, h: Int, rotation: Int) {
+                        // Pre-rotation dimensions off a libwebrtc thread — swap for portrait and
+                        // hop to the main scope (see Go2rtcPlayer).
+                        val (rw, rh) = if (rotation % 180 == 0) w to h else h to w
+                        scope.launch { currentOnVideoSize.value?.invoke(rw, rh) }
+                    }
                 },
             )
             setEnableHardwareScaler(true)

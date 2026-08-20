@@ -30,6 +30,7 @@ import com.hawksnest.ui.components.ControlFeedbackViewModel
 import com.hawksnest.ui.components.ZWaveStatusBanner
 import com.hawksnest.ui.components.rememberHaptics
 import com.hawksnest.ui.area.AreaDetailScreen
+import com.hawksnest.ui.cameras.CameraLightbox
 import com.hawksnest.ui.automations.AutomationEditScreen
 import com.hawksnest.ui.automations.AutomationsScreen
 import com.hawksnest.ui.devices.DevicesScreen
@@ -59,6 +60,10 @@ fun AppNavGraph(
      */
     openEntityId: String? = null,
     pushNav: com.hawksnest.push.PushNav? = null,
+    /** The app-scoped open-camera session; the lightbox renders here at the nav-graph root (in
+     *  the activity's own window, over the bottom bar) so system PiP can show it. Null only in
+     *  previews/tests that don't exercise cameras. */
+    cameraSession: com.hawksnest.ui.cameras.CameraSession? = null,
     feedback: ControlFeedbackViewModel = hiltViewModel(),
 ) {
     val navController = rememberNavController()
@@ -105,94 +110,116 @@ fun AppNavGraph(
         }
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            if (showBottomBar) {
-                PulseBottomBar(
-                    currentRoute = currentRoute,
-                    onNavigate = { dest ->
-                        navController.navigate(dest.navRoute) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            bottomBar = {
+                if (showBottomBar) {
+                    PulseBottomBar(
+                        currentRoute = currentRoute,
+                        onNavigate = { dest ->
+                            navController.navigate(dest.navRoute) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
                             }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                )
-            }
-        },
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .consumeWindowInsets(innerPadding),
-        ) {
-            NavHost(
-                navController = navController,
-                startDestination = startDestination,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-            composable(Screen.Home.route) {
-                HomeScreen(
-                    onOpenRooms = {
-                        navController.navigate(Screen.Rooms.route) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    onOpenSettings = { navController.navigate(Screen.Settings.route) },
-                )
-            }
-            composable(Screen.Devices.route) {
-                DevicesScreen(onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) })
-            }
-            composable(Screen.Rooms.route) {
-                RoomsScreen(onOpenArea = { area -> navController.navigate(Screen.Area.createRoute(area)) })
-            }
-            composable(Screen.History.route) {
-                HistoryScreen(onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) })
-            }
-            composable(Screen.Settings.route) {
-                SettingsScreen()
-            }
-            composable(Screen.Automations.route) {
-                AutomationsScreen(
-                    onNew = { navController.navigate(Screen.AutomationEdit.createRoute("new")) },
-                    onEdit = { id -> navController.navigate(Screen.AutomationEdit.createRoute(id)) },
-                )
-            }
-            composable(
-                route = Screen.AutomationEdit.route,
-                arguments = listOf(navArgument("id") { type = NavType.StringType }),
-            ) {
-                AutomationEditScreen(onBack = { navController.popBackStack() })
-            }
-            composable(
-                route = Screen.Area.route,
-                arguments = listOf(navArgument("area") { type = NavType.StringType }),
-            ) {
-                AreaDetailScreen(
-                    onBack = { navController.popBackStack() },
-                    onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) },
-                )
-            }
-            composable(
-                route = Screen.Entity.route,
-                arguments = listOf(navArgument("entityId") { type = NavType.StringType }),
-            ) {
-                EntityDetailScreen(onBack = { navController.popBackStack() })
-            }
-            }
-
-            ZWaveStatusBanner(
+                        },
+                    )
+                }
+            },
+        ) { innerPadding ->
+            Box(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(12.dp),
-            )
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding),
+            ) {
+                NavHost(
+                    navController = navController,
+                    startDestination = startDestination,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                composable(Screen.Home.route) {
+                    HomeScreen(
+                        onOpenRooms = {
+                            navController.navigate(Screen.Rooms.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        onOpenSettings = { navController.navigate(Screen.Settings.route) },
+                    )
+                }
+                composable(Screen.Devices.route) {
+                    DevicesScreen(onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) })
+                }
+                composable(Screen.Rooms.route) {
+                    RoomsScreen(onOpenArea = { area -> navController.navigate(Screen.Area.createRoute(area)) })
+                }
+                composable(Screen.History.route) {
+                    HistoryScreen(onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) })
+                }
+                composable(Screen.Settings.route) {
+                    SettingsScreen()
+                }
+                composable(Screen.Automations.route) {
+                    AutomationsScreen(
+                        onNew = { navController.navigate(Screen.AutomationEdit.createRoute("new")) },
+                        onEdit = { id -> navController.navigate(Screen.AutomationEdit.createRoute(id)) },
+                    )
+                }
+                composable(
+                    route = Screen.AutomationEdit.route,
+                    arguments = listOf(navArgument("id") { type = NavType.StringType }),
+                ) {
+                    AutomationEditScreen(onBack = { navController.popBackStack() })
+                }
+                composable(
+                    route = Screen.Area.route,
+                    arguments = listOf(navArgument("area") { type = NavType.StringType }),
+                ) {
+                    AreaDetailScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenEntity = { id -> navController.navigate(Screen.Entity.createRoute(id)) },
+                    )
+                }
+                composable(
+                    route = Screen.Entity.route,
+                    arguments = listOf(navArgument("entityId") { type = NavType.StringType }),
+                ) {
+                    EntityDetailScreen(onBack = { navController.popBackStack() })
+                }
+                }
+
+                ZWaveStatusBanner(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(12.dp),
+                )
+            }
+        }
+
+        // The open-camera lightbox, hosted HERE — a sibling of the Scaffold in the activity's own
+        // window — rather than in a Dialog or a nav destination. Full-bleed over the bottom bar,
+        // and (the reason it moved) visible to the system PiP surface, which renders only the
+        // activity window. HomeScreen still decides WHAT opens (it owns the camera list and the
+        // push deep-link); this only renders whatever session is open.
+        if (cameraSession != null) {
+            val session by cameraSession.open.collectAsState()
+            val inPip by cameraSession.inPip.collectAsState()
+            session?.let { s ->
+                CameraLightbox(
+                    cameras = s.cameras,
+                    initial = s.initial,
+                    nonce = s.nonce,
+                    initialEventId = s.eventId,
+                    inPip = inPip,
+                    onDismiss = { cameraSession.close() },
+                )
+            }
         }
     }
 }

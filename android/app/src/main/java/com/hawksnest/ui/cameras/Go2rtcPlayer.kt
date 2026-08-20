@@ -73,11 +73,17 @@ fun Go2rtcPlayer(
      *  org.webrtc plays remote audio automatically, which is the web twin's opposite
      *  default; the player chrome's MuteButton is the deliberate way to sound. */
     muted: Boolean = true,
+    /** Reports the source video's (width, height) — post-rotation — when known/changed. Feeds
+     *  the PiP window's aspect ratio. */
+    onVideoSize: ((width: Int, height: Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val currentOnFail = rememberUpdatedState(onFail)
+    // Kept current without recreating the renderer (same reason as currentOnFail — the renderer
+    // lives in an unkeyed remember).
+    val currentOnVideoSize = rememberUpdatedState(onVideoSize)
     remember(context) { WebRtcCore.init(context) }
     val connecting = remember { mutableStateOf(true) }
     val renderer = remember {
@@ -86,7 +92,13 @@ fun Go2rtcPlayer(
                 WebRtcCore.eglBase.eglBaseContext,
                 object : RendererCommon.RendererEvents {
                     override fun onFirstFrameRendered() { scope.launch { connecting.value = false } }
-                    override fun onFrameResolutionChanged(w: Int, h: Int, rotation: Int) {}
+                    override fun onFrameResolutionChanged(w: Int, h: Int, rotation: Int) {
+                        // WebRTC reports pre-rotation dimensions; swap for portrait rotations so
+                        // the consumer sees the shape actually rendered. Posted to the main
+                        // scope — this fires on a libwebrtc thread.
+                        val (rw, rh) = if (rotation % 180 == 0) w to h else h to w
+                        scope.launch { currentOnVideoSize.value?.invoke(rw, rh) }
+                    }
                 },
             )
             setEnableHardwareScaler(true)

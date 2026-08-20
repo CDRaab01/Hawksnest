@@ -724,6 +724,32 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   the OS, and silently flipping an installed app's appearance to match a constant is worse than
   the inconsistency. `ThemePref.parse` is tolerant of junk, because a bad stored value would
   otherwise make the picker unreachable.
+- **The camera lightbox is a nav-root overlay, not a Dialog — because of PiP** (`ui/cameras/
+  CameraSession.kt`, `CameraLightbox.kt`, `AppNavGraph.kt`, `MainActivity`). A live camera
+  minimizes into a floating **system picture-in-picture** window on home/gesture-away, Ring-style.
+  The PiP surface renders only the **activity's own window**, and the lightbox used to live in a
+  Compose `Dialog` — a separate window that would simply vanish on minimize — so it was hoisted:
+  `CameraSession` (an app-scoped `@Singleton`, the camera stack's `PushNav`) holds the open
+  session, and `AppNavGraph` renders `CameraLightbox` as a sibling of the Scaffold. HomeScreen
+  still decides *what* opens (it owns the camera list and the push deep-link) and keeps the
+  switcher list fresh while it recomposes underneath; the `Open.nonce` is what lets a doorbell
+  push retarget an already-open lightbox. The Dialog's freebies came back by hand: a `BackHandler`
+  for dismiss (registered before `CameraPlayer`'s fullscreen one, which must win) and
+  `statusBarsPadding` on the close button.
+  The PiP wiring itself: `CameraPlayer` reports live-vs-recorded (`playhead == null`) and the
+  renderers report the source video size (`onFrameResolutionChanged`, rotation-swapped) into the
+  session; `MainActivity` keeps `PictureInPictureParams` current off those flows — **the reactive
+  `setAutoEnterEnabled` (API 31+) is what makes "live only" hold for the swipe-home gesture**,
+  since no callback fires to decide in; pre-31 `onUserLeaveHint` + `wantsPip()` enters manually.
+  Only LIVE playback minimizes (`core/logic/Pip.kt shouldEnterPip`, aspect clamping in
+  `pipAspect`, both pure/tested); recorded playback backgrounds normally. In PiP every piece of
+  chrome hides behind the same guards fullscreen uses — which also **unmounts `TalkButton`, so
+  minimizing is what closes a latched mic** (the live-only-mount guarantee above, extended) —
+  and the transport `when` stays in its composition slot, so entering/leaving PiP never tears the
+  stream down (the manifest's `configChanges` already prevents recreation; that comment now
+  carries PiP too). Leaving PiP while the activity is STOPPED is the "dismissed via X" signature:
+  `MainActivity` closes the session so composition disposal tears the stream down, in the players'
+  documented LIFO order — nothing may stream invisibly from a background task.
 - **Camera chrome stays OFF the picture.** Controls live in the row above the frame, on black.
   This was tried the other way on 2026-08-03 — view controls as 30dp buttons overlaying the video
   — and reverted after one look on a device: too small to hit, competing with a bright daylight

@@ -19,11 +19,12 @@ data class CameraTarget(val cameraId: String, val eventId: String? = null)
  * A tiny app-scoped bus for "a tapped notification wants to open camera X".
  *
  * A notification tap can't just carry a nav route because a specific camera opens
- * in the CameraLightbox overlay on Home, not via a NavHost destination. So the
- * tap sets [cameraTarget] here (from MainActivity, cold start via the launch intent
- * or warm via onNewIntent); the nav shell reacts by bringing Home forward, and
- * HomeScreen opens the lightbox for that camera once the camera list is loaded,
- * then [consume]s it so it fires once.
+ * in the CameraLightbox overlay, not via a NavHost destination. So the tap sets
+ * [cameraTarget] here (from MainActivity, cold start via the launch intent or warm
+ * via onNewIntent); the nav shell reacts by bringing Home forward, and HomeScreen
+ * opens the lightbox for that camera once the camera list is loaded — via
+ * CameraSession, which renders it at the nav-graph root — then [consume]s it so it
+ * fires once.
  */
 @Singleton
 class PushNav @Inject constructor() {

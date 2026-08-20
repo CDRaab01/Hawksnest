@@ -57,7 +57,6 @@ import com.hawksnest.core.logic.alarmView
 import com.hawksnest.core.logic.graceExpired
 import com.hawksnest.core.logic.relativeTime
 import com.hawksnest.core.logic.snapshotBucket
-import com.hawksnest.ui.cameras.CameraLightbox
 import com.hawksnest.ui.cameras.DoorbellBanner
 import com.hawksnest.ui.cameras.CameraSnapshot
 import com.hawksnest.ui.cameras.LiveFrameStore
@@ -133,11 +132,6 @@ fun HomeScreen(
     }
     val sharedBucket = bucketSeed + ticks
     val onOpenBucket = bucketSeed + ticks + opens
-    var lightbox by remember { mutableStateOf<CameraUi?>(null) }
-    // Frigate event the tap wants the player to open ON, rather than live. Held
-    // alongside the lightbox camera and handed to CameraPlayer once.
-    var lightboxEventId by remember { mutableStateOf<String?>(null) }
-
     // Deep-link from a tapped notification: open that camera's lightbox once the
     // camera list has loaded. Consume it either way so it fires exactly once (a not-yet-known
     // camera just lands on Home rather than looping).
@@ -148,13 +142,17 @@ fun HomeScreen(
         // and consume so it fires exactly once (unknown camera → just lands on Home).
         if (target != null && ui.cameras.isNotEmpty()) {
             ui.cameras.firstOrNull { it.id == target.cameraId }?.let {
-                lightbox = it
-                // Null for doorbell/alarm taps — those open live, as before.
-                lightboxEventId = target.eventId
+                // eventId null for doorbell/alarm taps — those open live, as before.
+                viewModel.openLightbox(ui.cameras, it, target.eventId)
             }
             viewModel.consumePushTarget()
         }
     }
+    // The lightbox renders at the nav-graph root off CameraSession (so system PiP can show it),
+    // but Home stays the active destination underneath and keeps recomposing — keep the
+    // in-player switcher's camera list (and its snapshot URLs) fresh, as the old Dialog's
+    // capture-by-recomposition did.
+    LaunchedEffect(ui.cameras) { viewModel.updateLightboxCameras(ui.cameras) }
 
     // Doorbell banner: show the latest ring until dismissed or auto-timeout.
     var doorbellDismissedAt by remember { mutableStateOf(0L) }
@@ -245,21 +243,9 @@ fun HomeScreen(
             controlsEnabled = !inGrace,
             onOpenRooms = onOpenRooms,
             onArm = viewModel::arm,
-            onOpenLightbox = { lightbox = it },
+            onOpenLightbox = { viewModel.openLightbox(ui.cameras, it) },
             onDoorbellDismiss = { ring?.let { doorbellDismissedAt = it.whenMs } },
             modifier = if (inGrace) Modifier.alpha(0.55f) else Modifier,
-        )
-    }
-
-    lightbox?.let { cam ->
-        CameraLightbox(
-            cameras = ui.cameras,
-            initial = cam,
-            initialEventId = lightboxEventId,
-            onDismiss = {
-                lightbox = null
-                lightboxEventId = null
-            },
         )
     }
 }
