@@ -1,7 +1,11 @@
 package com.hawksnest
 
+import android.app.PictureInPictureParams
 import android.content.Intent
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,7 +18,9 @@ import com.hawksnest.push.PushNotifier
 import com.hawksnest.ui.navigation.AppNavGraph
 import com.hawksnest.ui.navigation.Screen
 import com.hawksnest.core.logic.ThemePref
+import com.hawksnest.core.logic.pipAspect
 import com.hawksnest.core.logic.resolveDarkTheme
+import com.hawksnest.ui.cameras.CameraSession
 import com.hawksnest.ui.theme.HawksnestTheme
 import com.hawksnest.shortcuts.ShortcutPublisher
 import com.hawksnest.util.DevicePrefsStore
@@ -23,8 +29,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import dagger.hilt.android.AndroidEntryPoint
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
 import com.hawksnest.push.NtfyPushService
 import com.hawksnest.push.PushSettings
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -40,6 +48,7 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var pushSettings: PushSettings
     @Inject lateinit var devicePrefs: DevicePrefsStore
     @Inject lateinit var shortcutPublisher: ShortcutPublisher
+    @Inject lateinit var cameraSession: CameraSession
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,6 +61,15 @@ class MainActivity : FragmentActivity() {
         // running listener is a no-op it handles itself.
         lifecycleScope.launch {
             if (pushSettings.enabled.first()) NtfyPushService.start(this@MainActivity)
+        }
+        // Keep the PiP params current with the camera session. On Android 12+ this is what makes
+        // "live only" hold for the swipe-home gesture: setAutoEnterEnabled flips off the moment
+        // the owner scrubs to a recording or closes the player, and back on at Live — there is no
+        // callback moment to decide in (onUserLeaveHint isn't used by the gesture's auto-enter).
+        // The aspect ratio follows the source video so the window isn't letterboxed.
+        lifecycleScope.launch {
+            combine(cameraSession.open, cameraSession.isLive, cameraSession.videoSize) { _, _, _ -> }
+                .collect { setPictureInPictureParams(pipParams()) }
         }
         // A doorbell notification carries a camera id to open. Route it through PushNav
         // (the nav shell brings Home forward and opens that camera's lightbox) rather
@@ -81,9 +99,51 @@ class MainActivity : FragmentActivity() {
                         startDestination = start,
                         openEntityId = openEntity,
                         pushNav = pushNav,
+                        cameraSession = cameraSession,
                     )
                 }
             }
+        }
+    }
+
+    /** The current PiP window shape + auto-enter gate, rebuilt from the camera session. */
+    private fun pipParams(): PictureInPictureParams {
+        val size = cameraSession.videoSize.value
+        val (w, h) = pipAspect(size?.first, size?.second)
+        return PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(w, h))
+            .apply {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    setAutoEnterEnabled(cameraSession.wantsPip())
+                    // Video content: crossfade between window sizes rather than stretching frames.
+                    setSeamlessResizeEnabled(false)
+                }
+            }
+            .build()
+    }
+
+    // Pre-31 there is no auto-enter, so the home button lands here and we minimize a live camera
+    // by hand. 31+ deliberately does NOT also call enterPictureInPictureMode: auto-enter already
+    // covers home AND the gesture with the smooth transition, and a redundant manual call animates
+    // as a jarring double-jump.
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT < 31 && cameraSession.wantsPip()) {
+            enterPictureInPictureMode(pipParams())
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        // CameraPlayer hides all chrome off this flag (the same pattern as fullscreen), so the
+        // tiny window shows only the video frame.
+        cameraSession.setInPip(isInPictureInPictureMode)
+        // Leaving PiP with the activity already STOPPED is the canonical "dismissed via the X"
+        // signature (expanding back to the app leaves PiP RESUMED/STARTED). Close the session so
+        // the overlay unmounts and composition disposal tears down the stream — otherwise the
+        // player keeps streaming (and could keep sounding) invisibly in the background task.
+        if (!isInPictureInPictureMode && lifecycle.currentState == Lifecycle.State.CREATED) {
+            cameraSession.close()
         }
     }
 

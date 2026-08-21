@@ -35,11 +35,16 @@
              landscape — an activity restart there tears down the live stream and costs a 2-4s
              WebRTC renegotiation every time. It also fixes the same stutter on ordinary manual
              rotation. Compose handles configuration changes natively, so nothing else needs to
-             react to this. -->
+             react to this. It also carries the PiP transition below: entering/leaving
+             picture-in-picture is a configuration change, and recreating there would tear down
+             the live stream the tiny window exists to keep playing.
+             supportsPictureInPicture: a live camera minimizes into a floating system PiP window
+             on home/gesture-away (like the Ring app) — see MainActivity's PiP wiring. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:supportsPictureInPicture="true"
             android:theme="@style/Theme.Hawksnest">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

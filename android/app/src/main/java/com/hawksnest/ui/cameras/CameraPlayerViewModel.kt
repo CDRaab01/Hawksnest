@@ -84,7 +84,18 @@ class CameraPlayerViewModel @Inject constructor(
     private val go2rtcStreams: Go2rtcStreams,
     private val credentialStore: CredentialStore,
     private val httpClient: OkHttpClient,
+    private val cameraSession: CameraSession,
 ) : ViewModel() {
+
+    /** True while the activity is minimized into system PiP — the player hides its chrome off
+     *  this, the same way it does for fullscreen. */
+    val inPip: kotlinx.coroutines.flow.StateFlow<Boolean> = cameraSession.inPip
+
+    /** Report live-vs-recorded so MainActivity can gate PiP entry (live only). */
+    fun reportLive(isLive: Boolean) = cameraSession.reportLive(isLive)
+
+    /** Report the live video's real (width, height) so the PiP window takes the source aspect. */
+    fun reportVideoSize(width: Int, height: Int) = cameraSession.reportVideoSize(width, height)
 
     /**
      * Whether to attempt the go2rtc live tier for [cameraName], asked once per camera open.

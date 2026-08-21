@@ -101,6 +101,7 @@ data class HomeUi(
 class HomeViewModel @Inject constructor(
     private val connection: ConnectionManager,
     private val pushNav: com.hawksnest.push.PushNav,
+    private val cameraSession: com.hawksnest.ui.cameras.CameraSession,
 ) : ViewModel() {
 
     private val state = connection.state
@@ -111,6 +112,14 @@ class HomeViewModel @Inject constructor(
 
     /** Clear the deep-link once HomeScreen has opened (or failed to find) the camera. */
     fun consumePushTarget() = pushNav.consume()
+
+    /** Open the camera lightbox — rendered at the nav-graph root off [CameraSession], not here,
+     *  so system picture-in-picture can show it (a Dialog window can't be minimized). */
+    fun openLightbox(cameras: List<CameraUi>, initial: CameraUi, eventId: String? = null) =
+        cameraSession.open(cameras, initial, eventId)
+
+    /** Keep the open lightbox's switcher list fresh as the camera list recomposes. */
+    fun updateLightboxCameras(cameras: List<CameraUi>) = cameraSession.updateCameras(cameras)
 
     val uiState: StateFlow<HomeUi> = combine(
         state.entities, state.areas, state.status, state.error, state.baseUrl, state.devices,

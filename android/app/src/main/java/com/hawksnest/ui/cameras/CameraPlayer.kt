@@ -273,6 +273,18 @@ fun CameraPlayer(
     var fullscreen by remember { mutableStateOf(false) }
     FullscreenEffect(fullscreen)
 
+    // System picture-in-picture (home/gesture-away on a live camera). In PiP the window IS the
+    // picture: every piece of chrome hides behind the same guards fullscreen uses, so entering
+    // and leaving PiP never tears the player out of composition. Hiding the control row is also
+    // load-bearing, not cosmetic: it unmounts TalkButton, and disposal is what closes a latched
+    // mic — so minimizing can never carry an open mic into the background. Zoom resets going in:
+    // a magnified corner in a 2-inch window reads as a broken picture, and the double-tap that
+    // would fix it isn't available there.
+    val inPip by viewModel.inPip.collectAsState()
+    LaunchedEffect(inPip) { if (inPip) zoom = NO_ZOOM }
+    // Live vs recorded feeds the PiP gate in MainActivity — only a LIVE camera minimizes.
+    LaunchedEffect(playhead == null) { viewModel.reportLive(playhead == null) }
+
     // Sound behaves like a video, not a phone call — see CameraAudio.kt. The rocker adjusts media
     // volume the whole time a camera is open; focus is taken only once the owner unmutes, so
     // merely opening a camera never interrupts what they were listening to.
@@ -482,7 +494,7 @@ fun CameraPlayer(
         // one line when the set fits and extra lines only when it doesn't — and
         // the set genuinely varies (Move only for PTZ, Low/High only with a sub
         // stream, Talk only for Ring, Siren only where one exists).
-        if (!fullscreen) FlowRow(
+        if (!fullscreen && !inPip) FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -569,7 +581,10 @@ fun CameraPlayer(
         ZoomableFrame(
             zoom = zoom,
             onZoomChange = { zoom = it },
-            modifier = if (fullscreen) {
+            // In PiP the window itself already has the video's aspect (set via the PiP params),
+            // so fill it; the renderers' SCALE_ASPECT_FIT keeps the picture correct even while
+            // the window and source briefly disagree.
+            modifier = if (fullscreen || inPip) {
                 Modifier.fillMaxSize()
             } else {
                 Modifier.fillMaxWidth().aspectRatio(16f / 9f)
@@ -658,6 +673,7 @@ fun CameraPlayer(
                 baseUrl = viewModel.baseUrl(),
                 onFail = { go2rtcFailed = true },
                 muted = muted,
+                onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
             )
             // `canGo2rtc != null` holds this arm while the stream list is in flight. Starting an HA
@@ -669,6 +685,7 @@ fun CameraPlayer(
                 viewModel = viewModel,
                 onFail = { webRtcFailed = true },
                 muted = muted,
+                onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
             )
             // live = true pins the HLS feed near the live edge (no fast-forward catch-up). loop
@@ -690,7 +707,7 @@ fun CameraPlayer(
             // as chrome on the frame. Previously this was an exit button alone, which meant
             // losing Mute, Reply and the way to hear anything exactly when the picture was
             // biggest.
-            if (fullscreen) {
+            if (fullscreen && !inPip) {
                 FullscreenChrome(
                     muted = muted,
                     onToggleMute = { muted = !muted },
@@ -701,7 +718,7 @@ fun CameraPlayer(
             }
         }
 
-        if (!fullscreen) {
+        if (!fullscreen && !inPip) {
             // Live only: moving the lens while watching recorded footage would re-aim
             // the camera with no visible feedback. Leaving composition is also what
             // guarantees an in-flight move is stopped (see PtzPad).

@@ -18,7 +18,12 @@ components (`ui/components/`) are in place, plus:
   hero. Demo/fixture mode (`FixtureSource`) runs with no token.
 - **Phase 2** ✅ — control (`call_service`, non-optimistic) + domain cards + entity detail/history +
   logbook timeline + customize.
-- **Phase 3** ✅ — camera snapshots + live MJPEG (`ui/cameras/`). (An earlier biometric gate + alarm
+- **Phase 3** ✅ — camera snapshots + live MJPEG (`ui/cameras/`). Since then the player grew the
+  full live ladder (RTSP/WebRTC/HLS), the recorded timeline, and **system picture-in-picture**:
+  pressing home (or gesturing away) on a LIVE camera minimizes it into a floating window,
+  Ring-style — recorded playback backgrounds normally. (See ARCHITECTURE.md's lightbox/PiP
+  bullet for why the lightbox is a nav-root overlay rather than a Dialog.)
+  (An earlier biometric gate + alarm
   PIN keypad on unlock/disarm were removed — the home owner found the friction unwanted; disarm/unlock
   now fire directly. A panel that enforces HA `code_format` must allow codeless disarm from the app.)
 - **Control feel** ✅ — every user-facing control call goes through `core/ha/ControlGate`
