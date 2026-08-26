@@ -36,4 +36,24 @@ class RtspHealthTest {
         RtspHealth.report("big_room", true)
         assertTrue(RtspHealth.maybeAvailable("big_room"))
     }
+
+
+    @Test
+    fun `a camera's verdict expires, so a reboot cannot demote it forever`() {
+        var clock = 1_000L
+        RtspHealth.setClockForTest { clock }
+
+        RtspHealth.report("garage", false)
+        assertFalse(RtspHealth.maybeAvailable("garage"))
+
+        // Still suppressed just before the TTL...
+        clock += RtspHealth.BREAKER_TTL_MS - 1
+        assertFalse(RtspHealth.maybeAvailable("garage"))
+
+        // ...and retryable once it elapses. Without this, `canRtsp` gates mounting the player, so
+        // the success that would clear the verdict could never fire: a camera that was briefly
+        // rebooting stayed demoted to the relayed tier for the rest of the process.
+        clock += 2
+        assertTrue(RtspHealth.maybeAvailable("garage"))
+    }
 }

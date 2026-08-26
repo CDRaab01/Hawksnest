@@ -173,6 +173,13 @@ fun Go2rtcPlayer(
  * so org.webrtc's worker-thread callbacks can mutate it under a lock. Signaling mirrors the Talk
  * session; rendering mirrors WebRtcSession.
  */
+/**
+ * How long to wait for CONNECTED before stepping down. go2rtc-direct exists because it is fast
+ * (~1-2 s to first frame); a longer wait would sit on the "Connecting…" overlay instead of trying
+ * the tier below, and every failure here also costs a global verdict via [Go2rtcHealth].
+ */
+private const val WATCHDOG_MS = 8_000L
+
 private class Go2rtcSession(
     private val scope: CoroutineScope,
     baseUrl: String,
@@ -213,13 +220,20 @@ private class Go2rtcSession(
         pc.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, recvOnly)
         ws = httpClient.newWebSocket(Request.Builder().url(wsUrl).build(), wsListener)
 
-        // go2rtc-direct is meant to be fast; step down after 8s rather than hang. The "Connecting…"
+        // go2rtc-direct is meant to be fast; step down rather than hang. The "Connecting…"
         // overlay covers the wait; a stale stream / unreachable :8555 media both land here.
         watchdog = scope.launch {
-            delay(8_000)
+            delay(WATCHDOG_MS)
             if (peer?.connectionState() != PeerConnection.PeerConnectionState.CONNECTED) fail()
         }
     }
+
+    /**
+     * Whether this session ever reached CONNECTED. Gates whether a later failure is allowed to
+     * report a GLOBAL verdict to [Go2rtcHealth] — see onConnectionChange.
+     */
+    @Volatile
+    private var everConnected = false
 
     private val wsListener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -289,11 +303,20 @@ private class Go2rtcSession(
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             when (newState) {
-                PeerConnection.PeerConnectionState.CONNECTED -> Go2rtcHealth.report(true)
+                PeerConnection.PeerConnectionState.CONNECTED -> {
+                    everConnected = true
+                    Go2rtcHealth.report(true)
+                }
+                // A drop AFTER this session was connected is not evidence about go2rtc's media
+                // path — we just proved that path works. It's a network blip, and DISCONNECTED in
+                // particular is often transient and recoverable. Stepping this session down is
+                // right; condemning the tier for every other camera is not, and used to be
+                // permanent (see Go2rtcHealth). So only a session that NEVER connected reports a
+                // global verdict.
                 PeerConnection.PeerConnectionState.FAILED,
                 PeerConnection.PeerConnectionState.DISCONNECTED,
                 PeerConnection.PeerConnectionState.CLOSED,
-                -> fail()
+                -> fail(global = !everConnected)
                 else -> Unit
             }
         }
@@ -319,10 +342,10 @@ private class Go2rtcSession(
      * thread, and tearing down from that thread is unsafe. The parent drops this player and close()
      * runs from onDispose on the main thread.
      */
-    private fun fail() {
+    private fun fail(global: Boolean = true) {
         val report = synchronized(lock) { !closed }
         if (!report) return
-        Go2rtcHealth.report(false)
+        if (global) Go2rtcHealth.report(false)
         watchdog?.cancel()
         scope.launch { onFail() }
     }

@@ -36,6 +36,29 @@ describe("go2rtc helper", () => {
     expect(go2rtcMaybeAvailable("front_door")).toBe(true);
   });
 
+  it("expires the circuit-breaker, so a transient failure can't disable the tier forever", async () => {
+    vi.useFakeTimers();
+    try {
+      const { go2rtcMaybeAvailable, reportGo2rtcMedia } = await freshModule();
+
+      reportGo2rtcMedia(false);
+      expect(go2rtcMaybeAvailable("front_door")).toBe(false);
+
+      // Still suppressed just before the TTL.
+      vi.advanceTimersByTime(59_999);
+      expect(go2rtcMaybeAvailable("front_door")).toBe(false);
+
+      // ...and retryable once it elapses. Without this the tier was unreachable until a reload:
+      // `go2rtcMaybeAvailable` gates mounting the player, so the success that would clear the
+      // verdict could never fire. Android's twin of this bug rendered a 10s-refresh still image
+      // behind a green "Live" badge and was reported as "very choppy live video".
+      vi.advanceTimersByTime(2);
+      expect(go2rtcMaybeAvailable("front_door")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("skips a camera go2rtc isn't serving once the list is known", async () => {
     vi.stubGlobal(
       "fetch",

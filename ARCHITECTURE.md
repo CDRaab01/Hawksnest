@@ -504,9 +504,22 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   its WS API (`/go2rtc/api/ws?src=<base>`, same signaling `TalkButton` speaks — both share
   `Go2rtc.kt`'s `go2rtcWsUrl`), skipping the ring-mqtt/ffmpeg hop for ~1–2 s first frame. Media
   is WebRTC to go2rtc's `:8555`; when that's unreachable (§7c host forwarder down / off-tailnet)
-  the 8 s watchdog fails over to HA WebRTC and `Go2rtcHealth` (process-wide circuit-breaker)
-  makes every later camera skip the tier. Shares `WebRtcCore` (process EGL/factory — never
-  disposed per-session) and `LiveFrameStore` tile capture with `WebRtcPlayer`.
+  the `WATCHDOG_MS` (8 s) watchdog fails over to HA WebRTC and `Go2rtcHealth` (process-wide
+  circuit-breaker) makes every later camera skip the tier. Shares `WebRtcCore` (process
+  EGL/factory — never disposed per-session) and `LiveFrameStore` tile capture with `WebRtcPlayer`.
+  **`Go2rtcHealth` EXPIRES after `BREAKER_TTL_MS` (60 s), and must** — it was a permanent latch
+  until 2026-08-25, and that was a severe silent failure. Its only reader gates whether a
+  `Go2rtcPlayer` is mounted at all, so once tripped, the `report(true)` that would clear it was
+  **unreachable**: one transient blip disabled go2rtc for every camera for the whole process
+  (an Android process survives backgrounding indefinitely). The ladder then fell through HA
+  WebRTC and HLS to `RefreshingSnapshot` — a still refreshed every 10 s **behind a green "Live"
+  badge** — which users reported as "very choppy live video". It was a 0.1 fps slideshow, and it
+  survived until the app was force-stopped. It was diagnosed only by proving go2rtc itself was
+  healthy: it was streaming megabytes to a browser on the same phone at the time. Two rules came
+  out of it: a circuit-breaker whose success path is gated by its own verdict **must** have a
+  time-based escape, and a transport that has silently degraded **must not** still say "Live".
+  Relatedly, a drop AFTER a session connected reports only locally (`fail(global = false)`) —
+  having connected is proof the path works, so a blip must not condemn the tier for everyone.
   The tier is offered for **every** camera, gated on go2rtc's own stream list
   (`core/net/Go2rtcStreams`, the 1:1 port of web's `lib/go2rtc.ts` cache — same 60 s TTL, same
   fail-to-EMPTY-set rule, and it hosts `Go2rtcHealth` since `core` cannot depend on `ui`).
