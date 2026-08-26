@@ -131,28 +131,70 @@ class Go2rtcStreams internal constructor(
 }
 
 /**
- * Session circuit-breaker for the go2rtc **media** path. Signaling (WebSocket via nginx) can succeed
- * while media (WebRTC to `GO2RTC_HOST_IP:8555`) cannot be reached — before the §7c host forwarder is
- * up, or off the tailnet. The first camera whose media fails flips this false and every camera after
- * skips the go2rtc tier for the rest of the process (no repeated multi-second stalls); it drops to
- * the HA WebRTC path instead. A success flips it true.
+ * Circuit-breaker for the go2rtc **media** path. Signaling (WebSocket via nginx) can succeed while
+ * media (WebRTC to `GO2RTC_HOST_IP:8555`) cannot be reached — before the §7c host forwarder is up,
+ * or off the tailnet. A camera whose media fails trips this, and every camera after skips the
+ * go2rtc tier (no repeated multi-second stalls), dropping to the HA WebRTC path instead.
+ *
+ * ## It EXPIRES, and that is the whole point
+ *
+ * This was a permanent latch until 2026-08-25, and the failure mode it produced was severe and
+ * completely silent. `report(false)` set a flag with no expiry and no lifecycle reset, and the only
+ * reader — [Go2rtcStreams.maybeAvailable] — is what decides whether a `Go2rtcPlayer` is ever
+ * mounted. So once the flag was false, nothing could mount the player, and the `report(true)` that
+ * would clear it became **unreachable**. A single transient blip disabled go2rtc for EVERY camera
+ * for the entire process lifetime, and an Android process survives backgrounding indefinitely.
+ *
+ * The observed result: the live ladder fell all the way through HA WebRTC and HLS to
+ * `RefreshingSnapshot` — a still image refreshed every 10s, rendered behind a green "Live" badge.
+ * Users reported it as "very choppy live video"; it was a 0.1 fps slideshow, and it stayed that way
+ * for days until the app was force-stopped. Diagnosed only by proving go2rtc itself was healthy
+ * (it was streaming 3 MB to a browser on the same phone at the time).
+ *
+ * So a failure now records WHEN it happened and stops counting after [BREAKER_TTL_MS], letting one
+ * open retry the tier and re-establish the truth. This mirrors the self-healing already used by
+ * [Go2rtcStreams]' own list cache ([STREAMS_TTL_MS]) — the breaker sits in FRONT of that cache, so
+ * without its own expiry the cache's TTL could never rescue it.
+ *
+ * A success still clears it immediately: the tier working is proof the path is fine.
  *
  * Stays a process-global object rather than an injected dependency because it is reported from
  * go2rtc's signaling thread and read from composition — the same shape the web module uses.
  */
 object Go2rtcHealth {
+    /** When media last failed, or null if it hasn't (or a success/expiry has cleared it). */
     @Volatile
-    private var mediaHealthy: Boolean? = null
+    private var failedAtMs: Long? = null
+
+    @Volatile
+    private var nowMs: () -> Long = System::currentTimeMillis
 
     fun report(ok: Boolean) {
-        mediaHealthy = ok
+        failedAtMs = if (ok) null else nowMs()
     }
 
     /** Best-guess for whether the direct-go2rtc tier is worth attempting (media not known-broken). */
-    fun maybeAvailable(): Boolean = mediaHealthy != false
-
-    /** Test seam: forget this session's media verdict. */
-    internal fun resetForTest() {
-        mediaHealthy = null
+    fun maybeAvailable(): Boolean {
+        val failed = failedAtMs ?: return true
+        return nowMs() - failed >= BREAKER_TTL_MS
     }
+
+    /** Test seam: forget the media verdict and restore the real clock. */
+    internal fun resetForTest() {
+        failedAtMs = null
+        nowMs = System::currentTimeMillis
+    }
+
+    /** Test seam: drive [maybeAvailable]'s expiry without sleeping. */
+    internal fun setClockForTest(clock: () -> Long) {
+        nowMs = clock
+    }
+
+    /**
+     * How long a media failure suppresses the tier. Matches [Go2rtcStreams.STREAMS_TTL_MS]: long
+     * enough that a genuinely unreachable go2rtc isn't retried on every camera open (the cost this
+     * breaker exists to avoid is the player's full watchdog), short enough that a transient blip
+     * costs one minute of degraded quality rather than the rest of the app's life.
+     */
+    internal const val BREAKER_TTL_MS = 60_000L
 }

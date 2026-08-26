@@ -22,17 +22,34 @@ let streamsInFlight: Promise<Set<string>> | null = null;
 const STREAMS_TTL_MS = 60_000;
 
 /**
- * Session circuit-breaker for the go2rtc **media** path. Signaling can succeed
- * (WS via nginx) while media (WebRTC to `GO2RTC_HOST_IP:8555`) can't be reached —
- * e.g. before the §7c host forwarder is up, or off the tailnet. The first camera
- * that fails media flips this to false, and every camera after skips the go2rtc
- * tier for the rest of the session (no repeated multi-second stalls). A success
- * flips it true. Reset on reload.
+ * Circuit-breaker for the go2rtc **media** path. Signaling can succeed (WS via
+ * nginx) while media (WebRTC to `GO2RTC_HOST_IP:8555`) can't be reached — e.g.
+ * before the §7c host forwarder is up, or off the tailnet. A camera that fails
+ * media trips this, and every camera after skips the go2rtc tier (no repeated
+ * multi-second stalls).
+ *
+ * ## It EXPIRES, and that is the whole point
+ *
+ * This was a permanent latch until 2026-08-25. `reportGo2rtcMedia(false)` set a
+ * flag with no expiry, and its only reader — `go2rtcMaybeAvailable` — is what
+ * decides whether the go2rtc player is mounted at all. So once false, nothing
+ * could mount the player, and the success that would clear it became
+ * **unreachable**: one transient blip disabled go2rtc for every camera until a
+ * full page reload.
+ *
+ * Android's twin produced the visible incident (the live ladder fell through to a
+ * 10s-refresh still image behind a green "Live" badge, reported as "very choppy
+ * live video"); web shares the shape, so it is fixed in lockstep.
+ *
+ * A failure now records WHEN it happened and stops counting after
+ * `BREAKER_TTL_MS`, letting one open retry the tier and re-establish the truth.
+ * A success clears it immediately — the tier working proves the path is fine.
  */
-let mediaHealthy: boolean | null = null;
+let mediaFailedAt: number | null = null;
+const BREAKER_TTL_MS = STREAMS_TTL_MS;
 
 export function reportGo2rtcMedia(ok: boolean): void {
-  mediaHealthy = ok;
+  mediaFailedAt = ok ? null : Date.now();
 }
 
 /** Whether the stream list has been fetched at least once this session. */
@@ -72,7 +89,7 @@ export function primeGo2rtcStreams(): Promise<void> {
  *    negotiation fast and the player steps down.
  */
 export function go2rtcMaybeAvailable(src: string): boolean {
-  if (mediaHealthy === false) return false;
+  if (mediaFailedAt !== null && Date.now() - mediaFailedAt < BREAKER_TTL_MS) return false;
   if (streamsCache && !streamsCache.has(src)) return false;
   return true;
 }
@@ -89,5 +106,5 @@ export function resetGo2rtcForTest(): void {
   streamsCache = null;
   streamsFetchedAt = 0;
   streamsInFlight = null;
-  mediaHealthy = null;
+  mediaFailedAt = null;
 }

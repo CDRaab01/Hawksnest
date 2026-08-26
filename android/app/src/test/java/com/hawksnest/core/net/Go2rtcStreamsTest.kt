@@ -44,12 +44,50 @@ class Go2rtcStreamsTest {
         assertTrue(streams.maybeAvailable("front_door"))
         assertFalse(streams.streamsKnown())
 
-        // The first media failure trips the breaker for the rest of the session.
+        // A media failure trips the breaker.
         Go2rtcHealth.report(false)
         assertFalse(streams.maybeAvailable("front_door"))
 
         // A success clears it.
         Go2rtcHealth.report(true)
+        assertTrue(streams.maybeAvailable("front_door"))
+    }
+
+    @Test
+    fun `the breaker expires, so a transient failure cannot disable the tier forever`() {
+        val streams = subject()
+        var clock = 1_000L
+        Go2rtcHealth.setClockForTest { clock }
+
+        Go2rtcHealth.report(false)
+        assertFalse(streams.maybeAvailable("front_door"))
+
+        // Still suppressed just before the TTL.
+        clock += Go2rtcHealth.BREAKER_TTL_MS - 1
+        assertFalse(streams.maybeAvailable("front_door"))
+
+        // ...and retryable once it elapses. Without this the tier was unreachable for the whole
+        // process: `maybeAvailable` gates mounting the player, so the `report(true)` that would
+        // clear the verdict could never fire. The observed symptom was the live ladder falling
+        // all the way to a 10s-refresh still image behind a green "Live" badge.
+        clock += 2
+        assertTrue(streams.maybeAvailable("front_door"))
+    }
+
+    @Test
+    fun `a success after expiry keeps the tier available`() {
+        val streams = subject()
+        var clock = 1_000L
+        Go2rtcHealth.setClockForTest { clock }
+
+        Go2rtcHealth.report(false)
+        clock += Go2rtcHealth.BREAKER_TTL_MS + 1
+        assertTrue(streams.maybeAvailable("front_door"))
+
+        // The retry succeeds: the verdict is cleared outright, not merely expired, so a later
+        // clock reading can't resurrect it.
+        Go2rtcHealth.report(true)
+        clock += 1
         assertTrue(streams.maybeAvailable("front_door"))
     }
 
