@@ -48,7 +48,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.ha.ConnectionStatus
@@ -426,23 +430,28 @@ private fun SecurityHero(
             )
         }
         Spacer(Modifier.size(HawksnestTheme.spacing.md))
-        Row(
+        // One Text, not a Row of two. Side-by-side Texts are each measured against what the other
+        // leaves behind, so once the summary wrapped, the offline label was squeezed to a
+        // one-character-wide column running the height of the card. As a single annotated string
+        // the whole read-out wraps as one paragraph (what the web twin gets from inline spans);
+        // the offline half keeps its smaller type via a span.
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = if (ui.secureAllClear) pulse.recovery else pulse.streak)) {
+                    append(ui.securitySummary)
+                }
+                ui.offlineLabel?.let {
+                    withStyle(
+                        MaterialTheme.typography.bodySmall.toSpanStyle().copy(color = pulse.streak),
+                    ) {
+                        append(" · $it")
+                    }
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                ui.securitySummary,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (ui.secureAllClear) pulse.recovery else pulse.streak,
-            )
-            ui.offlineLabel?.let {
-                Text(
-                    " · $it",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = pulse.streak,
-                )
-            }
-        }
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
