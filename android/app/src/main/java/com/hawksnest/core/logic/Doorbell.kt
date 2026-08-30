@@ -4,7 +4,7 @@ import com.hawksnest.core.ha.HassEntity
 import java.time.Instant
 import java.time.OffsetDateTime
 
-/** A doorbell press surfaced from a camera's `_ding` sensor. */
+/** A doorbell press surfaced from a camera's ding sensor (`_ding` or `_visitor`). */
 data class DoorbellPress(
     val cameraId: String,
     val name: String,
@@ -21,8 +21,9 @@ private fun parseMs(iso: String?, fallback: Long): Long {
 
 /**
  * The most recent active doorbell press across all cameras — a camera whose
- * `binary_sensor.<base>_ding` is `on` and changed within [windowMs]. ring-mqtt
- * surfaces a doorbell ring as that sensor flipping on. Ported from
+ * resolved ding sensor is `on` and changed within [windowMs]. ring-mqtt surfaces a
+ * ring as `binary_sensor.<base>_ding` and the Reolink integration as `_visitor`;
+ * [resolveCameras] folds both into [LogicalCamera.dingId]. Ported from
  * `src/lib/doorbell.ts`.
  */
 fun activeDoorbellPress(

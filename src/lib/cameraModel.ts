@@ -32,7 +32,7 @@ export interface LogicalCamera {
   eventStreamId: string | null;
   /** ring-mqtt event selector (`select.<base>_event_select`) — picks the event to play. */
   eventSelectId: string | null;
-  /** Doorbell press sensor (`binary_sensor.<base>_ding`), if present. */
+  /** Doorbell press sensor (ring-mqtt `_ding` or Reolink `_visitor`), if present. */
   dingId: string | null;
   /** Motion sensor (`binary_sensor.<base>_motion`), if present. */
   motionId: string | null;
@@ -45,6 +45,22 @@ function objectIdOf(entityId: string): string {
   const dot = entityId.indexOf(".");
   return dot >= 0 ? entityId.slice(dot + 1) : entityId;
 }
+
+/**
+ * Doorbell-press sensor suffixes, in preference order.
+ *
+ * ring-mqtt names the press `binary_sensor.<base>_ding`; HA's official **Reolink**
+ * integration names the identical signal `binary_sensor.<base>_visitor`. Both mean
+ * "someone pressed the button", so both resolve into the same `dingId` and every
+ * downstream consumer — the wall tile pulse, `DoorbellBanner`, and the player's ding
+ * history on the timeline — works unchanged whichever backend the doorbell came from.
+ *
+ * Keep in lockstep with `core/logic/CameraModel.kt`'s `DING_SUFFIXES`.
+ */
+const DING_SUFFIXES = ["_ding", "_visitor"] as const;
+
+/** States meaning "this entity is registered but not reporting". */
+const DEAD_STATES = new Set(["unavailable", "unknown"]);
 
 type Role = "live" | "snapshot" | "event" | "standalone";
 
@@ -94,6 +110,23 @@ export function resolveCameras(
 
   const has = (id: string): string | null => (entities[id] ? id : null);
 
+  /**
+   * The doorbell-press sensor for `base`, preferring one that is actually reporting.
+   *
+   * Retiring a backend does not unregister its entities: a replaced Ring doorbell
+   * leaves `binary_sensor.<base>_ding` registered but `unavailable`, still holding the
+   * canonical slug, while the replacement publishes `_visitor`. Picking by suffix order
+   * alone would bind the dead sensor and the banner would never fire — the same class of
+   * bug that mis-bound the basement/bedroom tiles. So: first live candidate wins, and we
+   * only fall back to declaration order when none of them are reporting.
+   */
+  const dingIdFor = (base: string): string | null => {
+    const candidates = DING_SUFFIXES.map((suffix) =>
+      has(`binary_sensor.${base}${suffix}`),
+    ).filter((id): id is string => id !== null);
+    return candidates.find((id) => !DEAD_STATES.has(entities[id].state)) ?? candidates[0] ?? null;
+  };
+
   const cameras: LogicalCamera[] = [];
   for (const g of groups.values()) {
     const liveEntity = g.live ?? g.standalone ?? g.snapshot;
@@ -108,7 +141,7 @@ export function resolveCameras(
       snapshotEntity,
       eventStreamId: g.event?.entity_id ?? null,
       eventSelectId: has(`select.${g.base}_event_select`),
-      dingId: has(`binary_sensor.${g.base}_ding`),
+      dingId: dingIdFor(g.base),
       motionId: has(`binary_sensor.${g.base}_motion`),
       sirenSwitchId: has(`switch.${g.base}_siren`),
     });
