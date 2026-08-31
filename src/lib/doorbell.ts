@@ -1,7 +1,7 @@
 import type { HassEntity } from "./ha";
 import type { LogicalCamera } from "./cameraModel";
 
-/** A doorbell press surfaced from a camera's `_ding` sensor. */
+/** A doorbell press surfaced from a camera's ding sensor (`_ding` or `_visitor`). */
 export interface DoorbellPress {
   cameraId: string;
   name: string;
@@ -11,9 +11,10 @@ export interface DoorbellPress {
 
 /**
  * The most recent active doorbell press across all cameras — a camera whose
- * `binary_sensor.<base>_ding` is `on` and changed within `windowMs`. ring-mqtt
- * surfaces a doorbell ring as that sensor flipping on; this is the signal the
- * in-app banner + notification ride. Returns null when nothing is ringing.
+ * resolved ding sensor is `on` and changed within `windowMs`. ring-mqtt surfaces a
+ * ring as `binary_sensor.<base>_ding` and the Reolink integration as `_visitor`;
+ * `cameraModel` folds both into `dingId`, so this reads either. This is the signal
+ * the in-app banner + notification ride. Returns null when nothing is ringing.
  */
 export function activeDoorbellPress(
   cameras: LogicalCamera[],

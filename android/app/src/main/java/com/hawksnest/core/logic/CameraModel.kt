@@ -22,11 +22,26 @@ data class LogicalCamera(
      */
     val eventStreamId: String?,
     val eventSelectId: String?,
+    /** Doorbell press sensor (ring-mqtt `_ding` or Reolink `_visitor`), if present. */
     val dingId: String?,
     val motionId: String?,
     /** ring-mqtt siren switch (`switch.<base>_siren`) on siren-capable cameras, else null. */
     val sirenSwitchId: String? = null,
 )
+
+/**
+ * Doorbell-press sensor suffixes, in preference order.
+ *
+ * ring-mqtt names the press `binary_sensor.<base>_ding`; HA's official **Reolink**
+ * integration names the identical signal `binary_sensor.<base>_visitor`. Both mean
+ * "someone pressed the button", so both resolve into the same [LogicalCamera.dingId]
+ * and every downstream consumer works unchanged whichever backend the doorbell came
+ * from. Keep in lockstep with `src/lib/cameraModel.ts`'s `DING_SUFFIXES`.
+ */
+private val DING_SUFFIXES = listOf("_ding", "_visitor")
+
+/** States meaning "this entity is registered but not reporting". */
+private val DEAD_STATES = setOf("unavailable", "unknown")
 
 private fun objectIdOf(entityId: String): String =
     entityId.substringAfter('.', entityId)
@@ -67,6 +82,21 @@ fun resolveCameras(
 
     fun has(id: String): String? = if (entities.containsKey(id)) id else null
 
+    /**
+     * The doorbell-press sensor for [base], preferring one that is actually reporting.
+     *
+     * Retiring a backend does not unregister its entities: a replaced Ring doorbell leaves
+     * `binary_sensor.<base>_ding` registered but `unavailable`, still holding the canonical
+     * slug, while the replacement publishes `_visitor`. Picking by suffix order alone would
+     * bind the dead sensor and the banner would never fire. First live candidate wins; fall
+     * back to declaration order only when none are reporting.
+     */
+    fun dingIdFor(base: String): String? {
+        val candidates = DING_SUFFIXES.mapNotNull { has("binary_sensor.$base$it") }
+        return candidates.firstOrNull { entities[it]?.state !in DEAD_STATES }
+            ?: candidates.firstOrNull()
+    }
+
     val cameras = mutableListOf<LogicalCamera>()
     for ((base, g) in groups) {
         val liveEntity = g["live"] ?: g["standalone"] ?: g["snapshot"] ?: continue
@@ -79,7 +109,7 @@ fun resolveCameras(
                 snapshotEntity = snapshotEntity,
                 eventStreamId = g["event"]?.entityId,
                 eventSelectId = has("select.${base}_event_select"),
-                dingId = has("binary_sensor.${base}_ding"),
+                dingId = dingIdFor(base),
                 motionId = has("binary_sensor.${base}_motion"),
                 sirenSwitchId = has("switch.${base}_siren"),
             ),

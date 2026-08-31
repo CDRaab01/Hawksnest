@@ -84,3 +84,68 @@ describe("resolveCameras", () => {
     expect(zzz.snapshotEntity.entity_id).toBe("camera.zzz_live");
   });
 });
+
+describe("resolveCameras — doorbell press across backends", () => {
+  it("binds a Reolink doorbell's `_visitor` sensor as the ding", () => {
+    // What the live rig produces for a Reolink doorbell: Frigate owns the camera
+    // entity, and the button press comes from the official Reolink integration as
+    // `_visitor` (there is no `_ding` — that name is ring-mqtt's).
+    const entities = map(
+      ent("camera.front_door", "Front Door"),
+      ent("binary_sensor.front_door_visitor", "Front Door Visitor"),
+      ent("binary_sensor.front_door_motion", "Front Door Motion"),
+    );
+    const cams = resolveCameras(entities, {});
+    expect(cams).toHaveLength(1);
+    expect(cams[0].dingId).toBe("binary_sensor.front_door_visitor");
+    expect(cams[0].motionId).toBe("binary_sensor.front_door_motion");
+  });
+
+  it("prefers `_ding` over `_visitor` when both are reporting", () => {
+    const entities = map(
+      ent("camera.front_door", "Front Door"),
+      ent("binary_sensor.front_door_ding", "Front Door Ding"),
+      ent("binary_sensor.front_door_visitor", "Front Door Visitor"),
+    );
+    expect(resolveCameras(entities, {})[0].dingId).toBe("binary_sensor.front_door_ding");
+  });
+
+  it("skips a retired backend's dead `_ding` in favour of a live `_visitor`", () => {
+    // The handover case: the Ring doorbell is gone but ring-mqtt's `_ding` entity is
+    // still registered on the canonical slug, reporting `unavailable`. Binding it would
+    // wire the banner to a dead sensor, so the live Reolink `_visitor` must win.
+    const dead: HassEntity = {
+      entity_id: "binary_sensor.front_door_ding",
+      state: "unavailable",
+      attributes: {},
+    };
+    const entities = map(
+      ent("camera.front_door", "Front Door"),
+      dead,
+      ent("binary_sensor.front_door_visitor", "Front Door Visitor"),
+    );
+    expect(resolveCameras(entities, {})[0].dingId).toBe("binary_sensor.front_door_visitor");
+  });
+
+  it("falls back to declaration order when no candidate is reporting", () => {
+    const off = (id: string): HassEntity => ({
+      entity_id: id,
+      state: "unavailable",
+      attributes: {},
+    });
+    const entities = map(
+      ent("camera.front_door", "Front Door"),
+      off("binary_sensor.front_door_ding"),
+      off("binary_sensor.front_door_visitor"),
+    );
+    expect(resolveCameras(entities, {})[0].dingId).toBe("binary_sensor.front_door_ding");
+  });
+
+  it("leaves dingId null for a camera with neither sensor", () => {
+    const entities = map(
+      ent("camera.garage", "Garage"),
+      ent("binary_sensor.garage_motion", "Garage Motion"),
+    );
+    expect(resolveCameras(entities, {})[0].dingId).toBeNull();
+  });
+});
