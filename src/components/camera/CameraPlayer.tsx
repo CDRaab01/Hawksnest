@@ -49,6 +49,8 @@ import { HlsPlayer } from "../HlsPlayer";
 import { CameraSwitcher } from "./CameraSwitcher";
 import { SirenButton } from "./SirenButton";
 import { TalkButton } from "./TalkButton";
+import { ReplyButton, ReplySheet } from "./ReplySheet";
+import { canReachSpeaker } from "../../lib/quickReply";
 import { MuteButton } from "./MuteButton";
 import { SnapshotButton } from "./SnapshotButton";
 import { QualityToggle } from "./QualityToggle";
@@ -174,12 +176,13 @@ export function CameraPlayer({
     [cameraName, entityIds],
   );
   const [showPtz, setShowPtz] = useState(false);
+  const [replyOpen, setReplyOpen] = useState(false);
 
   const subSrc = `${cameraName}_sub`;
   const hasSubStream = go2rtcKnown && go2rtcMaybeAvailable(subSrc);
-  // Whether anything can be spoken through this camera — the Talk gate, and the
-  // web twin of Android's `canReachSpeaker`. go2rtc is what carries the audio
-  // backchannel, so a camera it doesn't serve has no path to a speaker at all.
+  // Whether anything can be spoken through this camera — the gate for BOTH speaker
+  // features, Talk and Reply. go2rtc is what carries the audio backchannel, so a
+  // camera it doesn't serve has no path to a speaker at all.
   //
   // This was `isRing` until 2026-08-05, which is a fact about where a camera's
   // RECORDINGS live and says nothing about its speaker — the same category error
@@ -189,7 +192,10 @@ export function CameraPlayer({
   // `go2rtcKnown &&` is not redundant: `go2rtcMaybeAvailable` is deliberately
   // OPTIMISTIC while the stream list is in flight, which is right for choosing a
   // transport that can step down and wrong for a button. Fails closed here.
-  const canReachSpeaker = go2rtcKnown && go2rtcMaybeAvailable(cameraName);
+  // `null` while the stream list is in flight, which `canReachSpeaker` fails closed on.
+  const speakerReachable = canReachSpeaker(
+    go2rtcKnown ? go2rtcMaybeAvailable(cameraName) : null,
+  );
   // A camera without a sub stream always plays High — don't let a stale Low
   // selection from the previous camera silently pick a nonexistent stream.
   const liveGo2rtcSrc = quality === "low" && hasSubStream ? subSrc : cameraName;
@@ -776,7 +782,10 @@ export function CameraPlayer({
           )}
           {/* Live only: TalkButton latches the mic open and unmounting it is what
               closes the session, so it must never outlive the live view. */}
-          {canReachSpeaker && isLive && <TalkButton src={cameraName} />}
+          {speakerReachable && isLive && <TalkButton src={cameraName} />}
+          {/* Reply needs no mic and no peer connection — one POST to go2rtc, which
+              pushes a file into the camera's backchannel. Same gate as Talk. */}
+          {speakerReachable && isLive && <ReplyButton onOpen={() => setReplyOpen(true)} />}
           {camera.sirenSwitchId && <SirenButton entityId={camera.sirenSwitchId} />}
           {/* ml-auto pushes the status to the right while everything shares a
               line, and simply trails the group once the row wraps. */}
@@ -852,6 +861,13 @@ export function CameraPlayer({
           the camera with no visible feedback. Unmounting on the way out is what
           guarantees any in-flight move is stopped (see PtzPad). */}
       {isLive && ptz && showPtz && <PtzPanel ptz={ptz} />}
+      {replyOpen && (
+        <ReplySheet
+          cameraName={cameraName}
+          displayName={camera.name}
+          onClose={() => setReplyOpen(false)}
+        />
+      )}
 
       <Timeline24h
         events={displayEvents}
