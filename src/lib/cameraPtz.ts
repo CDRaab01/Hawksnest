@@ -66,8 +66,29 @@ export interface PtzControls {
 }
 
 /** Is one slug the other's trailing whole segments? (`stairway` ~ `first_floor_stairway`) */
-function slugsMatch(a: string, b: string): boolean {
+export function slugsMatch(a: string, b: string): boolean {
   return a === b || a.endsWith(`_${b}`) || b.endsWith(`_${a}`);
+}
+
+/**
+ * Pick the integration's device slug for `cameraBase` from the slugs that actually exist.
+ *
+ * Shared with `doorbellControls.ts` so the two resolvers can never disagree about which
+ * device a camera is. The rules, in order: an explicit alias wins, then an exact match
+ * (never let a fuzzy match override an exact one), then exactly one trailing-segment
+ * match. Ambiguity yields null rather than a guess — pointing a control at the wrong
+ * camera is worse than showing no control.
+ */
+export function pickDeviceSlug(
+  cameraBase: string,
+  candidates: string[],
+  aliases: Record<string, string> = {},
+): string | null {
+  const alias = aliases[cameraBase];
+  if (alias && candidates.includes(alias)) return alias;
+  if (candidates.includes(cameraBase)) return cameraBase;
+  const near = candidates.filter((c) => slugsMatch(c, cameraBase));
+  return near.length === 1 ? near[0] : null;
 }
 
 const PTZ_UP = /^button\.(.+)_ptz_up$/;
@@ -96,18 +117,7 @@ export function resolvePtz(
   }
   if (candidates.length === 0) return null;
 
-  const alias = aliases[cameraBase];
-  let slug: string | undefined;
-  if (alias && candidates.includes(alias)) {
-    slug = alias;
-  } else if (candidates.includes(cameraBase)) {
-    // Exact wins outright — never let a fuzzy match override an exact one.
-    slug = cameraBase;
-  } else {
-    const near = candidates.filter((c) => slugsMatch(c, cameraBase));
-    // Exactly one, or nothing. An ambiguous match moves the wrong camera.
-    if (near.length === 1) slug = near[0];
-  }
+  const slug = pickDeviceSlug(cameraBase, candidates, aliases);
   if (!slug) return null;
 
   const has = (id: string) => (ids.has(id) ? id : null);

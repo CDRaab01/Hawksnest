@@ -56,9 +56,11 @@ import { SnapshotButton } from "./SnapshotButton";
 import { QualityToggle } from "./QualityToggle";
 import { EventDescription } from "./EventDescription";
 import { PtzPanel } from "./PtzPanel";
+import { DoorbellPanel } from "./DoorbellPanel";
 import { resolvePtz } from "../../lib/cameraPtz";
+import { resolveDoorbellControls } from "../../lib/doorbellControls";
 import { useEntityStore } from "../../store/entityStore";
-import { Move, Scissors } from "lucide-react";
+import { Move, Scissors, SlidersHorizontal } from "lucide-react";
 import { Timeline24h } from "./Timeline24h";
 import { TransportBar } from "./TransportBar";
 import { ZoomableFrame } from "./ZoomableFrame";
@@ -177,6 +179,12 @@ export function CameraPlayer({
   );
   const [showPtz, setShowPtz] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
+  // Doorbell-only settings (chime volume, button sound, auto reply, siren). Resolved the
+  // same way as PTZ — from the entity ids that exist, never derived from the camera name.
+  const doorbell = useMemo(
+    () => resolveDoorbellControls(cameraName, Object.keys(entityIds)),
+    [cameraName, entityIds],
+  );
 
   const subSrc = `${cameraName}_sub`;
   const hasSubStream = go2rtcKnown && go2rtcMaybeAvailable(subSrc);
@@ -738,19 +746,28 @@ export function CameraPlayer({
           with a sub stream, Talk only for Ring, Siren where one exists). */}
       <div className="flex flex-wrap items-center gap-sm">
           <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
-          {isLive && ptz && (
+          {/* One drawer, two possible contents: the movement pad (PTZ cameras) and the
+              doorbell settings. Gated on EITHER existing — gating on `ptz` alone meant the
+              doorbell panel could never be opened, since a doorbell has no pan/tilt. */}
+          {isLive && (ptz || doorbell) && (
             <button
               type="button"
               onClick={() => setShowPtz((s) => !s)}
               aria-pressed={showPtz}
-              aria-label={showPtz ? "Hide camera controls" : "Move camera"}
+              aria-label={
+                showPtz
+                  ? "Hide camera controls"
+                  : ptz
+                    ? "Move camera"
+                    : "Doorbell settings"
+              }
               className={[
                 "flex items-center gap-xs rounded-sm px-sm py-xs caption-label transition-colors duration-fast",
                 showPtz ? "bg-panel-high text-ink" : "bg-panel text-ink-dim hover:text-ink",
               ].join(" ")}
             >
-              <Move size={14} />
-              Move
+              {ptz ? <Move size={14} /> : <SlidersHorizontal size={14} />}
+              {ptz ? "Move" : "Settings"}
             </button>
           )}
           {isLive && hasSubStream && <QualityToggle quality={quality} onChange={setQuality} />}
@@ -861,6 +878,7 @@ export function CameraPlayer({
           the camera with no visible feedback. Unmounting on the way out is what
           guarantees any in-flight move is stopped (see PtzPad). */}
       {isLive && ptz && showPtz && <PtzPanel ptz={ptz} />}
+      {isLive && doorbell && showPtz && <DoorbellPanel controls={doorbell} />}
       {replyOpen && (
         <ReplySheet
           cameraName={cameraName}

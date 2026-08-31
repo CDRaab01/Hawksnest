@@ -52,8 +52,29 @@ data class PtzControls(
 )
 
 /** Is one slug the other's trailing whole segments? (`stairway` ~ `first_floor_stairway`) */
-private fun slugsMatch(a: String, b: String): Boolean =
+internal fun slugsMatch(a: String, b: String): Boolean =
     a == b || a.endsWith("_$b") || b.endsWith("_$a")
+
+/**
+ * Pick the integration's device slug for [cameraBase] from the slugs that actually exist.
+ *
+ * Shared with `DoorbellControls.kt` so the two resolvers can never disagree about which device a
+ * camera is. An explicit alias wins, then an exact match (never let a fuzzy match override an
+ * exact one), then exactly one trailing-segment match. Ambiguity yields null rather than a guess —
+ * pointing a control at the wrong camera is worse than showing no control.
+ */
+internal fun pickDeviceSlug(
+    cameraBase: String,
+    candidates: List<String>,
+    aliases: Map<String, String> = emptyMap(),
+): String? {
+    val alias = aliases[cameraBase]
+    return when {
+        alias != null && alias in candidates -> alias
+        cameraBase in candidates -> cameraBase
+        else -> candidates.filter { slugsMatch(it, cameraBase) }.singleOrNull()
+    }
+}
 
 private val PTZ_UP = Regex("""^button\.(.+)_ptz_up$""")
 
@@ -75,15 +96,7 @@ fun resolvePtz(
     val candidates = ids.mapNotNull { PTZ_UP.find(it)?.groupValues?.get(1) }
     if (candidates.isEmpty()) return null
 
-    val alias = aliases[cameraBase]
-    val slug = when {
-        alias != null && alias in candidates -> alias
-        // Exact wins outright — never let a fuzzy match override an exact one.
-        cameraBase in candidates -> cameraBase
-        else -> candidates.filter { slugsMatch(it, cameraBase) }
-            // Exactly one, or nothing. An ambiguous match moves the wrong camera.
-            .singleOrNull()
-    } ?: return null
+    val slug = pickDeviceSlug(cameraBase, candidates, aliases) ?: return null
 
     fun has(id: String): String? = if (id in ids) id else null
 

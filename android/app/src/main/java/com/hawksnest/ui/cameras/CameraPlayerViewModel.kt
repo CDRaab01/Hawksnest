@@ -16,6 +16,8 @@ import com.hawksnest.core.logic.clipFileName
 import com.hawksnest.core.logic.PtzControls
 import com.hawksnest.core.logic.QuickReply
 import com.hawksnest.core.logic.quickReplyPath
+import com.hawksnest.core.logic.DoorbellControls
+import com.hawksnest.core.logic.resolveDoorbellControls
 import com.hawksnest.core.logic.resolvePtz
 import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
@@ -330,6 +332,12 @@ class CameraPlayerViewModel @Inject constructor(
             .map { resolvePtz(cameraBase, it.keys) }
             .distinctUntilChanged()
 
+    /** Doorbell-only settings, resolved the same way as PTZ: discovered, never derived. */
+    fun doorbellControls(cameraBase: String): Flow<DoorbellControls?> =
+        connection.state.entities
+            .map { resolveDoorbellControls(cameraBase, it.keys) }
+            .distinctUntilChanged()
+
     /** Live state of one entity — backs the zoom/focus positions and autofocus toggle. */
     fun entityFlow(entityId: String): Flow<HassEntity?> =
         connection.state.entities.map { it[entityId] }.distinctUntilChanged()
@@ -358,6 +366,22 @@ class CameraPlayerViewModel @Inject constructor(
     /** Toggle the camera's autofocus. */
     fun setAutofocus(entityId: String, on: Boolean) {
         connection.control(entityId, if (on) "turn_on" else "turn_off", label = "Autofocus")
+    }
+
+    /** Toggle a `switch`/`siren` entity. The domain is taken from the entity id. */
+    fun setToggle(entityId: String, on: Boolean, label: String) {
+        connection.control(entityId, if (on) "turn_on" else "turn_off", label = label)
+    }
+
+    /** Choose an option on a `select` entity (the doorbell's quick-reply messages). */
+    fun selectOption(entityId: String, option: String, label: String) {
+        connection.control(
+            entityId,
+            "select_option",
+            label = label,
+            extra = mapOf("option" to option),
+            awaitEcho = false,
+        )
     }
 
     /** Recall a saved camera position. */
