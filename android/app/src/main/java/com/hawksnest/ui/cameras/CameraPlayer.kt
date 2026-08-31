@@ -260,6 +260,10 @@ fun CameraPlayer(
     // (the stairway's Reolink device is named differently from its Frigate camera).
     val ptz by remember(cameraName) { viewModel.ptzControls(cameraName) }
         .collectAsState(initial = null)
+    // Doorbell-only settings (chime volume, button sound, auto reply, siren). Discovered from
+    // the entity ids, never derived from the camera name — see core/logic/DoorbellControls.kt.
+    val doorbell by remember(cameraName) { viewModel.doorbellControls(cameraName) }
+        .collectAsState(initial = null)
     var showPtz by remember(cam.id) { mutableStateOf(false) }
     // Keyed on cam.id so switching cameras closes the sheet: the replies would still be addressed
     // to the camera you were looking at a moment ago, which is a message played in the wrong room.
@@ -499,8 +503,15 @@ fun CameraPlayer(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             CameraSwitcher(cameras = cameras, current = cam, onSelect = onSelectCamera)
-            if (isLive && ptz != null) {
-                MoveButton(active = showPtz, onToggle = { showPtz = !showPtz })
+            // One drawer, two possible contents. Gated on EITHER existing — gating on `ptz`
+            // alone would mean the doorbell panel could never be opened, since a doorbell has
+            // no pan/tilt.
+            if (isLive && (ptz != null || doorbell != null)) {
+                MoveButton(
+                    active = showPtz,
+                    onToggle = { showPtz = !showPtz },
+                    hasPtz = ptz != null,
+                )
             }
             if (isLive && subAvailable) {
                 QualityToggle(low = qualityLow, onChange = { qualityLow = it })
@@ -732,6 +743,7 @@ fun CameraPlayer(
             }
 
             ptz?.takeIf { isLive && showPtz }?.let { PtzPanel(it, viewModel) }
+            doorbell?.takeIf { isLive && showPtz }?.let { DoorbellPanel(it, viewModel) }
 
             Timeline24h(
                 events = displayEvents,

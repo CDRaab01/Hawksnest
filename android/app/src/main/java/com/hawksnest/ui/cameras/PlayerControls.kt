@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.OpenWith
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -56,17 +57,23 @@ import java.util.Locale
 
 /** Opens the camera-movement drawer. Only shown for cameras that can actually move. */
 @Composable
-fun MoveButton(active: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+fun MoveButton(
+    active: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** False on a doorbell: the drawer then holds settings, not a movement pad. */
+    hasPtz: Boolean = true,
+) {
     ChromeButton(
         icon = { fg ->
             Icon(
-                Icons.Filled.OpenWith,
+                if (hasPtz) Icons.Filled.OpenWith else Icons.Filled.Tune,
                 contentDescription = null,
                 tint = fg,
                 modifier = Modifier.size(16.dp),
             )
         },
-        label = "Move",
+        label = if (hasPtz) "Move" else "Settings",
         active = active,
         onClick = onToggle,
         modifier = modifier,

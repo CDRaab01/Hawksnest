@@ -49,14 +49,18 @@ import { HlsPlayer } from "../HlsPlayer";
 import { CameraSwitcher } from "./CameraSwitcher";
 import { SirenButton } from "./SirenButton";
 import { TalkButton } from "./TalkButton";
+import { ReplyButton, ReplySheet } from "./ReplySheet";
+import { canReachSpeaker } from "../../lib/quickReply";
 import { MuteButton } from "./MuteButton";
 import { SnapshotButton } from "./SnapshotButton";
 import { QualityToggle } from "./QualityToggle";
 import { EventDescription } from "./EventDescription";
 import { PtzPanel } from "./PtzPanel";
+import { DoorbellPanel } from "./DoorbellPanel";
 import { resolvePtz } from "../../lib/cameraPtz";
+import { resolveDoorbellControls } from "../../lib/doorbellControls";
 import { useEntityStore } from "../../store/entityStore";
-import { Move, Scissors } from "lucide-react";
+import { Move, Scissors, SlidersHorizontal } from "lucide-react";
 import { Timeline24h } from "./Timeline24h";
 import { TransportBar } from "./TransportBar";
 import { ZoomableFrame } from "./ZoomableFrame";
@@ -174,12 +178,19 @@ export function CameraPlayer({
     [cameraName, entityIds],
   );
   const [showPtz, setShowPtz] = useState(false);
+  const [replyOpen, setReplyOpen] = useState(false);
+  // Doorbell-only settings (chime volume, button sound, auto reply, siren). Resolved the
+  // same way as PTZ — from the entity ids that exist, never derived from the camera name.
+  const doorbell = useMemo(
+    () => resolveDoorbellControls(cameraName, Object.keys(entityIds)),
+    [cameraName, entityIds],
+  );
 
   const subSrc = `${cameraName}_sub`;
   const hasSubStream = go2rtcKnown && go2rtcMaybeAvailable(subSrc);
-  // Whether anything can be spoken through this camera — the Talk gate, and the
-  // web twin of Android's `canReachSpeaker`. go2rtc is what carries the audio
-  // backchannel, so a camera it doesn't serve has no path to a speaker at all.
+  // Whether anything can be spoken through this camera — the gate for BOTH speaker
+  // features, Talk and Reply. go2rtc is what carries the audio backchannel, so a
+  // camera it doesn't serve has no path to a speaker at all.
   //
   // This was `isRing` until 2026-08-05, which is a fact about where a camera's
   // RECORDINGS live and says nothing about its speaker — the same category error
@@ -189,7 +200,10 @@ export function CameraPlayer({
   // `go2rtcKnown &&` is not redundant: `go2rtcMaybeAvailable` is deliberately
   // OPTIMISTIC while the stream list is in flight, which is right for choosing a
   // transport that can step down and wrong for a button. Fails closed here.
-  const canReachSpeaker = go2rtcKnown && go2rtcMaybeAvailable(cameraName);
+  // `null` while the stream list is in flight, which `canReachSpeaker` fails closed on.
+  const speakerReachable = canReachSpeaker(
+    go2rtcKnown ? go2rtcMaybeAvailable(cameraName) : null,
+  );
   // A camera without a sub stream always plays High — don't let a stale Low
   // selection from the previous camera silently pick a nonexistent stream.
   const liveGo2rtcSrc = quality === "low" && hasSubStream ? subSrc : cameraName;
@@ -732,19 +746,28 @@ export function CameraPlayer({
           with a sub stream, Talk only for Ring, Siren where one exists). */}
       <div className="flex flex-wrap items-center gap-sm">
           <CameraSwitcher cameras={cameras} current={camera} onSelect={onSelectCamera} />
-          {isLive && ptz && (
+          {/* One drawer, two possible contents: the movement pad (PTZ cameras) and the
+              doorbell settings. Gated on EITHER existing — gating on `ptz` alone meant the
+              doorbell panel could never be opened, since a doorbell has no pan/tilt. */}
+          {isLive && (ptz || doorbell) && (
             <button
               type="button"
               onClick={() => setShowPtz((s) => !s)}
               aria-pressed={showPtz}
-              aria-label={showPtz ? "Hide camera controls" : "Move camera"}
+              aria-label={
+                showPtz
+                  ? "Hide camera controls"
+                  : ptz
+                    ? "Move camera"
+                    : "Doorbell settings"
+              }
               className={[
                 "flex items-center gap-xs rounded-sm px-sm py-xs caption-label transition-colors duration-fast",
                 showPtz ? "bg-panel-high text-ink" : "bg-panel text-ink-dim hover:text-ink",
               ].join(" ")}
             >
-              <Move size={14} />
-              Move
+              {ptz ? <Move size={14} /> : <SlidersHorizontal size={14} />}
+              {ptz ? "Move" : "Settings"}
             </button>
           )}
           {isLive && hasSubStream && <QualityToggle quality={quality} onChange={setQuality} />}
@@ -776,7 +799,10 @@ export function CameraPlayer({
           )}
           {/* Live only: TalkButton latches the mic open and unmounting it is what
               closes the session, so it must never outlive the live view. */}
-          {canReachSpeaker && isLive && <TalkButton src={cameraName} />}
+          {speakerReachable && isLive && <TalkButton src={cameraName} />}
+          {/* Reply needs no mic and no peer connection — one POST to go2rtc, which
+              pushes a file into the camera's backchannel. Same gate as Talk. */}
+          {speakerReachable && isLive && <ReplyButton onOpen={() => setReplyOpen(true)} />}
           {camera.sirenSwitchId && <SirenButton entityId={camera.sirenSwitchId} />}
           {/* ml-auto pushes the status to the right while everything shares a
               line, and simply trails the group once the row wraps. */}
@@ -852,6 +878,14 @@ export function CameraPlayer({
           the camera with no visible feedback. Unmounting on the way out is what
           guarantees any in-flight move is stopped (see PtzPad). */}
       {isLive && ptz && showPtz && <PtzPanel ptz={ptz} />}
+      {isLive && doorbell && showPtz && <DoorbellPanel controls={doorbell} />}
+      {replyOpen && (
+        <ReplySheet
+          cameraName={cameraName}
+          displayName={camera.name}
+          onClose={() => setReplyOpen(false)}
+        />
+      )}
 
       <Timeline24h
         events={displayEvents}

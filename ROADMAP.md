@@ -52,10 +52,29 @@ live tier (PR #72), and the 1.0 version bump itself (V1.md item 11 — merged; t
   leave localStorage too. The v1.1 headline.
 - [ ] **Wall-tablet/kiosk mode** — if a mounted tablet becomes real: no-sleep, auto-reconnect
   aggressiveness, larger touch targets on the alarm panel. Cheap now that light theme exists.
-- [ ] **Two-way doorbell talk** — go2rtc supports two-way audio and it's Ring's core feature;
-  it's the difference between a camera *viewer* and a *doorbell*. Run the feasibility spike
-  against ring-mqtt first (is the Ring device's speaker path actually exposed?) and record the
-  outcome here either way — a failed spike is a deliberate drop, not a silent one.
+- [x] **Two-way doorbell talk** — **SPIKE PASSED, and the feature was already built.**
+  Confirmed on the hardware 2026-08-31 against the Reolink Video Doorbell WiFi (D340W), not
+  ring-mqtt: the Ring doorbell was retired on 2026-08-30 and the Reolink is now the doorbell, so
+  the original spike target no longer exists.
+
+  Evidence, from go2rtc's own view of the stream while Talk was held. The camera advertises the
+  ONVIF backchannel in its RTSP SDP —
+
+      m=audio 0 RTP/AVP 0
+      a=rtpmap:0 PCMU/8000
+      a=sendonly
+
+  — and go2rtc showed live `pcm_mulaw/8000` **senders** on that producer (12,960 and 49,920 bytes),
+  i.e. microphone audio reaching the speaker. The camera's `GetAbility` also reports
+  `talk: {permit: 4, ver: 1}`.
+
+  No code was needed. `TalkButton` exists on both clients and its gate stopped being `isRing` on
+  2026-08-05 — that change was made precisely because `isRing` describes where a camera's
+  RECORDINGS live and says nothing about its speaker, and it had been excluding every Reolink from
+  a feature they support. Once go2rtc served `front_door_reolink`, Talk was already reachable.
+
+  The same backchannel carries Quick Reply, which is now on **both** clients (web gained it
+  2026-08-31; Android had it already).
 
 ## Play fork program
 
