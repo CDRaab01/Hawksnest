@@ -22,7 +22,7 @@ jobs:
         working-directory: android
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5.6.0
+      - uses: actions/setup-java@v6.0.0
         with:
           distribution: temurin
           java-version: "17"
@@ -39,7 +39,7 @@ jobs:
         working-directory: android
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5.6.0
+      - uses: actions/setup-java@v6.0.0
         with:
           distribution: temurin
           java-version: "17"
@@ -65,7 +65,7 @@ jobs:
         working-directory: android
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5.6.0
+      - uses: actions/setup-java@v6.0.0
         with:
           distribution: temurin
           java-version: "17"
@@ -128,7 +128,7 @@ jobs:
           repository: CDRaab01/Sift
           path: android/sift-src
           token: ${{ secrets.SIFT_REPO_TOKEN || github.token }}
-      - uses: actions/setup-java@v5.6.0
+      - uses: actions/setup-java@v6.0.0
         with:
           distribution: temurin
           java-version: "17"
