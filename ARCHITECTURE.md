@@ -520,6 +520,22 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   time-based escape, and a transport that has silently degraded **must not** still say "Live".
   Relatedly, a drop AFTER a session connected reports only locally (`fail(global = false)`) —
   having connected is proof the path works, so a blip must not condemn the tier for everyone.
+  **The "Connecting…" overlay clears per SESSION, not per renderer** (`ui/cameras/LiveOverlay.kt`,
+  `FirstFrameSink`) — the same failure shape one layer up, found on a phone in the house on
+  2026-09-10. Both players re-arm the overlay for each new stream
+  (`DisposableEffect(src) { connecting = true }`) but used to clear it from the renderer's
+  `RendererEvents.onFirstFrameRendered`, which `EglRenderer` latches and fires once per `init()`.
+  The renderer is held in an **unkeyed** `remember` on purpose — it must outlive each stream,
+  because recreating the SurfaceView per stream flickers and freeing it under a live peer crashes
+  natively — so it spans every stream the player shows. The first stream therefore cleared the
+  overlay and every stream after it (a Low/High toggle, an in-player camera switch) armed a scrim
+  nothing could lift: measured at ~20 fps received and ~10 fps rendered for 70+ seconds behind an
+  **opaque** black rectangle, with `Reporting first rendered frame` appearing exactly once in the
+  whole logcat. A `VideoSink` on the track is scoped to the session by construction, so it cannot
+  inherit a previous stream's verdict. The scrim is now translucent as the standing defence — the
+  "must not still say Live" rule above, generalised: **the chrome that hides a transport must never
+  be able to outlive the transport's own failure**, so if it ever sticks again the video is visible
+  through it rather than replaced by it.
   The tier is offered for **every** camera, gated on go2rtc's own stream list
   (`core/net/Go2rtcStreams`, the 1:1 port of web's `lib/go2rtc.ts` cache — same 60 s TTL, same
   fail-to-EMPTY-set rule, and it hosts `Go2rtcHealth` since `core` cannot depend on `ui`).

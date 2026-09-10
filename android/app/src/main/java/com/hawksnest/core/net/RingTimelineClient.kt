@@ -13,6 +13,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,7 +31,29 @@ import javax.inject.Singleton
  * the camera screen.
  */
 @Singleton
-class RingTimelineClient @Inject constructor(private val client: OkHttpClient) {
+class RingTimelineClient @Inject constructor(client: OkHttpClient) {
+
+    /**
+     * The injected client is the one shared with the HA WebSocket, which sets `readTimeout(0)` —
+     * no timeout at all, correct for a connection meant to stay open for hours and wrong for a REST
+     * call. "Returns null on failure" only degrades gracefully when the call actually *fails*: a
+     * request that stalls instead of erroring never throws, so it never returns null, so the
+     * selector fallback never runs and the timeline waits forever with no error on screen.
+     *
+     * Bounding it turns that silent hang into a fast fall-back. [TIMEOUT_SECONDS] is generous, not
+     * tight: measured calls land in 0.2–0.7 s, but nginx allows the upstream 60 s because paging a
+     * busy camera's day through Ring's own API genuinely takes seconds, and timing out a slow-but-
+     * working timeline would be a regression. 20 s matches the bound the selector path already
+     * uses, so the worst case is symmetric either way.
+     *
+     * `newBuilder()` (as in [Go2rtcStreams.httpFetcher]) shares the connection pool and dispatcher
+     * with the parent rather than standing up a second set of threads.
+     */
+    private val client: OkHttpClient = client.newBuilder()
+        .callTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -97,5 +120,8 @@ class RingTimelineClient @Inject constructor(private val client: OkHttpClient) {
     private companion object {
         /** Deliberately not under `/api/` — that path is proxied to Home Assistant. */
         const val PATH = "/ring-timeline"
+
+        /** Ceiling for one timeline call; see the note on [client]. */
+        const val TIMEOUT_SECONDS = 20L
     }
 }

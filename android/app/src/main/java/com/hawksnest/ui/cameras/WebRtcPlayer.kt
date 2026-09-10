@@ -1,16 +1,8 @@
 package com.hawksnest.ui.cameras
 
 import android.graphics.Bitmap
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -18,13 +10,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.hawksnest.core.ha.WebRtcHandle
 import com.hawksnest.core.ha.WebRtcSignal
@@ -89,6 +78,9 @@ fun WebRtcPlayer(
             init(
                 WebRtcCore.eglBase.eglBaseContext,
                 object : RendererCommon.RendererEvents {
+                    // Fires once per renderer init() — NOT once per stream. It is the earliest
+                    // possible clear for the FIRST stream only; every stream after it is cleared by
+                    // the per-session FirstFrameSink below. See LiveOverlay.kt.
                     override fun onFirstFrameRendered() { scope.launch { connecting.value = false } }
                     override fun onFrameResolutionChanged(w: Int, h: Int, rotation: Int) {
                         // Pre-rotation dimensions off a libwebrtc thread — swap for portrait and
@@ -127,9 +119,16 @@ fun WebRtcPlayer(
     val session = remember { mutableStateOf<WebRtcSession?>(null) }
     DisposableEffect(entityId) {
         connecting.value = true // re-show "Connecting…" for the newly-selected camera
-        val s = WebRtcSession(scope, viewModel, WebRtcCore.factory, renderer, entityId, muted) {
-            currentOnFail.value()
-        }
+        val s = WebRtcSession(
+            scope,
+            viewModel,
+            WebRtcCore.factory,
+            renderer,
+            entityId,
+            muted,
+            onFirstFrame = { scope.launch { connecting.value = false } },
+            onFail = { currentOnFail.value() },
+        )
         session.value = s
         s.start()
         onDispose {
@@ -155,21 +154,7 @@ fun WebRtcPlayer(
 
     Box(modifier) {
         AndroidView(factory = { renderer }, modifier = Modifier.fillMaxSize())
-        if (connecting.value) {
-            Column(
-                modifier = Modifier.fillMaxSize().background(Color.Black),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                CircularProgressIndicator(color = Color.White.copy(alpha = 0.7f), strokeWidth = 2.dp)
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Connecting…",
-                    color = Color.White.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-        }
+        if (connecting.value) ConnectingOverlay()
     }
 }
 
@@ -221,8 +206,21 @@ private class WebRtcSession(
     private val renderer: SurfaceViewRenderer,
     private val entityId: String,
     initialMuted: Boolean,
+    onFirstFrame: () -> Unit,
     private val onFail: () -> Unit,
 ) {
+    /** Per-session "video is actually arriving" signal — see [FirstFrameSink]. */
+    private val firstFrame = FirstFrameSink(onFirstFrame)
+
+    /**
+     * Render the incoming video AND watch it for this session's first frame. The extra sink is a
+     * compare-and-set on a boolean, so it costs nothing per frame.
+     */
+    private fun VideoTrack.addSinks() {
+        addSink(renderer)
+        addSink(firstFrame)
+    }
+
     private var peer: PeerConnection? = null
     private var handle: WebRtcHandle? = null
     private var watchdog: Job? = null
@@ -339,7 +337,7 @@ private class WebRtcSession(
 
         override fun onTrack(transceiver: RtpTransceiver) {
             when (val track = transceiver.receiver?.track()) {
-                is VideoTrack -> track.addSink(renderer)
+                is VideoTrack -> track.addSinks()
                 is AudioTrack -> {
                     audioTrack = track
                     runCatching { track.setEnabled(!muted) }
@@ -350,7 +348,7 @@ private class WebRtcSession(
 
         override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
             when (val track = receiver.track()) {
-                is VideoTrack -> track.addSink(renderer)
+                is VideoTrack -> track.addSinks()
                 is AudioTrack -> {
                     audioTrack = track
                     runCatching { track.setEnabled(!muted) }
