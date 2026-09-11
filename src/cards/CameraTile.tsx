@@ -24,25 +24,41 @@ export function CameraTile({
   name: nameOverride,
   transitionId,
   ringing = false,
+  battery = false,
+  motionChangedMs = null,
 }: CardProps & {
   name?: string;
   /** Logical camera id — names the tile for the tile→player View Transition. */
   transitionId?: string;
   /** True while this camera's doorbell `_ding` sensor is on — pulses the tile. */
   ringing?: boolean;
+  /**
+   * The camera sleeps between events (`isBatteryCamera`). A Frigate one then rides the shared
+   * snapshot beat, and while HA reports it `idle` — parked in Frigate until its PIR fires — the
+   * tile fetches nothing (Frigate would answer with its grey error image, at HTTP 200) and
+   * reads "Asleep" instead of stamping a stale frame with a fresh-looking age.
+   */
+  battery?: boolean;
+  /** When its motion sensor last changed — the honest "last seen" for a sleeping camera. */
+  motionChangedMs?: number | null;
 }) {
   const name = nameOverride ?? resolveName(entity, overrides);
   const aspect = density === "compact" ? "aspect-video" : "aspect-[4/3]";
-  // Frigate cameras also refresh every time the app is opened — see the buckets'
-  // doc comment. Ring stays on the shared beat (metered proxy, 300s snapshot policy).
-  const bucket = useSnapshotBucket(isFrigateCamera(entity));
+  const isFrigate = isFrigateCamera(entity);
+  // A Frigate battery camera parked off: HA reports the camera entity `idle` while Frigate's
+  // pipeline is stopped and `streaming` while its PIR holds it awake. Gated to Frigate battery
+  // cameras so a Ring tile (whose `idle` means nothing of the sort) is untouched.
+  const asleep = isFrigate && battery && entity.state === "idle";
+  // Always-on Frigate cameras also refresh every time the app is opened — see the buckets'
+  // doc comment. Ring, and a Frigate camera that sleeps, stay on the shared beat.
+  const bucket = useSnapshotBucket(isFrigate && !battery);
   const baseUrl = useHaBaseUrl();
   const [failed, setFailed] = useState(false);
   // The last snapshot URL that actually decoded. We keep showing it while the next
   // bucket's frame loads so the tile never blanks to black on the ~10s refresh.
   const [loaded, setLoaded] = useState<string | null>(null);
 
-  const live = isCameraLive(entity) && !failed;
+  const live = isCameraLive(entity) && !failed && !asleep;
   // While this camera is open in the player, the PLAYER owns the transition
   // name (a view-transition-name must be unique on screen at any moment).
   const openId = useCameraOverlay((s) => s.openId);
@@ -87,7 +103,7 @@ export function CameraTile({
               <Camera className="text-ink-faint" size={32} />
             )}
             <span className="caption-label text-ink-faint">
-              {failed ? "No signal" : "Offline"}
+              {asleep ? "Asleep" : failed ? "No signal" : "Offline"}
             </span>
           </div>
         )}
@@ -124,7 +140,9 @@ export function CameraTile({
 
         {/* Ring-style freshness badge: a status dot + the snapshot's age. The tile
             is a periodic still (not a live feed), so we stamp how old it is rather
-            than calling it "Live" — tapping the tile is what opens the live view. */}
+            than calling it "Live" — tapping the tile is what opens the live view.
+            A sleeping camera's snapshot age would lie (HA re-publishes the entity
+            without a new frame), so it reports its last motion instead. */}
         <div className="absolute left-md top-md flex items-center gap-xs rounded-sm bg-black/40 px-sm py-xs backdrop-blur">
           <span
             className={[
@@ -135,7 +153,15 @@ export function CameraTile({
             ].join(" ")}
           />
           <span className="caption-label text-white/90">
-            {changedMs ? relativeTime(changedMs) : live ? "Live" : "—"}
+            {asleep
+              ? motionChangedMs
+                ? `Motion ${relativeTime(motionChangedMs)}`
+                : "Asleep"
+              : changedMs
+                ? relativeTime(changedMs)
+                : live
+                  ? "Live"
+                  : "—"}
           </span>
         </div>
 

@@ -182,3 +182,44 @@ export const frigateEntities = (): HaStateObj[] => [
     last_changed: ago(600),
   },
 ];
+
+/**
+ * A **battery** camera behind a Reolink Home Hub ("Driveway"), recorded on demand by Frigate and
+ * currently **asleep**.
+ *
+ * Three things distinguish it from `frigateEntities` and each is load-bearing in the app:
+ * - `sensor.driveway_battery` — its presence is what `isBatteryCamera` keys on (the same rule the
+ *   HA snapshot-policy automation uses), which widens the live connect watchdog, exempts the
+ *   camera from the go2rtc session breaker, and moves the tile to the shared snapshot beat.
+ * - the camera is `idle` — HA's state while Frigate's pipeline is parked (it reads `streaming`
+ *   only while the hub's PIR holds the camera awake). A Frigate battery camera that is `idle`
+ *   renders "Asleep" and fetches no snapshot (Frigate would serve its grey error image).
+ * - `binary_sensor.driveway_motion` is the hub's PIR (the Reolink integration's, renamed onto the
+ *   canonical slug) — its `last_changed` is the badge's "Motion Xm ago".
+ */
+export const frigateBatteryEntities = (): HaStateObj[] => [
+  {
+    entity_id: "camera.driveway",
+    state: "idle",
+    attributes: {
+      friendly_name: "Driveway",
+      icon: "mdi:cctv",
+      entity_picture: "/demo-cam-2.svg",
+      client_id: "frigate",
+      camera_name: "driveway",
+    },
+    last_changed: ago(1),
+  },
+  {
+    entity_id: "binary_sensor.driveway_motion",
+    state: "off",
+    attributes: { friendly_name: "Driveway Motion", device_class: "motion" },
+    last_changed: ago(420),
+  },
+  {
+    entity_id: "sensor.driveway_battery",
+    state: "87",
+    attributes: { friendly_name: "Driveway Battery", device_class: "battery", unit_of_measurement: "%" },
+    last_changed: ago(3600),
+  },
+];

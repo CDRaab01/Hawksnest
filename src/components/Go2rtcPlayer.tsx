@@ -26,10 +26,24 @@ const DISCONNECT_GRACE_MS = 4_000;
  * other camera its best transport. Mirrors `WebRtcPlayer`'s recvonly
  * negotiation + "Connecting…" overlay.
  */
+/**
+ * Connect watchdog for a camera that is awake: go2rtc-direct exists because it is fast, so a
+ * session that hasn't connected in 8 s is a dead path, not a slow one.
+ */
+const CONNECT_TIMEOUT_MS = 8_000;
+/**
+ * …and for a camera that has to be WOKEN first. A battery Reolink behind a Home Hub takes up to
+ * ~20 s to wake before its RTSP even starts (Reolink's own figure; they advise a ≥20 s request
+ * timeout), and go2rtc only opens the source when we ask. 8 s would step down every time and
+ * never show the picture.
+ */
+const WAKE_TIMEOUT_MS = 30_000;
+
 export function Go2rtcPlayer({
   src,
   poster,
   muted = true,
+  wakeable = false,
   onFail,
 }: {
   src: string;
@@ -37,6 +51,13 @@ export function Go2rtcPlayer({
   /** Audio track gate. Mounts muted for autoplay policy; flipped live via the
    *  DOM property (React only applies the `muted` attribute at mount). */
   muted?: boolean;
+  /**
+   * The camera sleeps and must be woken to stream (`isBatteryCamera`). Widens the connect
+   * watchdog to {@link WAKE_TIMEOUT_MS}, labels the overlay honestly, and — most importantly —
+   * keeps a slow or failed wake from tripping the SESSION breaker: one battery camera taking
+   * its time says nothing about whether go2rtc's media path works for the other eleven.
+   */
+  wakeable?: boolean;
   onFail: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -77,8 +98,9 @@ export function Go2rtcPlayer({
       // `reportGo2rtcMedia(false)` is not local — it makes EVERY camera skip the go2rtc tier for
       // the rest of the session. That is right when media is genuinely unreachable (the §7c
       // :8555 host forwarder is down, or we're off the tailnet) and wrong when a stream that was
-      // working simply dropped, which says nothing about whether the path works.
-      if (!everConnected) reportGo2rtcMedia(false);
+      // working simply dropped, which says nothing about whether the path works. Nor does a
+      // camera that never woke up (`wakeable`): that is a fact about one sleeping camera.
+      if (!everConnected && !wakeable) reportGo2rtcMedia(false);
       onFailRef.current();
     };
 
@@ -143,10 +165,14 @@ export function Go2rtcPlayer({
     };
 
     // Watchdog: go2rtc-direct is meant to be fast; if it hasn't connected in 8s,
-    // step down rather than hang (covers unreachable media / a stale stream).
-    const watchdog = setTimeout(() => {
-      if (pc && pc.connectionState !== "connected") fail();
-    }, 8_000);
+    // step down rather than hang (covers unreachable media / a stale stream). A camera that
+    // has to wake first gets the longer leash — see WAKE_TIMEOUT_MS.
+    const watchdog = setTimeout(
+      () => {
+        if (pc && pc.connectionState !== "connected") fail();
+      },
+      wakeable ? WAKE_TIMEOUT_MS : CONNECT_TIMEOUT_MS,
+    );
 
     setConnecting(true);
     return () => {
@@ -157,7 +183,7 @@ export function Go2rtcPlayer({
       pc?.close();
       pc = null;
     };
-  }, [src]);
+  }, [src, wakeable]);
 
   return (
     <div className="relative">
@@ -179,7 +205,7 @@ export function Go2rtcPlayer({
               className="h-3 w-3 rounded-full bg-effort animate-breathe motion-reduce:animate-none"
             />
             <span className="caption-label text-ink" role="status">
-              Connecting…
+              {wakeable ? "Waking camera…" : "Connecting…"}
             </span>
           </div>
         </div>

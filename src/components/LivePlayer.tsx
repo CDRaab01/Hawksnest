@@ -37,6 +37,7 @@ export function LivePlayer({
   entity,
   go2rtcSrc,
   muted = true,
+  wakeable = false,
 }: {
   entity: HassEntity;
   /** go2rtc stream name (the HA camera base) for the direct low-latency tier. */
@@ -44,6 +45,12 @@ export function LivePlayer({
   /** Camera audio. Defaults muted (autoplay policy); the player chrome's
    *  MuteButton is the unmute gesture. Image tiers (MJPEG/poll) have no audio. */
   muted?: boolean;
+  /**
+   * The camera sleeps and must be woken to stream (`isBatteryCamera`). The WebRTC tiers give
+   * it a longer connect leash, label the wait honestly, and keep a slow wake from tripping the
+   * session-wide go2rtc breaker.
+   */
+  wakeable?: boolean;
 }) {
   const baseUrl = useHaBaseUrl();
   const mjpeg = mjpegUrl(entity, baseUrl);
@@ -147,6 +154,7 @@ export function LivePlayer({
         src={go2rtcSrc}
         poster={snapshotUrl(entity, baseUrl) ?? undefined}
         muted={muted}
+        wakeable={wakeable}
         onFail={() => stepDownFrom("go2rtc")}
       />
     );
@@ -158,6 +166,7 @@ export function LivePlayer({
         entityId={entity.entity_id}
         poster={snapshotUrl(entity, baseUrl) ?? undefined}
         muted={muted}
+        wakeable={wakeable}
         onFail={() => stepDownFrom("webrtc")}
       />
     );

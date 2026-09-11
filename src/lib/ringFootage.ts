@@ -127,6 +127,26 @@ export function footageSegmentAt(segments: FootageSegment[], t: number): Footage
   return best;
 }
 
+/**
+ * The drawable span covering `t`, or null — the {@link FootageSpan} twin of `footageSegmentAt`,
+ * same half-open interval and same latest-start-wins rule.
+ *
+ * This is what turns the continuous lane from decoration into a fact the player can act on:
+ * "is there footage under the playhead?" Frigate's VOD cannot answer that itself — it concatenates
+ * whatever segments exist in a range back-to-back, so a range that straddles a gap plays with
+ * wall-clock and playlist time disagreeing, and a range that is all gap 404s. On a 24/7 camera
+ * that is a rare edge; on an event-only camera (a battery Reolink behind a Home Hub, recorded only
+ * while its PIR holds it awake) it is the normal state of the timeline. See `vodRangeFor`.
+ */
+export function footageSpanAt(spans: FootageSpan[], t: number): FootageSpan | null {
+  let best: FootageSpan | null = null;
+  for (const span of spans) {
+    if (t < span.startMs || t >= span.endMs) continue;
+    if (!best || span.startMs >= best.startMs) best = span;
+  }
+  return best;
+}
+
 /** Offset of `t` within `seg`, clamped into the span, in seconds (the player seeks in seconds). */
 export function offsetInSegmentSeconds(seg: FootageSegment, t: number): number {
   const span = seg.endMs - seg.startMs;

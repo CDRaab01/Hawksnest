@@ -20,6 +20,11 @@ import { createContext, useContext } from "react";
  * always-on and their snapshot is current the instant it is asked for, so a refetch
  * on open is both cheap and the only way to avoid opening the app on a frame from
  * whenever it was last foregrounded.
+ *
+ * "Always-on" is the premise, so a Frigate camera that ISN'T — a battery Reolink behind
+ * a Home Hub, parked off in Frigate until its PIR fires — rides the `shared` beat like
+ * a Ring camera: while it sleeps, Frigate serves the same stale frame (or its error
+ * image) on every fetch, and the on-open tick would just buy that again.
  */
 export interface SnapshotBuckets {
   /** Shared ~10s beat while visible. All cameras. */
@@ -45,8 +50,9 @@ export function useSnapshotBuckets(): SnapshotBuckets {
 /**
  * The bucket a camera should bust its cache with.
  *
- * @param isFrigate whether Frigate records this camera (`isFrigateCamera`). Frigate
- *   cameras additionally refresh every time the app is opened.
+ * @param isFrigate whether Frigate records this camera (`isFrigateCamera`) AND it is
+ *   always-on — pass `isFrigate && !battery`. Those cameras additionally refresh every time
+ *   the app is opened; everything else rides the shared beat.
  */
 export function useSnapshotBucket(isFrigate: boolean): number {
   const { shared, onOpen } = useSnapshotBuckets();

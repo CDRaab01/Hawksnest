@@ -44,6 +44,7 @@ const GATE: LogicalCamera = {
   dingId: null,
   motionId: null,
   sirenSwitchId: null,
+  batteryId: null,
 };
 
 // What the `camera.gate_event` stream resolves to, per test. Routed by entity id

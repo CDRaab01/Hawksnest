@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { LogicalCamera } from "../../lib/cameraModel";
+import { isBatteryCamera, type LogicalCamera } from "../../lib/cameraModel";
 import {
   fetchCameraEvents,
   fetchCameraFootage,
@@ -26,7 +26,7 @@ import {
   isFrigateCamera,
   frigateCameraName,
 } from "../../lib/frigate";
-import { retentionRange, vodPageFor, vodPositionSecondsInPage } from "../../lib/vodWindow";
+import { retentionRange, vodPositionSecondsInPage, vodRangeFor } from "../../lib/vodWindow";
 import {
   clipFileName,
   defaultSelection,
@@ -489,12 +489,25 @@ export function CameraPlayer({
   // capped at ~1024 segments by nginx-vod-module (~3h at these segment lengths) and 503s past it,
   // so a window spanning days — or even the old 24h — cannot be one manifest. Pages are
   // grid-aligned, so scrubbing within a page keeps the same URL and the player does not reload.
+  //
+  // The page is further BOUNDED TO THE FOOTAGE SPAN under the playhead (`vodRangeFor`). Frigate's
+  // VOD concatenates whatever segments exist in the range back-to-back, so a page that straddles
+  // a gap plays with playlist time and wall-clock time disagreeing, and a page with no footage
+  // 404s. On a 24/7 camera the lane is one long span and this is a no-op; on an event-only camera
+  // (a battery Reolink behind a Home Hub, recorded only while its PIR holds it awake) the timeline
+  // is mostly gap, and a scrub into it yields null — "No saved recording for this moment" —
+  // instead of a Retry that can never succeed. An unresolved lane (`[]`) keeps the plain page:
+  // unknown is not none.
   const vodPage = useMemo(
     () =>
       isLive || isRing
         ? null
-        : vodPageFor(headTime, { startMs: window.start, endMs: window.end }),
-    [isLive, isRing, headTime, window.start, window.end],
+        : vodRangeFor(
+            headTime,
+            { startMs: window.start, endMs: window.end },
+            isFrigate ? frigateFootage : [],
+          ),
+    [isLive, isRing, isFrigate, headTime, window.start, window.end, frigateFootage],
   );
   // Frigate VOD must be SIGNED or every segment 401s and the video is silently black — see
   // `Source.signedRecordingUrlAt`. Signing is a websocket round trip, so it resolves in an effect
@@ -602,11 +615,13 @@ export function CameraPlayer({
   // covered only by an end-to-end-encrypted segment is its own case — footage WAS recorded, this
   // player just has no key for it, which is neither a failure to retry nor "nothing recorded".
   const placeholderState: "resolving" | "failed" | "encrypted" | "none" = !isRing
-    ? // Frigate: a whole-window VOD that won't play is a failure worth retrying,
-      // not "nothing was recorded" — the window is 24h and Frigate is recording
-      // continuously, so a total miss is far more likely a transient fetch than a
-      // genuinely empty day. Demo/no-NVR never gets here (its src always plays).
-      backend === "frigate" && vodFailed
+    ? // Frigate: a VOD page that won't play is a failure worth retrying — UNLESS the footage
+      // lane already says there is nothing under the playhead (`vodPage === null`), which is
+      // "no recording kept", not a fetch to retry. That distinction used to be moot: with 24/7
+      // cameras a total miss was almost always transient. An event-only camera inverts it (most
+      // of its timeline is gap), so a stale `vodFailed` from an earlier page must not outrank
+      // the lane. Demo/no-NVR never gets here (its src always plays).
+      backend === "frigate" && vodPage !== null && vodFailed
       ? "failed"
       : "none"
     : timeline
@@ -835,6 +850,10 @@ export function CameraPlayer({
           // Quality=Low swaps in the `_sub` stream (only offered when go2rtc lists it).
           go2rtcSrc={liveGo2rtcSrc}
           muted={muted}
+          // A battery camera (Ring, or a Reolink behind a Home Hub) is asleep until asked and
+          // takes up to ~20s to wake — the live tiers must wait for it, say so, and not blame
+          // go2rtc's media path for the wait.
+          wakeable={isBatteryCamera(camera)}
         />
       ) : recordingSrc ? (
         <HlsPlayer

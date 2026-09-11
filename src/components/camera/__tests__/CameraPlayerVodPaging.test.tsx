@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { CameraPlayer } from "../CameraPlayer";
-import { signedRecordingUrlAt, startConnection } from "../../../store/connection";
+import {
+  fetchCameraFootage,
+  signedRecordingUrlAt,
+  startConnection,
+} from "../../../store/connection";
 import { useEntityStore } from "../../../store/entityStore";
 import { resetGo2rtcForTest } from "../../../lib/go2rtc";
 import type { HassEntity } from "../../../lib/ha";
@@ -18,10 +22,15 @@ import type { LogicalCamera } from "../../../lib/cameraModel";
  */
 vi.mock("../../../store/connection", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../store/connection")>();
-  return { ...actual, signedRecordingUrlAt: vi.fn(actual.signedRecordingUrlAt) };
+  return {
+    ...actual,
+    signedRecordingUrlAt: vi.fn(actual.signedRecordingUrlAt),
+    fetchCameraFootage: vi.fn(actual.fetchCameraFootage),
+  };
 });
 
 const signed = signedRecordingUrlAt as unknown as ReturnType<typeof vi.fn>;
+const footage = fetchCameraFootage as unknown as ReturnType<typeof vi.fn>;
 
 function frigateCamera(base: string, name: string): LogicalCamera {
   const entity: HassEntity = {
@@ -43,6 +52,7 @@ function frigateCamera(base: string, name: string): LogicalCamera {
     dingId: null,
     motionId: null,
     sirenSwitchId: null,
+    batteryId: null,
   };
 }
 
@@ -63,6 +73,7 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(NOON_ISH);
   signed.mockClear();
+  footage.mockClear();
   resetGo2rtcForTest();
   useEntityStore.setState({ entities: {}, areas: {}, status: "connecting" });
   startConnection();
@@ -142,6 +153,52 @@ describe("CameraPlayer — Frigate VOD paging", () => {
     expect(screen.getByLabelText("Camera footage")).toBe(video);
     expect(signed.mock.calls.length).toBe(callsAfterFirstPage);
     expect(screen.queryByText(/no saved recording|couldn't load/i)).toBeNull();
+  });
+});
+
+/**
+ * The footage lane is no longer decoration. On an event-only camera (a battery Reolink behind a
+ * Home Hub, recorded only while its PIR holds it awake) most of the timeline is gap, and Frigate's
+ * VOD cannot express a gap — it concatenates whatever exists, or 404s. So the lane decides whether
+ * and how much VOD to mount. These pin the two halves of `vodRangeFor` through the real player.
+ */
+describe("CameraPlayer — gap-aware scrub (event-only cameras)", () => {
+  /** Let the lane's resolved spans land in state before scrubbing into them. */
+  async function laneLanded() {
+    await waitFor(() => expect(footage).toHaveBeenCalled());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  }
+
+  it("says 'no saved recording' and signs nothing when the lane says the moment is a gap", async () => {
+    const now = NOON_ISH.getTime();
+    // Footage exists — two to three hours ago — but not under a playhead one minute back.
+    footage.mockResolvedValueOnce([
+      { startMs: now - 3 * 3600_000, endMs: now - 2 * 3600_000, playable: true },
+    ]);
+    renderPlayer(BEDROOM);
+    await laneLanded();
+    scrubBack(1);
+
+    expect(await screen.findByText("No saved recording for this moment")).toBeInTheDocument();
+    // Not a failure with a Retry that can never succeed — and no URL was ever minted for it.
+    expect(screen.queryByText(/couldn't load/i)).toBeNull();
+    expect(signed).not.toHaveBeenCalled();
+  });
+
+  it("bounds the VOD to the footage island under the playhead, not the whole grid page", async () => {
+    const now = NOON_ISH.getTime();
+    // One keyboard step in jsdom is the strip's tick interval — 15 minutes — so the island must
+    // reach back past that; 50 minutes keeps it inside the 14:00–15:00 page while being far
+    // narrower than the page, which is what makes the bounded range observable.
+    const island = { startMs: now - 50 * 60_000, endMs: now, playable: true };
+    footage.mockResolvedValueOnce([island]);
+    renderPlayer(BEDROOM);
+    await laneLanded();
+    scrubBack(1);
+
+    await recordedVideo();
+    // The signed range is the island, so playlist time == wall-clock offset from its start.
+    expect(signed).toHaveBeenCalledWith("bedroom", island.startMs, island.endMs);
   });
 });
 

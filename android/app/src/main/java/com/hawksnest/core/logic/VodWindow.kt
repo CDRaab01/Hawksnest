@@ -82,6 +82,41 @@ fun vodPageFor(headMs: Long, bounds: TimeRange): TimeRange {
 }
 
 /**
+ * The VOD range to mount for [headMs]: the grid page, **bounded to the footage span under the
+ * playhead** — or null when the lane says there is nothing there.
+ *
+ * [vodPageFor] alone assumes the page is solid footage. Frigate's VOD does not fill gaps: it
+ * concatenates the recording segments that exist in the range back-to-back, so a page that is 5%
+ * footage and 95% gap plays as a few minutes of video whose playlist time bears no relation to the
+ * wall-clock position the user scrubbed to, and a page with no footage at all 404s. Continuous
+ * cameras rarely hit this; an event-only camera lives in it — a battery Reolink behind a Home Hub
+ * is recorded only while its PIR holds it awake, so its timeline is islands of footage in gap.
+ *
+ * Intersecting the page with the covering span fixes both: the range is contiguous footage, so
+ * playlist time == wall-clock offset from the range start, and a scrub into a gap yields null so
+ * the player shows "No saved recording for this moment" instead of mounting a URL that will fail.
+ *
+ * Two deliberate properties, shared with the web twin:
+ * - **Unknown is not none.** With no spans at all (lane not resolved, or the fetch failed) this
+ *   returns the plain page — exactly today's behaviour — the same convention `ClipExport.coverage`
+ *   uses (`UNKNOWN` ≠ `NONE`). Only a lane that *has* answered can say "nothing here".
+ * - **24/7 cameras are unchanged.** Their lane is one long span per uninterrupted run, so the
+ *   intersection is the whole page and the URL is identical to before. Grid alignment survives:
+ *   every playhead inside the same page *and* the same span yields the same range.
+ *
+ * 1:1 port of `src/lib/vodWindow.ts` `vodRangeFor` — keep in step.
+ */
+fun vodRangeFor(headMs: Long, bounds: TimeRange, spans: List<FootageSpan>): TimeRange? {
+    val page = vodPageFor(headMs, bounds)
+    if (spans.isEmpty()) return page
+    val span = footageSpanAt(spans, headMs) ?: return null
+    if (!span.playable) return null
+    val startMs = maxOf(page.startMs, span.startMs)
+    val endMs = minOf(page.endMs, span.endMs)
+    return if (endMs > startMs) TimeRange(startMs, endMs) else null
+}
+
+/**
  * Whether the playhead has left the loaded page, so the media must be refetched.
  *
  * Compares page identity rather than the playhead, so it is false for every scrub inside the
