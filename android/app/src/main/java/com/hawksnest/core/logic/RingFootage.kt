@@ -124,6 +124,27 @@ fun footageSegmentAt(segments: List<FootageSegment>, t: Long): FootageSegment? {
     return best
 }
 
+/**
+ * The drawable span covering [t], or null — the [FootageSpan] twin of [footageSegmentAt], same
+ * half-open interval and same latest-start-wins rule.
+ *
+ * This is what turns the continuous lane from decoration into a fact the player can act on:
+ * "is there footage under the playhead?" Frigate's VOD cannot answer that itself — it concatenates
+ * whatever segments exist in a range back-to-back, so a range straddling a gap plays with wall-clock
+ * and playlist time disagreeing, and a range that is all gap 404s. Rare on a 24/7 camera; the
+ * normal state of an event-only one (a battery Reolink behind a Home Hub, recorded only while its
+ * PIR holds it awake). See [vodRangeFor]. 1:1 with `src/lib/ringFootage.ts`.
+ */
+fun footageSpanAt(spans: List<FootageSpan>, t: Long): FootageSpan? {
+    var best: FootageSpan? = null
+    for (span in spans) {
+        if (t < span.startMs || t >= span.endMs) continue
+        val cur = best
+        if (cur == null || span.startMs >= cur.startMs) best = span
+    }
+    return best
+}
+
 /** Offset of [t] within [seg], clamped into the span, in milliseconds (ExoPlayer seeks in ms). */
 fun offsetInSegmentMs(seg: FootageSegment, t: Long): Long {
     val span = (seg.endMs - seg.startMs).coerceAtLeast(0L)

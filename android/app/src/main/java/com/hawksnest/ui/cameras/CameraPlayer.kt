@@ -60,7 +60,7 @@ import com.hawksnest.core.logic.footageSpans
 import com.hawksnest.core.logic.offsetInClipMs
 import com.hawksnest.core.logic.TimeRange
 import com.hawksnest.core.logic.retentionRange
-import com.hawksnest.core.logic.vodPageFor
+import com.hawksnest.core.logic.vodRangeFor
 import com.hawksnest.core.logic.vodPositionMsInPage
 import com.hawksnest.core.net.RtspHealth
 import com.hawksnest.ui.home.CameraUi
@@ -223,6 +223,10 @@ fun CameraPlayer(
     // refines timeline containment + chip width for open-ended (`endMs = null`) ring clips.
     var loadedClip by remember(cam.id) { mutableStateOf<Pair<String, Long>?>(null) }
     var retryNonce by remember(cam.id) { mutableStateOf(0) }
+    // The Frigate VOD url that failed to play, so the placeholder (with Retry) takes over instead
+    // of a stalled player. Keyed by url, not a flag, so a page turn re-arms it. Parity with the web
+    // `vodFailed` — this player used to pass no error handler for Frigate at all.
+    var vodFailed by remember(cam.id) { mutableStateOf<String?>(null) }
     // Ring/go2rtc live is WebRTC (sub-second). Try it first; on failure, step down to HLS/MJPEG.
     // Decide ONCE per camera — not every recomposition — so a mid-view entity update (battery cams
     // churn their attributes) can't flip the transport off WebRTC and drop us to the stale snapshot.
@@ -440,8 +444,20 @@ fun CameraPlayer(
     // capped at ~1024 segments by nginx-vod-module (~3h at these segment lengths) and 503s past
     // it, so a window spanning days — or even the old 24h — cannot be one manifest. Pages are
     // grid-aligned, so scrubbing within a page keeps the same URL and the player does not reload.
-    val vodPage = remember(isLive, isRing, headTime, startMs, endMs) {
-        if (isLive || isRing) null else vodPageFor(headTime, TimeRange(startMs, endMs))
+    //
+    // The page is further BOUNDED TO THE FOOTAGE SPAN under the playhead ([vodRangeFor]). Frigate's
+    // VOD concatenates whatever segments exist in the range back-to-back, so a page straddling a
+    // gap plays with playlist time and wall-clock time disagreeing, and a page with no footage
+    // 404s. A 24/7 camera's lane is one long span (no-op); an event-only camera's (a battery
+    // Reolink behind a Home Hub) is mostly gap, and a scrub into it yields null — "No saved
+    // recording for this moment" — instead of a dead player. An unresolved lane keeps the plain
+    // page: unknown is not none. Mirrors the web CameraPlayer.
+    val vodPage = remember(isLive, isRing, isFrigate, headTime, startMs, endMs, frigateLane) {
+        if (isLive || isRing) {
+            null
+        } else {
+            vodRangeFor(headTime, TimeRange(startMs, endMs), if (isFrigate) frigateLane else emptyList())
+        }
     }
     // Frigate VOD must also be SIGNED or every segment 401s and the video is silently black — see
     // Source.signedRecordingUrlAt. Signing is a websocket round trip, so it resolves in an effect
@@ -461,8 +477,9 @@ fun CameraPlayer(
         isLive -> null
         isRing -> playable?.first ?: ringReady?.url
         // Null until signing returns; the player simply has nothing to load for that moment,
-        // which is the same state it is in while a Ring clip URL resolves.
-        else -> signedVodUrl
+        // which is the same state it is in while a Ring clip URL resolves. Also null once THIS
+        // url failed to play (see `vodFailed`), so the placeholder takes over.
+        else -> if (signedVodUrl != null && signedVodUrl == vodFailed) null else signedVodUrl
     }
     val seekToMs = when {
         isLive -> null
@@ -639,7 +656,10 @@ fun CameraPlayer(
                             }
                         }
                     } else {
-                        null
+                        // Frigate VOD: a page that will not play is a (retryable) failure. Record
+                        // the url so the placeholder takes over — this used to be null, and a dead
+                        // VOD simply stalled with no message and no Retry (the web had both).
+                        { signedVodUrl?.let { vodFailed = it } }
                     },
                     // Frigate VOD only: its nested manifest needs a Bearer token that a URL
                     // signature cannot cover. Ring's URLs are pre-signed by Ring and must NOT
@@ -652,6 +672,14 @@ fun CameraPlayer(
             !isLive -> ScrubbedPlaceholder(
                 snapshotUrl = cam.snapshotUrl,
                 state = when {
+                    // Frigate: the footage lane knows. No span under the playhead (`vodPage`
+                    // null) is "no recording kept", never a Retry; a page that exists but would
+                    // not play is Failed. Mirrors the web `placeholderState`.
+                    !isRing -> if (vodPage != null && vodFailed != null && vodFailed == signedVodUrl) {
+                        PlaceholderState.Failed
+                    } else {
+                        PlaceholderState.None
+                    }
                     // Footage WAS recorded here, this player just has no key for it — neither a
                     // failure to retry nor "nothing recorded". Its own message.
                     source is RecordedSource.Encrypted -> PlaceholderState.Encrypted
@@ -663,10 +691,11 @@ fun CameraPlayer(
                     selected != null -> PlaceholderState.Resolving
                     else -> PlaceholderState.None
                 },
-                // Retrying means fresh signed URLs on the service path, re-resolution on the other.
+                // Retrying means fresh signed URLs on the service path, re-resolution on the
+                // selector path, and re-arming the same VOD url on Frigate so the player remounts.
                 onRetry = {
                     refetchedFor = null
-                    if (timeline != null) timelineNonce += 1 else retryNonce += 1
+                    if (!isRing) vodFailed = null else if (timeline != null) timelineNonce += 1 else retryNonce += 1
                 },
                 modifier = frame,
             )
@@ -684,6 +713,10 @@ fun CameraPlayer(
                 baseUrl = viewModel.baseUrl(),
                 onFail = { go2rtcFailed = true },
                 muted = muted,
+                // A battery camera (Ring, or a Reolink behind a Home Hub) is asleep until asked
+                // and takes up to ~20s to wake — the live tiers must wait for it, say so, and
+                // not blame go2rtc's media path for the wait.
+                wakeable = cam.isBattery,
                 onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
             )
@@ -696,6 +729,7 @@ fun CameraPlayer(
                 viewModel = viewModel,
                 onFail = { webRtcFailed = true },
                 muted = muted,
+                wakeable = cam.isBattery,
                 onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
             )

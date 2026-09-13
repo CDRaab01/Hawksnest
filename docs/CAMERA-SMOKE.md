@@ -107,6 +107,38 @@ playable clip of the right moment.
 - [ ] **App stays responsive** while an export runs — entities keep updating and live view still
       paints. This is the check on an export occupying the HA connection.
 
+## Battery cameras behind the Home Hub (the Argus 4 Pros) — run on BOTH platforms
+
+These are Frigate cameras that **sleep**: parked OFF in Frigate until the hub's PIR fires, woken
+by any RTSP request (up to ~20 s), force-slept by the hub after 5 minutes. Everything below is a
+consequence of that, and none of it is covered by the mock (`frigate-battery-camera` scenario
+renders the shapes, not the timing).
+
+- [ ] **Asleep tile.** With nobody in front of the camera for a few minutes, its wall tile shows
+      the last live frame (or the camera placeholder) captioned **Asleep**, a grey dot, and the
+      badge reads **Motion Xm ago** — never "2m ago" with a green dot over a stale frame, and never
+      Frigate's grey error image.
+- [ ] **Tile wakes with the PIR.** Walk in front of it: within seconds the badge flips to "Motion
+      just now", and once Frigate enables the camera (HA state `streaming`) the tile resumes
+      refreshing on the shared beat.
+- [ ] **Live wake, honestly labelled.** Open the camera cold: the overlay says **Waking camera…**
+      (not "Connecting…") and the picture arrives within ~20–30 s. It must NOT step down to a
+      snapshot at 8 s.
+- [ ] **A slow wake costs no other camera.** Immediately after a battery camera wakes slowly (or
+      fails to), open a wired camera: it still takes the go2rtc tier (first frame in 1–2 s). If it
+      lands on HA WebRTC/HLS instead, the session breaker tripped — that is the regression.
+- [ ] **Five-minute cap.** Keep watching live past 5 minutes: the hub drops the session; the
+      player either re-wakes cleanly or steps down with a visible state — never a frozen frame
+      behind a green badge.
+- [ ] **Gap placeholder.** Scrub to a moment with no event: **"No saved recording for this
+      moment"** — not "Couldn't load this recording" + Retry. On Android too (it used to stall
+      silently).
+- [ ] **Island playback seeks to the right second.** Scrub inside an event: the video shows the
+      moment under the playhead, not the start of the woken window and not the wrong minute.
+      Drag across the island: same element, no reload; step off it: the placeholder.
+- [ ] **Battery.** Note `sensor.<slug>_battery` before and 24 h after; it must not fall faster than
+      it did before the camera was integrated (the whole design exists for this line).
+
 ## If something fails
 
 - Camera frames 400 / never paint over the TLS path → suspect `X-Forwarded-For` leaking to HA;

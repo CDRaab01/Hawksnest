@@ -6,6 +6,7 @@ import {
   retentionRange,
   vodPageFor,
   vodPositionSecondsInPage,
+  vodRangeFor,
 } from "../vodWindow";
 
 const HOUR = 3600_000;
@@ -94,5 +95,44 @@ describe("vodPositionSecondsInPage", () => {
   it("never returns a negative seek", () => {
     const pageStart = 50 * DAY;
     expect(vodPositionSecondsInPage(pageStart - 5000, pageStart)).toBe(0);
+  });
+});
+
+describe("vodRangeFor", () => {
+  const bounds = { startMs: 0, endMs: 100 * DAY };
+  // 37 minutes into a page boundary (50 days is a multiple of the 2h grid).
+  const head = 50 * DAY + 37 * 60_000;
+  const page = vodPageFor(head, bounds);
+
+  it("is the plain grid page while the lane has not answered — unknown is not none", () => {
+    expect(vodRangeFor(head, bounds, [])).toEqual(page);
+  });
+
+  it("is identical to the grid page on a 24/7 camera whose span covers it", () => {
+    const solid = [{ startMs: 0, endMs: 100 * DAY, playable: true }];
+    expect(vodRangeFor(head, bounds, solid)).toEqual(page);
+  });
+
+  it("clamps the page to the footage island under the playhead", () => {
+    const island = { startMs: head - 2 * 60_000, endMs: head + 3 * 60_000, playable: true };
+    expect(vodRangeFor(head, bounds, [island])).toEqual({
+      startMs: island.startMs,
+      endMs: island.endMs,
+    });
+  });
+
+  it("is null in a known gap, so the player says 'no recording' instead of mounting a 404", () => {
+    const elsewhere = [{ startMs: head + HOUR, endMs: head + 2 * HOUR, playable: true }];
+    expect(vodRangeFor(head, bounds, elsewhere)).toBeNull();
+  });
+
+  it("treats an unplayable span as a gap", () => {
+    const unplayable = [{ startMs: 0, endMs: 100 * DAY, playable: false }];
+    expect(vodRangeFor(head, bounds, unplayable)).toBeNull();
+  });
+
+  it("keeps one range for every playhead inside the same island and page", () => {
+    const island = [{ startMs: head - 10 * 60_000, endMs: head + 10 * 60_000, playable: true }];
+    expect(vodRangeFor(head, bounds, island)).toEqual(vodRangeFor(head + 60_000, bounds, island));
   });
 });

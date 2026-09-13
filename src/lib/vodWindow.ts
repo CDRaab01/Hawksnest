@@ -1,3 +1,5 @@
+import { footageSpanAt, type FootageSpan } from "./ringFootage";
+
 /**
  * Windowing for Frigate's continuous VOD.
  *
@@ -76,6 +78,47 @@ export function vodPageFor(headMs: number, bounds: TimeRange): TimeRange {
   const startMs = Math.max(alignedStart, bounds.startMs);
   const endMs = Math.min(alignedStart + VOD_PAGE_MS, bounds.endMs);
   return { startMs, endMs: Math.max(endMs, startMs) };
+}
+
+/**
+ * The VOD range to mount for `headMs`: the grid page, **bounded to the footage span under the
+ * playhead** — or null when the lane says there is nothing there.
+ *
+ * `vodPageFor` alone assumes the page is solid footage. Frigate's VOD does not fill gaps: it
+ * concatenates the recording segments that exist in the range back-to-back, so a page that is 5%
+ * footage and 95% gap plays as a few minutes of video whose playlist time bears no relation to the
+ * wall-clock position the user scrubbed to, and a page with no footage at all 404s. Continuous
+ * cameras rarely hit this (a Frigate restart, a camera reconnect); an event-only camera lives in it
+ * — a battery Reolink behind a Home Hub is recorded only while its PIR holds it awake, so its
+ * timeline is islands of footage in a sea of gap.
+ *
+ * Intersecting the page with the covering span fixes both: the range is contiguous footage, so
+ * playlist time == wall-clock offset from the range start, and a scrub into a gap yields null so
+ * the player shows "No saved recording for this moment" instead of mounting a URL that will fail.
+ *
+ * Two deliberate properties:
+ * - **Unknown is not none.** With no spans at all (the lane has not resolved, or the fetch
+ *   failed) this returns the plain page — exactly today's behaviour — matching the convention
+ *   `clipExport.coverage` uses (`"unknown"` ≠ `"none"`). Only a lane that *has* answered can say
+ *   "nothing here".
+ * - **24/7 cameras are unchanged.** Their lane is one long span per uninterrupted run, so the
+ *   intersection is the whole page and the URL is byte-identical to before. Grid alignment
+ *   survives too: every playhead inside the same page *and* the same span yields the same range.
+ *
+ * Ported 1:1 to `core/logic/VodWindow.kt` — keep in step.
+ */
+export function vodRangeFor(
+  headMs: number,
+  bounds: TimeRange,
+  spans: FootageSpan[],
+): TimeRange | null {
+  const page = vodPageFor(headMs, bounds);
+  if (spans.length === 0) return page;
+  const span = footageSpanAt(spans, headMs);
+  if (!span || !span.playable) return null;
+  const startMs = Math.max(page.startMs, span.startMs);
+  const endMs = Math.min(page.endMs, span.endMs);
+  return endMs > startMs ? { startMs, endMs } : null;
 }
 
 /**

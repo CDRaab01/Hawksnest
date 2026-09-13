@@ -2,12 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   chooseRecordedSource,
   footageSegmentAt,
+  footageSpanAt,
   footageSpans,
   isPlayable,
   offsetInSegmentSeconds,
   parseFrigateWsRecordings,
   parseRingFootage,
   type FootageSegment,
+  type FootageSpan,
 } from "../ringFootage";
 import type { CameraEvent } from "../cameraEvents";
 
@@ -288,5 +290,25 @@ describe("chooseRecordedSource", () => {
         loadedDurationMs: 90_000,
       }),
     ).toMatchObject({ kind: "clip", seekSeconds: 45 });
+  });
+});
+
+describe("footageSpanAt", () => {
+  const span = (startMs: number, endMs: number, playable = true): FootageSpan => ({
+    startMs,
+    endMs,
+    playable,
+  });
+
+  it("finds the span covering t, half-open so a seam belongs to exactly one span", () => {
+    const spans = [span(T0, T0 + 10 * MIN), span(T0 + 10 * MIN, T0 + 20 * MIN)];
+    expect(footageSpanAt(spans, T0 + 10 * MIN)).toBe(spans[1]);
+    expect(footageSpanAt(spans, T0 + 10 * MIN - 1)).toBe(spans[0]);
+  });
+
+  it("is null in a gap and prefers the latest-starting span on overlap", () => {
+    const spans = [span(T0, T0 + 10 * MIN), span(T0 + 5 * MIN, T0 + 8 * MIN)];
+    expect(footageSpanAt(spans, T0 + 30 * MIN)).toBeNull();
+    expect(footageSpanAt(spans, T0 + 6 * MIN)).toBe(spans[1]);
   });
 });

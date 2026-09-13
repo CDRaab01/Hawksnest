@@ -320,4 +320,15 @@ class RingFootageTest {
         )
         assertEquals(listOf(FootageSpan(1000_000L, 1010_000L, playable = true)), spans)
     }
+
+    @Test
+    fun `footageSpanAt is half-open, null in a gap, and prefers the latest-starting span on overlap`() {
+        val a = FootageSpan(0L, 10_000L, playable = true)
+        val b = FootageSpan(10_000L, 20_000L, playable = true)
+        assertEquals(b, footageSpanAt(listOf(a, b), 10_000L))
+        assertEquals(a, footageSpanAt(listOf(a, b), 9_999L))
+        assertEquals(null, footageSpanAt(listOf(a, b), 30_000L))
+        val inner = FootageSpan(5_000L, 8_000L, playable = true)
+        assertEquals(inner, footageSpanAt(listOf(a, inner), 6_000L))
+    }
 }

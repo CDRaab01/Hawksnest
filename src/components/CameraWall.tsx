@@ -3,6 +3,8 @@ import { useEntityStore, useLogicalCameras } from "../store/entityStore";
 import { useCameraOverlay } from "../store/cameraOverlay";
 import { overrides } from "../config/overrides";
 import { isCameraLive } from "../lib/cameraUrl";
+import { parseHaTime } from "../lib/relativeTime";
+import { isBatteryCamera } from "../lib/cameraModel";
 import { CameraTile } from "../cards/CameraTile";
 import { SectionHeader } from "./SectionHeader";
 import { PanelCard } from "./PanelCard";
@@ -69,6 +71,10 @@ export function CameraWall() {
               name={cam.name}
               transitionId={cam.id}
               ringing={cam.dingId !== null && entities[cam.dingId]?.state === "on"}
+              battery={isBatteryCamera(cam)}
+              motionChangedMs={
+                cam.motionId !== null ? parseHaTime(entities[cam.motionId]?.last_changed) : null
+              }
             />
           </button>
         ))}

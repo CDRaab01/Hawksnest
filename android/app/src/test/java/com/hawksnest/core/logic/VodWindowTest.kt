@@ -2,6 +2,7 @@ package com.hawksnest.core.logic
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -103,5 +104,47 @@ class VodWindowTest {
     fun `vodPositionMsInPage never returns a negative seek`() {
         val pageStart = 50 * day
         assertEquals(0L, vodPositionMsInPage(pageStart - 5000L, pageStart))
+    }
+
+    // vodRangeFor — mirrors the `vodRangeFor` describe in vodWindow.test.ts.
+    private val rangeBounds = TimeRange(0, 100 * day)
+    // 37 minutes into a page boundary (50 days is a multiple of the 2h grid).
+    private val rangeHead = 50 * day + 37 * 60_000L
+
+    @Test
+    fun `vodRangeFor is the plain grid page while the lane has not answered`() {
+        assertEquals(vodPageFor(rangeHead, rangeBounds), vodRangeFor(rangeHead, rangeBounds, emptyList()))
+    }
+
+    @Test
+    fun `vodRangeFor is identical to the grid page on a 24-7 camera whose span covers it`() {
+        val solid = listOf(FootageSpan(0, 100 * day, playable = true))
+        assertEquals(vodPageFor(rangeHead, rangeBounds), vodRangeFor(rangeHead, rangeBounds, solid))
+    }
+
+    @Test
+    fun `vodRangeFor clamps the page to the footage island under the playhead`() {
+        val island = FootageSpan(rangeHead - 2 * 60_000L, rangeHead + 3 * 60_000L, playable = true)
+        assertEquals(
+            TimeRange(island.startMs, island.endMs),
+            vodRangeFor(rangeHead, rangeBounds, listOf(island)),
+        )
+    }
+
+    @Test
+    fun `vodRangeFor is null in a known gap and for an unplayable span`() {
+        val elsewhere = listOf(FootageSpan(rangeHead + hour, rangeHead + 2 * hour, playable = true))
+        assertNull(vodRangeFor(rangeHead, rangeBounds, elsewhere))
+        val unplayable = listOf(FootageSpan(0, 100 * day, playable = false))
+        assertNull(vodRangeFor(rangeHead, rangeBounds, unplayable))
+    }
+
+    @Test
+    fun `vodRangeFor keeps one range for every playhead inside the same island and page`() {
+        val island = listOf(FootageSpan(rangeHead - 10 * 60_000L, rangeHead + 10 * 60_000L, playable = true))
+        assertEquals(
+            vodRangeFor(rangeHead, rangeBounds, island),
+            vodRangeFor(rangeHead + 60_000L, rangeBounds, island),
+        )
     }
 }

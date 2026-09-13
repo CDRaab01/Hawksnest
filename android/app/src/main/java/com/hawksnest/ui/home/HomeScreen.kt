@@ -318,7 +318,10 @@ private fun HomeContent(
                     rowCams.forEach { cam ->
                         CameraTile(
                             cam = cam,
-                            snapshotModel = bustCache(cam.snapshotUrl, snapshotBucket(cam.isFrigate, sharedBucket, onOpenBucket)),
+                            // A Frigate camera that sleeps (battery, behind a Home Hub) rides the
+                            // shared beat like Ring: its frame is not current the instant it is
+                            // asked for, so the on-open tick would buy the same stale image twice.
+                            snapshotModel = bustCache(cam.snapshotUrl, snapshotBucket(cam.isFrigate && !cam.isBattery, sharedBucket, onOpenBucket)),
                             onClick = { onOpenLightbox(cam) },
                             modifier = Modifier.weight(1f),
                         )
@@ -532,20 +535,24 @@ private fun CameraTile(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                CameraSnapshot(model = snapshotModel, modifier = Modifier.fillMaxSize())
+                // A parked battery camera gets no fetch at all: Frigate answers with its grey
+                // error image (at HTTP 200) while the pipeline is off, which would decode as a
+                // "frame". The last live frame above, if any, is the truthful picture.
+                CameraSnapshot(model = if (cam.asleep) null else snapshotModel, modifier = Modifier.fillMaxSize())
             }
             // A camera HA reports unavailable (a closed/offline Ring camera that can't serve a
             // frame) gets a clear "No signal" over the dimmed last frame. This is HA's reliable
             // state — we deliberately do NOT infer staleness from timestamps, because ring-mqtt
             // doesn't expose a capture time and HA's entity_picture token rotation makes
-            // last_updated read "fresh" even on a stale camera.
-            if (!live) {
+            // last_updated read "fresh" even on a stale camera. A sleeping battery camera is the
+            // other reliable state (`asleep`, from the camera entity being `idle`).
+            if (!live || cam.asleep) {
                 Box(
                     Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        "No signal",
+                        if (!live) "No signal" else "Asleep",
                         style = MaterialTheme.typography.labelMedium,
                         color = Color.White.copy(alpha = 0.85f),
                     )
@@ -561,12 +568,17 @@ private fun CameraTile(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
             ) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(if (live) pulse.recovery else Color.White.copy(alpha = 0.4f)))
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (live && !cam.asleep) pulse.recovery else Color.White.copy(alpha = 0.4f)))
                 // Ring-style age badge. When we're showing a frame captured from the live view, stamp
                 // ITS grab time (so a just-watched battery cam reads "now", not the 7h-old snapshot);
                 // otherwise the snapshot's age. Falls back to LIVE/— when we have no time at all.
+                // A sleeping camera's snapshot age would lie (HA re-publishes the entity without a
+                // new frame), so it reports when its motion sensor last moved instead.
                 Text(
-                    (liveFrame?.capturedAtMs ?: cam.lastChangedMs)?.let { relativeTime(it) } ?: if (live) "LIVE" else "—",
+                    when {
+                        cam.asleep -> cam.motionChangedMs?.let { "Motion ${relativeTime(it)}" } ?: "Asleep"
+                        else -> (liveFrame?.capturedAtMs ?: cam.lastChangedMs)?.let { relativeTime(it) } ?: if (live) "LIVE" else "—"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White.copy(alpha = 0.9f),
                 )

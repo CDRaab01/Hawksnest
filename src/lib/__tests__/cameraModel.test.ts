@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveCameras } from "../cameraModel";
+import { isBatteryCamera, resolveCameras } from "../cameraModel";
 import type { HassEntity } from "../ha";
 
 const ent = (id: string, friendly?: string): HassEntity => ({
@@ -50,6 +50,7 @@ describe("resolveCameras", () => {
       dingId: null,
       motionId: null,
       sirenSwitchId: null,
+      batteryId: null,
     });
     // live + snapshot both fall back to the single camera entity.
     expect(cams[0].liveEntity.entity_id).toBe("camera.driveway");
@@ -147,5 +148,20 @@ describe("resolveCameras — doorbell press across backends", () => {
       ent("binary_sensor.garage_motion", "Garage Motion"),
     );
     expect(resolveCameras(entities, {})[0].dingId).toBeNull();
+  });
+
+  it("binds the battery sensor, which is what marks a camera as one that sleeps", () => {
+    // A Home Hub battery camera as HA's Reolink integration + Frigate present it: one plain
+    // `camera.<slug>` plus the (renamed) battery sensor. A wired camera has no such sensor.
+    const entities = map(
+      ent("camera.driveway", "Driveway"),
+      ent("sensor.driveway_battery", "Driveway Battery"),
+      ent("camera.garage", "Garage"),
+    );
+    const [driveway, garage] = resolveCameras(entities, {});
+    expect(driveway.batteryId).toBe("sensor.driveway_battery");
+    expect(isBatteryCamera(driveway)).toBe(true);
+    expect(garage.batteryId).toBeNull();
+    expect(isBatteryCamera(garage)).toBe(false);
   });
 });

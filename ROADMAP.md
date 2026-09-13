@@ -47,6 +47,15 @@ live tier (PR #72), and the 1.0 version bump itself (V1.md item 11 — merged; t
 
 ## v1.1 candidates
 
+- [x] **Battery cameras behind the Reolink Home Hub (2026-09-11).** The three Argus 4 Pros are
+  Frigate cameras that sleep — parked OFF until the hub's PIR fires, enabled for ≤ 4 min by the
+  sibling repo's automations. The apps learned to treat them as such (`isBatteryCamera`,
+  ARCHITECTURE.md §1): longer live wake with an honest label, no session-breaker verdict from a
+  slow wake, an "Asleep" tile that never stamps a stale frame fresh, and a gap-aware scrub whose
+  VOD range is bounded to the footage island under the playhead (which also closed Android's
+  silent-stall on a dead Frigate page). **Consequence worth naming: Ring has no remaining job.**
+  The doorbell went 2026-08-30, the outdoor cameras now; retiring ring-mqtt + ring-timeline and
+  the `"ring"` branch of `recordedBackend` is now a real candidate rather than a wish.
 - [ ] **OAuth to HA** — replace the long-lived access token with HA's OAuth + refresh, web +
   Android together so the token story stays one story. Once in, the web token can finally
   leave localStorage too. The v1.1 headline.

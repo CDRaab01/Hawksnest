@@ -76,7 +76,11 @@ class FirstFrameSink(private val onFirstFrame: () -> Unit) : VideoSink {
  * simply still working.
  */
 @Composable
-fun ConnectingOverlay(modifier: Modifier = Modifier) {
+fun ConnectingOverlay(
+    modifier: Modifier = Modifier,
+    /** "Connecting…" for a camera that answers in a second; "Waking camera…" for one that sleeps. */
+    label: String = "Connecting…",
+) {
     Column(
         modifier = modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)),
         verticalArrangement = Arrangement.Center,
@@ -85,7 +89,7 @@ fun ConnectingOverlay(modifier: Modifier = Modifier) {
         CircularProgressIndicator(color = Color.White.copy(alpha = 0.7f), strokeWidth = 2.dp)
         Spacer(Modifier.height(12.dp))
         Text(
-            "Connecting…",
+            label,
             color = Color.White.copy(alpha = 0.7f),
             style = MaterialTheme.typography.labelMedium,
         )

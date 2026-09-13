@@ -62,6 +62,13 @@ fun Go2rtcPlayer(
      *  org.webrtc plays remote audio automatically, which is the web twin's opposite
      *  default; the player chrome's MuteButton is the deliberate way to sound. */
     muted: Boolean = true,
+    /**
+     * The camera sleeps and must be woken to stream ([LogicalCamera.isBattery]). Widens the
+     * connect watchdog to [WAKE_WATCHDOG_MS], labels the overlay honestly, and — most importantly —
+     * keeps a slow or failed wake from tripping the session breaker in [Go2rtcHealth]: one battery
+     * camera taking its time says nothing about whether go2rtc's media path works for the rest.
+     */
+    wakeable: Boolean = false,
     /** Reports the source video's (width, height) — post-rotation — when known/changed. Feeds
      *  the PiP window's aspect ratio. */
     onVideoSize: ((width: Int, height: Int) -> Unit)? = null,
@@ -116,7 +123,7 @@ fun Go2rtcPlayer(
     }
 
     val session = remember { mutableStateOf<Go2rtcSession?>(null) }
-    DisposableEffect(src) {
+    DisposableEffect(src, wakeable) {
         connecting.value = true
         val s = Go2rtcSession(
             scope,
@@ -125,6 +132,7 @@ fun Go2rtcPlayer(
             WebRtcCore.factory,
             renderer,
             muted,
+            wakeable,
             onFirstFrame = { scope.launch { connecting.value = false } },
             onFail = { currentOnFail.value() },
         )
@@ -148,7 +156,7 @@ fun Go2rtcPlayer(
 
     Box(modifier) {
         AndroidView(factory = { renderer }, modifier = Modifier.fillMaxSize())
-        if (connecting.value) ConnectingOverlay()
+        if (connecting.value) ConnectingOverlay(label = if (wakeable) "Waking camera…" else "Connecting…")
     }
 }
 
@@ -165,6 +173,14 @@ fun Go2rtcPlayer(
  */
 private const val WATCHDOG_MS = 8_000L
 
+/**
+ * The watchdog for a camera that has to be WOKEN first. A battery Reolink behind a Home Hub takes
+ * up to ~20 s to wake before its RTSP even starts (Reolink's own figure — they advise a ≥20 s
+ * request timeout), and go2rtc only opens the source when we ask. 8 s would step down every time
+ * and never show the picture. Mirrors `WAKE_TIMEOUT_MS` in the web `Go2rtcPlayer`.
+ */
+private const val WAKE_WATCHDOG_MS = 30_000L
+
 private class Go2rtcSession(
     private val scope: CoroutineScope,
     baseUrl: String,
@@ -172,6 +188,8 @@ private class Go2rtcSession(
     private val factory: PeerConnectionFactory,
     private val renderer: SurfaceViewRenderer,
     initialMuted: Boolean,
+    /** See the composable's `wakeable` — longer watchdog, and never a global verdict. */
+    private val wakeable: Boolean,
     onFirstFrame: () -> Unit,
     private val onFail: () -> Unit,
 ) {
@@ -219,9 +237,10 @@ private class Go2rtcSession(
         ws = httpClient.newWebSocket(Request.Builder().url(wsUrl).build(), wsListener)
 
         // go2rtc-direct is meant to be fast; step down rather than hang. The "Connecting…"
-        // overlay covers the wait; a stale stream / unreachable :8555 media both land here.
+        // overlay covers the wait; a stale stream / unreachable :8555 media both land here. A
+        // camera that has to wake first gets the longer leash — see WAKE_WATCHDOG_MS.
         watchdog = scope.launch {
-            delay(WATCHDOG_MS)
+            delay(if (wakeable) WAKE_WATCHDOG_MS else WATCHDOG_MS)
             if (peer?.connectionState() != PeerConnection.PeerConnectionState.CONNECTED) fail()
         }
     }
@@ -343,7 +362,9 @@ private class Go2rtcSession(
     private fun fail(global: Boolean = true) {
         val report = synchronized(lock) { !closed }
         if (!report) return
-        if (global) Go2rtcHealth.report(false)
+        // A camera that never woke up (`wakeable`) is a fact about one sleeping camera, not about
+        // go2rtc's media path — it must never condemn the tier for every other camera.
+        if (global && !wakeable) Go2rtcHealth.report(false)
         watchdog?.cancel()
         scope.launch { onFail() }
     }

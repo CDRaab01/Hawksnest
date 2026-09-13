@@ -27,7 +27,24 @@ data class LogicalCamera(
     val motionId: String?,
     /** ring-mqtt siren switch (`switch.<base>_siren`) on siren-capable cameras, else null. */
     val sirenSwitchId: String? = null,
-)
+    /**
+     * Battery sensor (`sensor.<base>_battery`), if present — the tell that this camera **sleeps**.
+     * Published by ring-mqtt for its battery cameras and by HA's Reolink integration for battery
+     * cameras bound to a Home Hub (the Argus line); the same heuristic the HA automation
+     * `hawksnest_ring_snapshot_policy` uses. See [isBattery].
+     */
+    val batteryId: String? = null,
+) {
+    /**
+     * Whether this camera sleeps between events and has to be **woken** to stream. Every consumer
+     * that assumes always-on is wrong for these: live connect timeouts (a Reolink behind a Home Hub
+     * takes up to ~20 s to wake before RTSP even starts), the go2rtc session breaker (one slow wake
+     * must not condemn the tier for every camera), and the snapshot tile (a sleeping camera's last
+     * frame is not "fresh"). Fails closed: no battery sensor → today's behaviour. 1:1 with
+     * `isBatteryCamera` in `src/lib/cameraModel.ts`.
+     */
+    val isBattery: Boolean get() = batteryId != null
+}
 
 /**
  * Doorbell-press sensor suffixes, in preference order.
@@ -112,6 +129,7 @@ fun resolveCameras(
                 dingId = dingIdFor(base),
                 motionId = has("binary_sensor.${base}_motion"),
                 sirenSwitchId = has("switch.${base}_siren"),
+                batteryId = has("sensor.${base}_battery"),
             ),
         )
     }

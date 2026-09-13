@@ -13,10 +13,14 @@ export function WebRtcPlayer({
   entityId,
   poster,
   muted = true,
+  wakeable = false,
   onFail,
 }: {
   entityId: string;
   poster?: string;
+  /** The camera sleeps and must be woken to stream (`isBatteryCamera`) — a longer watchdog
+   *  and an honest overlay label. See `Go2rtcPlayer`. */
+  wakeable?: boolean;
   /** Audio track gate. Mounts muted for autoplay policy; flipped live via the
    *  DOM property (React only applies the `muted` attribute at mount). */
   muted?: boolean;
@@ -100,10 +104,14 @@ export function WebRtcPlayer({
     // 20s (not 10) because a battery camera has to wake from sleep before it
     // can negotiate, which takes longer than 10s — cutting to HLS too early
     // just trades one black screen for a slower one (mirrors the Android
-    // player's deliberate 20s).
-    const watchdog = setTimeout(() => {
-      if (pc && pc.connectionState !== "connected") fail();
-    }, 20_000);
+    // player's deliberate 20s). A camera KNOWN to sleep (`wakeable`) gets 30s:
+    // a Reolink behind a Home Hub takes up to ~20s just to wake, before RTSP.
+    const watchdog = setTimeout(
+      () => {
+        if (pc && pc.connectionState !== "connected") fail();
+      },
+      wakeable ? 30_000 : 20_000,
+    );
 
     setConnecting(true);
     return () => {
@@ -113,7 +121,7 @@ export function WebRtcPlayer({
       pc?.close();
       pc = null;
     };
-  }, [entityId]);
+  }, [entityId, wakeable]);
 
   return (
     <div className="relative">
@@ -135,7 +143,7 @@ export function WebRtcPlayer({
               className="h-3 w-3 rounded-full bg-effort animate-breathe motion-reduce:animate-none"
             />
             <span className="caption-label text-ink" role="status">
-              Connecting…
+              {wakeable ? "Waking camera…" : "Connecting…"}
             </span>
           </div>
         </div>

@@ -74,6 +74,24 @@ data class CameraUi(
      * `snapshotBucketContext.ts`.
      */
     val isFrigate: Boolean = false,
+    /**
+     * The camera sleeps and must be woken to stream ([LogicalCamera.isBattery]): the live tiers
+     * wait longer for it, and a Frigate one rides the shared snapshot beat rather than the
+     * on-open tick (its frame is not "current the instant it is asked for").
+     */
+    val isBattery: Boolean = false,
+    /**
+     * A Frigate battery camera that is parked right now — HA reports the camera entity `idle`
+     * while Frigate's pipeline is off, `streaming` while its PIR holds it awake. The tile must
+     * not fetch a snapshot for it (Frigate serves its grey error image, at HTTP 200) and must
+     * not call the last frame fresh. Always false for anything that is not a Frigate battery cam.
+     */
+    val asleep: Boolean = false,
+    /**
+     * When its motion sensor last changed (epoch ms), or null — the honest "last seen" for a
+     * sleeping camera's badge, in place of a snapshot age that would lie.
+     */
+    val motionChangedMs: Long? = null,
 )
 
 data class HomeUi(
@@ -223,6 +241,12 @@ class HomeViewModel @Inject constructor(
                 // Judged from the LIVE entity, matching how CameraPlayer derives the recorded
                 // backend — ring-mqtt's `_snapshot` sibling carries none of Frigate's attributes.
                 isFrigate = isFrigateCamera(lc.liveEntity),
+                isBattery = lc.isBattery,
+                // Parked in Frigate: HA reports the camera `idle` while the pipeline is off and
+                // `streaming` while its PIR holds it awake. Gated to Frigate battery cameras so a
+                // Ring tile (whose `idle` means nothing of the sort) is untouched.
+                asleep = isFrigateCamera(lc.liveEntity) && lc.isBattery && lc.snapshotEntity.state == "idle",
+                motionChangedMs = lc.motionId?.let { entities[it] }?.let { lastChangedMs(it.lastChanged) },
             )
         }
         val doorbell = activeDoorbellPress(logical, entities, System.currentTimeMillis())

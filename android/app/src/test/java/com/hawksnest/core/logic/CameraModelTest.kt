@@ -148,4 +148,22 @@ class CameraModelTest {
         )
         assertNull(cams[0].dingId)
     }
+
+    @Test
+    fun `binds the battery sensor, which is what marks a camera as one that sleeps`() {
+        // A Home Hub battery camera as HA's Reolink integration + Frigate present it: one plain
+        // `camera.<slug>` plus the (renamed) battery sensor. A wired camera has no such sensor.
+        val cams = resolveCameras(
+            map(
+                ent("camera.driveway", "Driveway"),
+                ent("sensor.driveway_battery", "Driveway Battery"),
+                ent("camera.garage", "Garage"),
+            ),
+        )
+        val (driveway, garage) = cams
+        assertEquals("sensor.driveway_battery", driveway.batteryId)
+        assertEquals(true, driveway.isBattery)
+        assertNull(garage.batteryId)
+        assertEquals(false, garage.isBattery)
+    }
 }

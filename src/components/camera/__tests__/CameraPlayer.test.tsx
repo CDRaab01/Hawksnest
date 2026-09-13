@@ -24,6 +24,7 @@ const lc = (id: string, name: string): LogicalCamera => {
     dingId: null,
     motionId: null,
     sirenSwitchId: null,
+    batteryId: null,
   };
 };
 

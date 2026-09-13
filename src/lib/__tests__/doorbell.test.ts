@@ -13,6 +13,7 @@ const cam = (id: string, name: string, dingId: string | null): LogicalCamera => 
   dingId,
   motionId: null,
   sirenSwitchId: null,
+  batteryId: null,
 });
 
 const ding = (id: string, state: string, whenMs: number): HassEntity => ({

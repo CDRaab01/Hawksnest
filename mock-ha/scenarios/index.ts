@@ -1,5 +1,5 @@
 import type { Scenario } from "../wsProtocol";
-import { baseEntities, frigateEntities, ringEntities } from "./entities";
+import { baseEntities, frigateBatteryEntities, frigateEntities, ringEntities } from "./entities";
 import { buildRegistries, buildHistory } from "./registries";
 
 const HA_VERSION = "2024.12.0";
@@ -49,6 +49,17 @@ export const scenarios: Record<string, () => Scenario> = {
   /** A Frigate-recorded camera (Front Gate) — the backend clip export requires. */
   "frigate-camera": () => {
     const entities = [...baseEntities, ...frigateEntities()];
+    return base({
+      entities,
+      registries: buildRegistries(entities),
+      history: buildHistory(entities),
+    });
+  },
+
+  /** The Frigate camera plus a sleeping battery camera behind a Home Hub (Driveway) — the
+   *  on-demand path: "Asleep" tile, longer live wake, breaker exemption, gap-aware scrub. */
+  "frigate-battery-camera": () => {
+    const entities = [...baseEntities, ...frigateEntities(), ...frigateBatteryEntities()];
     return base({
       entities,
       registries: buildRegistries(entities),

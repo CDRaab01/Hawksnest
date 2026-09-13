@@ -38,6 +38,29 @@ export interface LogicalCamera {
   motionId: string | null;
   /** ring-mqtt siren switch (`switch.<base>_siren`) on siren-capable cameras, else null. */
   sirenSwitchId: string | null;
+  /**
+   * Battery sensor (`sensor.<base>_battery`), if present — the tell that this camera **sleeps**.
+   *
+   * Both battery backends publish one: ring-mqtt for its battery cameras, and HA's official
+   * Reolink integration for battery cameras bound to a Home Hub (the Argus line). The same
+   * heuristic the HA automation `hawksnest_ring_snapshot_policy` uses to pick its battery
+   * cameras (`has_value('sensor.<base>_battery')`). See {@link isBatteryCamera}.
+   */
+  batteryId: string | null;
+}
+
+/**
+ * Whether this camera sleeps between events and has to be **woken** to stream.
+ *
+ * Every consumer that assumes a camera is always-on is wrong for these: live connect timeouts
+ * sized for a camera that answers in a second (a Reolink behind a Home Hub takes up to ~20 s to
+ * wake before RTSP even starts), the go2rtc session breaker (one slow wake must not condemn the
+ * tier for every other camera), and the snapshot tile (a sleeping camera's last frame is not
+ * "fresh", however recently HA re-published the entity). Fails closed: no battery sensor → not
+ * a battery camera → exactly today's behaviour.
+ */
+export function isBatteryCamera(camera: Pick<LogicalCamera, "batteryId">): boolean {
+  return camera.batteryId !== null;
 }
 
 /** The object id (after the domain dot), e.g. `camera.front_door_live` → `front_door_live`. */
@@ -144,6 +167,7 @@ export function resolveCameras(
       dingId: dingIdFor(g.base),
       motionId: has(`binary_sensor.${g.base}_motion`),
       sirenSwitchId: has(`switch.${g.base}_siren`),
+      batteryId: has(`sensor.${g.base}_battery`),
     });
   }
 

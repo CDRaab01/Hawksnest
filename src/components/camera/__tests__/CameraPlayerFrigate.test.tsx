@@ -40,6 +40,7 @@ const BEDROOM: LogicalCamera = (() => {
     dingId: null,
     motionId: null,
     sirenSwitchId: null,
+    batteryId: null,
   };
 })();
 

@@ -136,6 +136,52 @@ just today's behaviour. Derived per render rather than stored on `LogicalCamera`
 `cameraModel.ts` stays synchronous. Android's `CameraPlayer.kt` derives the same three-way backend
 (2026-07-30, closing the known lockstep gap where it still read the raw `eventSelectId` boolean).
 
+**Battery cameras behind a Reolink Home Hub are Frigate cameras that SLEEP (2026-09-11).** The
+three Argus 4 Pros reach Frigate/go2rtc as RTSP channels on the hub's IP (`h264Preview_0N_*`, N
+1-based), but the hub wakes a battery camera on any RTSP request (up to ~20 s), holds the session
+at most 5 minutes, then force-sleeps it — so Frigate never holds their streams. The sibling repo
+parks each one OFF at runtime (`frigate/<cam>/enabled/set`) and enables it only while the hub's
+PIR reports motion, for ≤ 4 minutes. What the apps see: an ordinary Frigate camera entity
+(`client_id`/`camera_name` stamped, so `isFrigateCamera` is true and every Frigate seam applies)
+whose state is `idle` while parked and `streaming` while awake, a `sensor.<base>_battery`, and a
+`binary_sensor.<base>_motion` that is the hub's PIR (renamed onto the canonical slug; Frigate's own
+lands on `_motion_2`). Four consumers had assumed always-on, and each is now gated on
+**`isBatteryCamera`** (`lib/cameraModel.ts` → `batteryId = sensor.<base>_battery`, Kotlin
+`LogicalCamera.isBattery`; the same heuristic the HA `hawksnest_ring_snapshot_policy` uses; fails
+closed):
+- **Live tiers wait for the wake and say so.** `LivePlayer` passes `wakeable` down; `Go2rtcPlayer`
+  widens its connect watchdog 8 s → 30 s (`WAKE_TIMEOUT_MS` ⇄ `WAKE_WATCHDOG_MS`), `WebRtcPlayer`
+  20 s → 30 s, and the overlay reads "Waking camera…". An 8 s watchdog would step down every time
+  and never show the picture.
+- **A slow wake never trips the session breaker.** `reportGo2rtcMedia(false)` /
+  `Go2rtcHealth.report(false)` make EVERY camera skip the go2rtc tier for 60 s; a sleeping camera
+  taking its time is a fact about one camera, not the media path, so a `wakeable` session that
+  never connected reports nothing global.
+- **Tiles do not lie.** A parked camera's `latest.jpg` is Frigate's grey `camera-error.jpg` at
+  HTTP 200, and `snapshotFreshnessMs` would stamp it "2m ago" because HA re-publishes the entity.
+  `CameraTile` (web) / `HomeScreen.CameraTile` (Android) treat `isFrigate && battery && state ===
+  "idle"` as **asleep**: no snapshot fetch, the last live frame if any, caption "Asleep", badge
+  "Motion <relative last_changed of motionId>". They also ride the `shared` snapshot beat, not
+  `onOpen` — the on-open tick's premise ("a Frigate snapshot is current the instant it is asked
+  for") is exactly what a parked camera breaks.
+- **The scrub is gap-aware, and it is the VOD RANGE that changes, not just the placeholder.**
+  Frigate's VOD concatenates the segments that exist in a range back-to-back and 404s on none, so a
+  grid page that is 95 % gap plays as a few minutes whose playlist time bears no relation to the
+  wall-clock the user scrubbed to. `vodRangeFor` (`lib/vodWindow.ts` ⇄ `core/logic/VodWindow.kt`)
+  intersects the grid page with the footage span under the playhead (`footageSpanAt`, from the
+  already-fetched `frigate/recordings/get` lane): an island → a range that is contiguous footage,
+  so playlist time == wall-clock offset; a gap → `null` → "No saved recording for this moment"
+  (never the Retry, which could not succeed); no spans yet → the plain page (unknown ≠ none, the
+  same convention `clipExport.coverage` uses). 24/7 cameras are byte-identical: their lane is one
+  span per uninterrupted run. This also closed a platform gap — Android's Frigate VOD had no
+  `onError` at all, so a dead page stalled silently; it now has `vodFailed` + Retry like the web.
+Two things deliberately NOT done: the Android direct-RTSP tier must not be given the hub's IP
+(`ReolinkRtsp.kt` hardcodes channel `01`, so it would silently play channel 1 for all three), and
+no Tailscale `/32` is advertised for the hub (that route only ever served that tier). Retention:
+these three carry `record.continuous.days: 1` — with on-demand enabling that is "keep every woken
+window for a day" — while `sensor.frigate_retention_days` stays the GLOBAL 3 (it sizes the timeline
+window, and `frigateRetentionDays` would treat a `0` as "unset" anyway).
+
 **Camera object alerts + AI descriptions (2026-07-30).** Frigate detections now reach the phone:
 the HA automation `hawksnest_push_camera_object` (sibling repo) subscribes to Frigate's
 `frigate/events` MQTT topic and publishes "There is a person at your Kitchen" to ntfy, **only

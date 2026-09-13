@@ -57,6 +57,9 @@ fun WebRtcPlayer(
     /** Audio gate: the received AudioTrack is disabled while true. Defaults muted —
      *  org.webrtc plays remote audio automatically otherwise (see Go2rtcPlayer). */
     muted: Boolean = true,
+    /** The camera sleeps and must be woken to stream ([LogicalCamera.isBattery]) — a longer
+     *  watchdog and an honest overlay label. See Go2rtcPlayer. */
+    wakeable: Boolean = false,
     /** Reports the source video's (width, height) — post-rotation — when known/changed. Feeds
      *  the PiP window's aspect ratio (see Go2rtcPlayer). */
     onVideoSize: ((width: Int, height: Int) -> Unit)? = null,
@@ -117,7 +120,7 @@ fun WebRtcPlayer(
     }
 
     val session = remember { mutableStateOf<WebRtcSession?>(null) }
-    DisposableEffect(entityId) {
+    DisposableEffect(entityId, wakeable) {
         connecting.value = true // re-show "Connecting…" for the newly-selected camera
         val s = WebRtcSession(
             scope,
@@ -126,6 +129,7 @@ fun WebRtcPlayer(
             renderer,
             entityId,
             muted,
+            wakeable,
             onFirstFrame = { scope.launch { connecting.value = false } },
             onFail = { currentOnFail.value() },
         )
@@ -154,7 +158,7 @@ fun WebRtcPlayer(
 
     Box(modifier) {
         AndroidView(factory = { renderer }, modifier = Modifier.fillMaxSize())
-        if (connecting.value) ConnectingOverlay()
+        if (connecting.value) ConnectingOverlay(label = if (wakeable) "Waking camera…" else "Connecting…")
     }
 }
 
@@ -206,6 +210,8 @@ private class WebRtcSession(
     private val renderer: SurfaceViewRenderer,
     private val entityId: String,
     initialMuted: Boolean,
+    /** See the composable's `wakeable` — the longer watchdog. */
+    private val wakeable: Boolean,
     onFirstFrame: () -> Unit,
     private val onFail: () -> Unit,
 ) {
@@ -275,9 +281,11 @@ private class WebRtcSession(
         // Fall back if we haven't connected in time rather than hanging on a black frame. 20s (not
         // 10) because a battery camera has to wake from sleep and start its stream, which routinely
         // takes longer than 10s — cutting over to HLS too early just trades one black screen for a
-        // slower one. The "Connecting…" overlay covers the wait.
+        // slower one. The "Connecting…" overlay covers the wait. A camera KNOWN to sleep
+        // (`wakeable`) gets 30s: a Reolink behind a Home Hub takes up to ~20s just to wake,
+        // before RTSP even starts. Mirrors the web WebRtcPlayer.
         watchdog = scope.launch {
-            delay(20_000)
+            delay(if (wakeable) 30_000 else 20_000)
             if (peer?.connectionState() != PeerConnection.PeerConnectionState.CONNECTED) fail()
         }
     }

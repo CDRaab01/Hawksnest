@@ -99,6 +99,54 @@ describe("CameraTile", () => {
     expect(screen.getByText("Offline")).toBeInTheDocument();
   });
 
+  it("shows a sleeping Frigate battery camera as asleep — fetches nothing, badges its last motion", () => {
+    // A Reolink behind a Home Hub, parked in Frigate: HA reports the camera `idle`, and Frigate
+    // would answer a snapshot request with its grey error image at HTTP 200. `last_changed` is
+    // recent because HA re-published the entity — NOT because a frame was captured.
+    const parked: HassEntity = {
+      entity_id: "camera.driveway",
+      state: "idle",
+      attributes: {
+        friendly_name: "Driveway",
+        entity_picture: "/a.svg",
+        client_id: "frigate",
+        camera_name: "driveway",
+      },
+      last_changed: new Date().toISOString(),
+    };
+    const { container } = render(
+      <CameraTile
+        entity={parked}
+        overrides={{}}
+        name="Driveway"
+        battery
+        motionChangedMs={Date.now() - 5 * 60_000}
+      />,
+    );
+    expect(preloader(container)).toBeNull();
+    expect(screen.queryByTestId("skeleton")).toBeNull();
+    expect(screen.getByText("Asleep")).toBeInTheDocument();
+    expect(screen.getByText(/^Motion /)).toBeInTheDocument();
+  });
+
+  it("treats the same idle camera as live when it is not a battery camera", () => {
+    // Fails closed: without the battery marker `idle` is just HA's default camera state (every
+    // wired Frigate camera reports it between stream sessions) and the tile behaves as before.
+    const wired: HassEntity = {
+      entity_id: "camera.garage",
+      state: "idle",
+      attributes: {
+        friendly_name: "Garage",
+        entity_picture: "/a.svg",
+        client_id: "frigate",
+        camera_name: "garage",
+      },
+    };
+    const { container } = render(<CameraTile entity={wired} overrides={{}} name="Garage" />);
+    expect(preloader(container)).not.toBeNull();
+    expect(screen.queryByText("Asleep")).toBeNull();
+  });
+
   it("names the tile for the view transition — and yields the name while open", () => {
     const { container } = render(
       <CameraTile
