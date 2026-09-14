@@ -153,6 +153,17 @@ closed):
   widens its connect watchdog 8 s → 30 s (`WAKE_TIMEOUT_MS` ⇄ `WAKE_WATCHDOG_MS`), `WebRtcPlayer`
   20 s → 30 s, and the overlay reads "Waking camera…". An 8 s watchdog would step down every time
   and never show the picture.
+- **Live tiers buffer the bursty radio path — on the web only.** The hub's Wi-Fi hop delivers a
+  battery camera's frames in clumps (measured 2026-09-13: ~40 % of frames < 10 ms apart, then
+  2–6 s gaps), and WebRTC renders each frame as it lands, so the picture blinked and froze.
+  `Go2rtcPlayer` and `WebRtcPlayer` both call `applyPlayoutBuffer` (`lib/playoutBuffer.ts`) on the
+  video and audio receivers of a `wakeable` camera: `receiver.jitterBufferTarget = 500` ms
+  (Chrome ≥ 100, Firefox ≥ 118), else the legacy `playoutDelayHint = 0.5` s, else nothing — guarded
+  and swallowed, because a throw inside negotiation would cost the whole tier. Wired cameras keep
+  the browser default (lowest latency); half a second is only worth paying where the frames
+  already arrive half a second late in bunches. **Known divergence, deliberate:** Android has no
+  twin — `stream-webrtc-android 1.3.10` exposes no playout-delay API on `org.webrtc.RtpReceiver`
+  (verified in the AAR) — so its battery live view still renders frames as they arrive.
 - **A slow wake never trips the session breaker.** `reportGo2rtcMedia(false)` /
   `Go2rtcHealth.report(false)` make EVERY camera skip the go2rtc tier for 60 s; a sleeping camera
   taking its time is a fact about one camera, not the media path, so a `wakeable` session that

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { go2rtcWsUrl, reportGo2rtcMedia } from "../lib/go2rtc";
+import { applyPlayoutBuffer, BATTERY_PLAYOUT_BUFFER_MS } from "../lib/playoutBuffer";
 
 /**
  * How long an ICE `disconnected` may last before it counts as a failure.
@@ -53,9 +54,11 @@ export function Go2rtcPlayer({
   muted?: boolean;
   /**
    * The camera sleeps and must be woken to stream (`isBatteryCamera`). Widens the connect
-   * watchdog to {@link WAKE_TIMEOUT_MS}, labels the overlay honestly, and — most importantly —
-   * keeps a slow or failed wake from tripping the SESSION breaker: one battery camera taking
-   * its time says nothing about whether go2rtc's media path works for the other eleven.
+   * watchdog to {@link WAKE_TIMEOUT_MS}, labels the overlay honestly, gives the receivers a
+   * half-second playout buffer against the hub's bursty Wi-Fi (`lib/playoutBuffer.ts`), and —
+   * most importantly — keeps a slow or failed wake from tripping the SESSION breaker: one
+   * battery camera taking its time says nothing about whether go2rtc's media path works for the
+   * other eleven.
    */
   wakeable?: boolean;
   onFail: () => void;
@@ -104,8 +107,15 @@ export function Go2rtcPlayer({
       onFailRef.current();
     };
 
-    pc.addTransceiver("video", { direction: "recvonly" });
-    pc.addTransceiver("audio", { direction: "recvonly" });
+    const video = pc.addTransceiver("video", { direction: "recvonly" });
+    const audio = pc.addTransceiver("audio", { direction: "recvonly" });
+    // A battery camera's frames arrive in clumps over the hub's Wi-Fi hop; half a second of
+    // playout buffer turns blink-then-freeze into motion. Wired cameras keep the lowest-latency
+    // default — see `lib/playoutBuffer.ts`.
+    if (wakeable) {
+      applyPlayoutBuffer(video?.receiver, BATTERY_PLAYOUT_BUFFER_MS);
+      applyPlayoutBuffer(audio?.receiver, BATTERY_PLAYOUT_BUFFER_MS);
+    }
     pc.ontrack = (e) => {
       if (videoRef.current && e.streams[0]) videoRef.current.srcObject = e.streams[0];
     };

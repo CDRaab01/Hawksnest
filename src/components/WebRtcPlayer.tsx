@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { webrtcOffer, webrtcCandidate } from "../store/connection";
+import { applyPlayoutBuffer, BATTERY_PLAYOUT_BUFFER_MS } from "../lib/playoutBuffer";
 
 /**
  * Low-latency live view over WebRTC, negotiated through HA's `camera/webrtc/offer`
@@ -18,8 +19,9 @@ export function WebRtcPlayer({
 }: {
   entityId: string;
   poster?: string;
-  /** The camera sleeps and must be woken to stream (`isBatteryCamera`) — a longer watchdog
-   *  and an honest overlay label. See `Go2rtcPlayer`. */
+  /** The camera sleeps and must be woken to stream (`isBatteryCamera`) — a longer watchdog,
+   *  an honest overlay label, and a half-second receiver playout buffer against its bursty
+   *  Wi-Fi path (`lib/playoutBuffer.ts`). See `Go2rtcPlayer`. */
   wakeable?: boolean;
   /** Audio track gate. Mounts muted for autoplay policy; flipped live via the
    *  DOM property (React only applies the `muted` attribute at mount). */
@@ -56,8 +58,15 @@ export function WebRtcPlayer({
       onFailRef.current();
     };
 
-    pc.addTransceiver("video", { direction: "recvonly" });
-    pc.addTransceiver("audio", { direction: "recvonly" });
+    const video = pc.addTransceiver("video", { direction: "recvonly" });
+    const audio = pc.addTransceiver("audio", { direction: "recvonly" });
+    // A battery camera's frames arrive in clumps over the hub's Wi-Fi hop; half a second of
+    // playout buffer turns blink-then-freeze into motion. Wired cameras keep the lowest-latency
+    // default — see `lib/playoutBuffer.ts`.
+    if (wakeable) {
+      applyPlayoutBuffer(video?.receiver, BATTERY_PLAYOUT_BUFFER_MS);
+      applyPlayoutBuffer(audio?.receiver, BATTERY_PLAYOUT_BUFFER_MS);
+    }
     pc.ontrack = (e) => {
       if (videoRef.current && e.streams[0]) videoRef.current.srcObject = e.streams[0];
     };

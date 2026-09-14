@@ -87,8 +87,12 @@ This file adds the things that are easy to get wrong and the suite context.
   breaker (a slow wake reports nothing global), the snapshot tile (`idle` = **Asleep**, no fetch,
   badge from the PIR's `last_changed`), and the scrub (`vodRangeFor` bounds the VOD to the
   footage island under the playhead; a gap is "No saved recording", never Retry). Don't give the
-  Android RTSP-direct tier the hub's IP — `ReolinkRtsp.kt` hardcodes channel `01`. ARCHITECTURE.md
-  has the full account.
+  Android RTSP-direct tier the hub's IP — `ReolinkRtsp.kt` hardcodes channel `01`. **Known
+  divergence, deliberate, web-only (2026-09-13):** the web WebRTC players give a `wakeable`
+  camera's receivers a 500 ms playout buffer (`lib/playoutBuffer.ts`) because the hub's Wi-Fi
+  hop delivers frames in clumps; Android cannot follow — `stream-webrtc-android 1.3.10` exposes
+  no playout-delay API on `org.webrtc.RtpReceiver` — so don't go looking for a Kotlin twin.
+  ARCHITECTURE.md has the full account.
 
 ## Testing map (all real seams are covered without real hardware)
 
