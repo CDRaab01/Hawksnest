@@ -23,6 +23,7 @@ import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
 import com.hawksnest.core.logic.ringEventsFromOptions
 import com.hawksnest.core.logic.FootageSpan
+import com.hawksnest.core.logic.footageLaneRefreshKeys
 import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.matchDevice
@@ -264,6 +265,14 @@ class CameraPlayerViewModel @Inject constructor(
     /** Continuous-recording spans for a Frigate camera — the timeline's footage lane. */
     suspend fun cameraFootage(camera: String, startMs: Long, endMs: Long): List<FootageSpan> =
         connection.fetchCameraFootage(camera, startMs, endMs)
+
+    /**
+     * The key the player re-runs [cameraFootage] on while a camera stays open: the Frigate camera
+     * entity's state for a camera that sleeps (each `idle` ⇄ `streaming` flip around a PIR wake is
+     * new footage), a constant for everything else. See [footageLaneRefreshKeys].
+     */
+    fun laneRefreshKeys(entityId: String, isBattery: Boolean): Flow<String?> =
+        footageLaneRefreshKeys(connection.state.entities, entityId, isBattery)
 
     /** HA token for media requests that must authenticate themselves — see [ConnectionManager.haToken]. */
     /**

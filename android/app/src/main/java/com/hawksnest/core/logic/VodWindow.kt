@@ -82,8 +82,8 @@ fun vodPageFor(headMs: Long, bounds: TimeRange): TimeRange {
 }
 
 /**
- * The VOD range to mount for [headMs]: the grid page, **bounded to the footage span under the
- * playhead** — or null when the lane says there is nothing there.
+ * The VOD range to mount for [headMs]: the grid page, **bounded to the contiguous footage under
+ * the playhead** — or null when the lane says there is nothing there.
  *
  * [vodPageFor] alone assumes the page is solid footage. Frigate's VOD does not fill gaps: it
  * concatenates the recording segments that exist in the range back-to-back, so a page that is 5%
@@ -92,17 +92,28 @@ fun vodPageFor(headMs: Long, bounds: TimeRange): TimeRange {
  * cameras rarely hit this; an event-only camera lives in it — a battery Reolink behind a Home Hub
  * is recorded only while its PIR holds it awake, so its timeline is islands of footage in gap.
  *
- * Intersecting the page with the covering span fixes both: the range is contiguous footage, so
- * playlist time == wall-clock offset from the range start, and a scrub into a gap yields null so
- * the player shows "No saved recording for this moment" instead of mounting a URL that will fail.
+ * Intersecting the page with the footage under the playhead fixes both: the range is contiguous
+ * footage, so playlist time == wall-clock offset from the range start, and a scrub into a gap
+ * yields null so the player shows "No saved recording for this moment" instead of mounting a URL
+ * that will fail.
+ *
+ * "Contiguous" is load-bearing, and a DRAWN span is not quite it: the lane bridges holes of up to
+ * 15 s so a dropped cache segment does not render as a gap, but the VOD bridges nothing, so a seek
+ * measured from the span start lands late by every bridged hole before it — and a battery camera's
+ * islands are riddled with them (its watchdog restarts ffmpeg, leaving 0.04–2 s scraps tens of
+ * seconds apart). So when the span carries [FootageSpan.runs] (Frigate does; see
+ * [parseFrigateWsRecordings]) the page is intersected with the RUN under the playhead, and a
+ * playhead inside a bridged hole is a gap: null. Spans without runs (Ring) intersect with the span
+ * itself, as before.
  *
  * Two deliberate properties, shared with the web twin:
  * - **Unknown is not none.** With no spans at all (lane not resolved, or the fetch failed) this
  *   returns the plain page — exactly today's behaviour — the same convention `ClipExport.coverage`
  *   uses (`UNKNOWN` ≠ `NONE`). Only a lane that *has* answered can say "nothing here".
- * - **24/7 cameras are unchanged.** Their lane is one long span per uninterrupted run, so the
- *   intersection is the whole page and the URL is identical to before. Grid alignment survives:
- *   every playhead inside the same page *and* the same span yields the same range.
+ * - **24/7 cameras are unchanged.** Their lane is one long span per uninterrupted run — one run per
+ *   span — so the intersection is the whole page and the URL is identical to before. Grid
+ *   alignment survives: every playhead inside the same page *and* the same run yields the same
+ *   range.
  *
  * 1:1 port of `src/lib/vodWindow.ts` `vodRangeFor` — keep in step.
  */
@@ -111,8 +122,15 @@ fun vodRangeFor(headMs: Long, bounds: TimeRange, spans: List<FootageSpan>): Time
     if (spans.isEmpty()) return page
     val span = footageSpanAt(spans, headMs) ?: return null
     if (!span.playable) return null
-    val startMs = maxOf(page.startMs, span.startMs)
-    val endMs = minOf(page.endMs, span.endMs)
+    // The run under the playhead when the span knows its runs; the span itself when it does not.
+    val (islandStart, islandEnd) = if (span.runs.isNotEmpty()) {
+        val run = footageRunAt(span.runs, headMs) ?: return null
+        run.startMs to run.endMs
+    } else {
+        span.startMs to span.endMs
+    }
+    val startMs = maxOf(page.startMs, islandStart)
+    val endMs = minOf(page.endMs, islandEnd)
     return if (endMs > startMs) TimeRange(startMs, endMs) else null
 }
 
@@ -131,7 +149,10 @@ fun needsNewPage(loaded: TimeRange?, headMs: Long, bounds: TimeRange): Boolean {
  * Playback offset (ms) for [headMs] within the page starting at [pageStartMs].
  *
  * The VOD's zero is the page start, not the timeline start. Getting this wrong seeks to a
- * plausible-looking but wrong moment, which is worse than an obvious failure.
+ * plausible-looking but wrong moment, which is worse than an obvious failure. A wall-clock delta
+ * is only right because [vodRangeFor] hands over a range of contiguous footage (a run): Frigate's
+ * playlist time is the sum of the segments present, so any hole before the playhead would make this
+ * seek late by the hole's width.
  */
 fun vodPositionMsInPage(headMs: Long, pageStartMs: Long): Long =
     maxOf(0L, headMs - pageStartMs)

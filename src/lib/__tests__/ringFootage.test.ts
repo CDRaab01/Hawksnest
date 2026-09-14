@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   chooseRecordedSource,
+  footageLaneRefreshKey,
+  footageRunAt,
   footageSegmentAt,
   footageSpanAt,
   footageSpans,
@@ -8,6 +10,7 @@ import {
   offsetInSegmentSeconds,
   parseFrigateWsRecordings,
   parseRingFootage,
+  sameFootageSpans,
   type FootageSegment,
   type FootageSpan,
 } from "../ringFootage";
@@ -181,7 +184,9 @@ describe("parseFrigateWsRecordings (frigate/recordings/get websocket result)", (
     const spans = parseFrigateWsRecordings(
       JSON.stringify([seg(1000, 1010), seg(1010.2, 1020), seg(1020.1, 1030)]),
     );
-    expect(spans).toEqual([{ startMs: 1000_000, endMs: 1030_000, playable: true }]);
+    expect(spans).toEqual([
+      { startMs: 1000_000, endMs: 1030_000, playable: true, runs: [{ startMs: 1000_000, endMs: 1030_000 }] },
+    ]);
   });
 
   it("keeps a real gap (beyond tolerance) as two spans — the lane must show honest holes", () => {
@@ -199,7 +204,9 @@ describe("parseFrigateWsRecordings (frigate/recordings/get websocket result)", (
 
   it("sorts unordered input before coalescing", () => {
     const spans = parseFrigateWsRecordings([seg(1020, 1030), seg(1000, 1010), seg(1010, 1020)]);
-    expect(spans).toEqual([{ startMs: 1000_000, endMs: 1030_000, playable: true }]);
+    expect(spans).toEqual([
+      { startMs: 1000_000, endMs: 1030_000, playable: true, runs: [{ startMs: 1000_000, endMs: 1030_000 }] },
+    ]);
   });
 
   it("drops malformed entries and returns [] for junk rather than throwing", () => {
@@ -208,7 +215,62 @@ describe("parseFrigateWsRecordings (frigate/recordings/get websocket result)", (
     expect(parseFrigateWsRecordings({ recordings: [] })).toEqual([]);
     // end <= start and missing fields drop only themselves.
     const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(2000, 2000), { start_time: 3000 }]);
-    expect(spans).toEqual([{ startMs: 1000_000, endMs: 1010_000, playable: true }]);
+    expect(spans).toEqual([
+      { startMs: 1000_000, endMs: 1010_000, playable: true, runs: [{ startMs: 1000_000, endMs: 1010_000 }] },
+    ]);
+  });
+
+  it("a bridged hole is drawn as one span but exposed as two runs", () => {
+    // 8 s hole: inside the 15 s drawing tolerance (one span on the strip), far outside the 1 s run
+    // tolerance. Frigate's VOD would play these back-to-back, so a seek measured from the span
+    // start would land 8 s late anywhere after the hole — the runs are what let vodRangeFor avoid it.
+    const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(1018, 1028)]);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]).toMatchObject({ startMs: 1000_000, endMs: 1028_000 });
+    expect(spans[0].runs).toEqual([
+      { startMs: 1000_000, endMs: 1010_000 },
+      { startMs: 1018_000, endMs: 1028_000 },
+    ]);
+  });
+
+  it("abutting segments form one run", () => {
+    // Sub-second seams and a slight overlap are how Frigate's own segments actually meet.
+    const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(1010.2, 1020), seg(1019.9, 1030)]);
+    expect(spans).toHaveLength(1);
+    expect(spans[0].runs).toEqual([{ startMs: 1000_000, endMs: 1030_000 }]);
+  });
+
+  it("footageRunAt is half-open and null inside a bridged hole", () => {
+    const [span] = parseFrigateWsRecordings([seg(1000, 1010), seg(1018, 1028)]);
+    expect(footageRunAt(span.runs!, 1000_000)).toEqual({ startMs: 1000_000, endMs: 1010_000 });
+    expect(footageRunAt(span.runs!, 1010_000)).toBeNull();
+    expect(footageRunAt(span.runs!, 1017_999)).toBeNull();
+    expect(footageRunAt(span.runs!, 1018_000)).toEqual({ startMs: 1018_000, endMs: 1028_000 });
+  });
+
+  it("sameFootageSpans compares spans and runs by value", () => {
+    const a = parseFrigateWsRecordings([seg(1000, 1010), seg(1018, 1028)]);
+    const b = parseFrigateWsRecordings([seg(1000, 1010), seg(1018, 1028)]);
+    expect(a).not.toBe(b);
+    expect(sameFootageSpans(a, b)).toBe(true);
+    // Same drawn span, different runs — a refetch that learned a hole closed is a real change.
+    const c = parseFrigateWsRecordings([seg(1000, 1010), seg(1010.5, 1028)]);
+    expect(c[0]).toMatchObject({ startMs: 1000_000, endMs: 1028_000 });
+    expect(sameFootageSpans(a, c)).toBe(false);
+    expect(sameFootageSpans([], [])).toBe(true);
+    expect(sameFootageSpans(a, [])).toBe(false);
+  });
+});
+
+describe("footageLaneRefreshKey", () => {
+  it("is the camera state for a battery camera and constant for everything else", () => {
+    // Each wake flips the Frigate entity idle → streaming → idle; each flip is one refetch.
+    expect(footageLaneRefreshKey(true, "idle")).toBe("idle");
+    expect(footageLaneRefreshKey(true, "streaming")).toBe("streaming");
+    expect(footageLaneRefreshKey(true, undefined)).toBeNull();
+    // A 24/7 camera's state changes say nothing about new footage — it is all new footage.
+    expect(footageLaneRefreshKey(false, "idle")).toBeNull();
+    expect(footageLaneRefreshKey(false, "streaming")).toBeNull();
   });
 });
 

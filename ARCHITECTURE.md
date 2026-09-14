@@ -175,6 +175,26 @@ closed):
   same convention `clipExport.coverage` uses). 24/7 cameras are byte-identical: their lane is one
   span per uninterrupted run. This also closed a platform gap — Android's Frigate VOD had no
   `onError` at all, so a dead page stalled silently; it now has `vodFailed` + Retry like the web.
+  **"Contiguous" is the RUN, not the drawn span (2026-09-13).** The lane bridges holes of up to
+  15 s so a dropped cache segment is not drawn as a gap, but a battery camera's islands are riddled
+  with real holes — the hub's watchdog restarts ffmpeg around each wake, so Frigate's recordings
+  table for one wake reads like `20:43:42 0.38 s | 20:44:25 0.04 s | 20:44:48 2.27 s | … |
+  20:47:14 1.75 s | 20:47:24 15.46 s`. The VOD bridges nothing, so a seek measured from a span
+  start landed late by every bridged hole before it, and near a span end overshot and clamped.
+  Each Frigate `FootageSpan` now carries its contiguous `runs` (`FootageRun`, segments abutting
+  within `FRIGATE_RUN_TOLERANCE_MS` = 1 s, filled by `parseFrigateWsRecordings` while it merges;
+  Ring spans carry none), and `vodRangeFor` intersects the page with the run under the playhead —
+  a playhead in a bridged hole is `null`. One run == the span on a 24/7 camera, so its URL is
+  unchanged (asserted on both platforms).
+- **A battery camera's lane is refetched while it is open (2026-09-13).** The Frigate lane was
+  fetched once per camera-open, which is right for a 24/7 camera and wrong for one that records
+  only while awake: every wake during the session was invisible until the player was reopened.
+  For `isBatteryCamera` only, the lane fetch is keyed on the Frigate camera entity's STATE
+  (`footageLaneRefreshKey` ⇄ Kotlin twin: `idle` ⇄ `streaming` around each wake — the same entity
+  and state the tile's "Asleep" reads), so one transition is exactly one refetch; other cameras'
+  key is constant. The refresh keeps the spans on screen until the new ones land and stores an
+  equal result as the SAME value (`sameFootageSpans` on web; structural `mutableStateOf` on
+  Android), so a no-change refetch never rebuilds the page memo or remounts the player.
 Two things deliberately NOT done: the Android direct-RTSP tier must not be given the hub's IP
 (`ReolinkRtsp.kt` hardcodes channel `01`, so it would silently play channel 1 for all three), and
 no Tailscale `/32` is advertised for the hub (that route only ever served that tier). Retention:
@@ -295,11 +315,15 @@ Frigate cameras from real recording segments. The payload is one entry per ~10 s
 (measured: ~6.5k entries / 1 MB / tens of ms for a 3-day window), so the mirrored
 `parseFrigateWsRecordings` (`lib/ringFootage.ts` ⇄ `core/logic/RingFootage.kt`) coalesces to
 drawable `FootageSpan`s at the parse boundary — 15 s tolerance, chosen to bridge a single
-dropped ~10 s cache segment while leaving real gaps honest. Spans are always `playable: true`
+dropped ~10 s cache segment while leaving real gaps honest. That tolerance is for DRAWING only:
+since 2026-09-13 each span also carries its contiguous `runs` (1 s tolerance,
+`FRIGATE_RUN_TOLERANCE_MS`), because Frigate's VOD plays the segments that exist back-to-back and
+a seek across a bridged hole lands late by the hole's width — `vodRangeFor` mounts the run, not
+the span (see the battery-camera section above). Spans are always `playable: true`
 (no per-segment URLs to expire, no Ring-style E2E encryption). It reaches the player through the
 source seam (`Source.fetchCameraFootage`, [] when unsupported — demo/mock render laneless, as
-before) and is **visual only**: playback stays on the paged VOD; the lane shows *where* scrubbing
-will land on footage. One trap the Android wiring hit: the fetch must be keyed on the window, not
+before) and is no longer visual only: playback stays on the paged VOD, but the lane's runs decide
+*which* range of it is mounted for the moment under the playhead. One trap the Android wiring hit: the fetch must be keyed on the window, not
 just the camera — the window opens at the 24h fallback and widens to real retention when
 `frigateRetentionDays` resolves, and an unkeyed fetch would leave days 2–3 laneless (the event
 fetch had the same latent bug; both are keyed now).

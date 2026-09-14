@@ -147,4 +147,53 @@ class VodWindowTest {
             vodRangeFor(rangeHead + 60_000L, rangeBounds, island),
         )
     }
+
+    // One drawn span (the 15 s drawing tolerance bridged an 8 s hole) made of two contiguous runs.
+    // Frigate's VOD plays whatever exists back-to-back, so a range that straddled the hole would
+    // show a frame 8 s late for every moment after it.
+    private val bridged = FootageSpan(
+        rangeHead - 60_000L,
+        rangeHead + 60_000L,
+        playable = true,
+        runs = listOf(
+            FootageRun(rangeHead - 60_000L, rangeHead - 10_000L),
+            FootageRun(rangeHead - 2_000L, rangeHead + 60_000L),
+        ),
+    )
+
+    @Test
+    fun `scrub past a bridged hole mounts the second run`() {
+        // The range starts at the RUN, so playlist time == wall-clock offset from head - 2 s.
+        assertEquals(
+            TimeRange(rangeHead - 2_000L, rangeHead + 60_000L),
+            vodRangeFor(rangeHead, rangeBounds, listOf(bridged)),
+        )
+        // And inside the first run, the first run — never the span.
+        assertEquals(
+            TimeRange(rangeHead - 60_000L, rangeHead - 10_000L),
+            vodRangeFor(rangeHead - 30_000L, rangeBounds, listOf(bridged)),
+        )
+    }
+
+    @Test
+    fun `scrub into a bridged hole yields null`() {
+        // Drawn as footage, but nothing was recorded here and the VOD cannot show it.
+        assertNull(vodRangeFor(rangeHead - 5_000L, rangeBounds, listOf(bridged)))
+        // Half-open like footageSpanAt: the first run's end is the hole's first instant.
+        assertNull(vodRangeFor(rangeHead - 10_000L, rangeBounds, listOf(bridged)))
+        assertNotEquals(null, vodRangeFor(rangeHead - 2_000L, rangeBounds, listOf(bridged)))
+    }
+
+    @Test
+    fun `a solid span yields the same range as before`() {
+        // A 24/7 camera's span is one run == the span, so the URL is identical to the run-less
+        // form — no regression on the cameras this never applied to.
+        val solid = FootageSpan(0, 100 * day, playable = true)
+        val withRun = solid.copy(runs = listOf(FootageRun(0, 100 * day)))
+        assertEquals(vodRangeFor(rangeHead, rangeBounds, listOf(solid)), vodRangeFor(rangeHead, rangeBounds, listOf(withRun)))
+        assertEquals(vodPageFor(rangeHead, rangeBounds), vodRangeFor(rangeHead, rangeBounds, listOf(withRun)))
+        val island = FootageSpan(rangeHead - 2 * 60_000L, rangeHead + 3 * 60_000L, playable = true)
+        val islandRun = island.copy(runs = listOf(FootageRun(island.startMs, island.endMs)))
+        assertEquals(vodRangeFor(rangeHead, rangeBounds, listOf(island)), vodRangeFor(rangeHead, rangeBounds, listOf(islandRun)))
+    }
 }

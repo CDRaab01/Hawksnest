@@ -1,5 +1,9 @@
 package com.hawksnest.core.logic
 
+import com.hawksnest.core.ha.HassEntity
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -56,12 +60,28 @@ data class RingFootage(
     }
 }
 
+/**
+ * One stretch of genuinely contiguous recording inside a [FootageSpan] — segments that abut within
+ * [FRIGATE_RUN_TOLERANCE_MS]. Its own type rather than [TimeRange] to mirror the web, where
+ * `vodWindow.ts` imports `ringFootage.ts` and not the other way round.
+ */
+data class FootageRun(val startMs: Long, val endMs: Long)
+
 /** A drawable run of the continuous lane — neighbouring segments coalesced (see [footageSpans]). */
 data class FootageSpan(
     val startMs: Long,
     val endMs: Long,
     /** False for encrypted/URL-less spans: footage exists but this player cannot show it. */
     val playable: Boolean,
+    /**
+     * The contiguous sub-runs this span was DRAWN over, when the source knows them. A Frigate span
+     * bridges holes of up to 15 s so the lane stays legible, but Frigate's VOD does not bridge
+     * anything — it concatenates the segments that exist — so a seek computed from the span start
+     * lands late by every hole before it. [vodRangeFor] mounts the run under the playhead instead,
+     * where playlist time really is wall-clock offset. Empty (Ring) means "treat the span itself as
+     * the run" — today's behaviour.
+     */
+    val runs: List<FootageRun> = emptyList(),
 )
 
 /** A segment is playable when it has a URL and isn't end-to-end encrypted. */
@@ -145,6 +165,48 @@ fun footageSpanAt(spans: List<FootageSpan>, t: Long): FootageSpan? {
     return best
 }
 
+/**
+ * The contiguous run covering [t], or null when [t] falls in a hole the span bridged for drawing.
+ * Same half-open interval and latest-start-wins rule as [footageSpanAt], so a seam between two
+ * abutting runs belongs to exactly one of them. 1:1 with the web `footageRunAt`.
+ */
+fun footageRunAt(runs: List<FootageRun>, t: Long): FootageRun? {
+    var best: FootageRun? = null
+    for (run in runs) {
+        if (t < run.startMs || t >= run.endMs) continue
+        val cur = best
+        if (cur == null || run.startMs >= cur.startMs) best = run
+    }
+    return best
+}
+
+/**
+ * The key that re-runs the Frigate footage-lane fetch while a camera stays open.
+ *
+ * The lane is otherwise fetched once per camera-open, which is right for a 24/7 camera (nothing
+ * new to learn) and wrong for a battery camera behind a Home Hub: everything it records DURING the
+ * session — each PIR wake — would never appear until the player was closed and reopened. HA flips
+ * the Frigate camera entity's state around every wake (`idle` → `streaming`/`recording` → `idle`),
+ * the same signal the tile's "Asleep" reads, so the state string IS the refresh key: one
+ * transition, one refetch. For everything else the key is constant, so nothing refetches.
+ * Attribute-only churn (battery %, snapshot republish) never changes it. 1:1 with the web
+ * `footageLaneRefreshKey`.
+ */
+fun footageLaneRefreshKey(isBattery: Boolean, cameraState: String?): String? =
+    if (isBattery) cameraState else null
+
+/**
+ * [footageLaneRefreshKey] over a live entity map: one emission per state transition of [entityId],
+ * none for attribute-only churn, and a single constant emission for a camera that does not sleep.
+ * The player keys its lane fetch on this, so every emission after the first is exactly one refetch.
+ */
+fun footageLaneRefreshKeys(
+    entities: Flow<Map<String, HassEntity>>,
+    entityId: String,
+    isBattery: Boolean,
+): Flow<String?> =
+    entities.map { footageLaneRefreshKey(isBattery, it[entityId]?.state) }.distinctUntilChanged()
+
 /** Offset of [t] within [seg], clamped into the span, in milliseconds (ExoPlayer seeks in ms). */
 fun offsetInSegmentMs(seg: FootageSegment, t: Long): Long {
     val span = (seg.endMs - seg.startMs).coerceAtLeast(0L)
@@ -182,6 +244,18 @@ fun footageSpans(segments: List<FootageSegment>, toleranceMs: Long = 1000L): Lis
 const val FRIGATE_SPAN_TOLERANCE_MS = 15_000L
 
 /**
+ * Tolerance when grouping Frigate segments into the contiguous RUNS inside a span.
+ *
+ * Frigate's real segment abutment is sub-second (a ~10 s segment ends where the next begins, give
+ * or take the muxer). Anything wider is a hole the VOD will not fill: it concatenates the segments
+ * that exist, so a seek measured from before the hole shows a frame that many seconds late. A
+ * battery camera behind a Home Hub produces exactly this — its watchdog restarts ffmpeg around a
+ * wake, leaving islands of 60 s segments littered with 0.04–2 s scraps tens of seconds apart —
+ * and with only the 15 s drawing tolerance a scrub near the island's end overshot and clamped.
+ */
+const val FRIGATE_RUN_TOLERANCE_MS = 1_000L
+
+/**
  * Unwrap a `frigate/recordings/get` websocket result into drawable [FootageSpan]s — the Frigate
  * counterpart of [footageSpans], and the data behind the continuous lane for Frigate cameras.
  * 1:1 with the web `parseFrigateWsRecordings`.
@@ -192,6 +266,12 @@ const val FRIGATE_SPAN_TOLERANCE_MS = 15_000L
  * tens of ms for a 3-day window), so coalescing here — not in the composable — is what keeps the
  * timeline from drawing thousands of runs.
  *
+ * Two tolerances, two jobs. Segments within [toleranceMs] (15 s) merge into one DRAWN span, so a
+ * single dropped cache segment does not render as a gap. Within a span, segments within
+ * [runToleranceMs] (1 s) extend the current contiguous RUN and anything wider starts a new one —
+ * so [vodRangeFor] can mount exactly the footage under the playhead and seek by wall-clock delta
+ * without the bridged holes pushing the picture late. On a 24/7 camera one run == the span.
+ *
  * Spans are always `playable = true`: unlike Ring, Frigate has no per-segment URL to expire and no
  * end-to-end encryption — if the segment is on disk, the VOD can serve it. Junk input yields [],
  * never a throw: the lane simply doesn't render, which is what the pre-8b timeline showed anyway.
@@ -199,6 +279,7 @@ const val FRIGATE_SPAN_TOLERANCE_MS = 15_000L
 fun parseFrigateWsRecordings(
     result: JsonElement?,
     toleranceMs: Long = FRIGATE_SPAN_TOLERANCE_MS,
+    runToleranceMs: Long = FRIGATE_RUN_TOLERANCE_MS,
 ): List<FootageSpan> {
     val element = when {
         result is JsonPrimitive && result.isString ->
@@ -221,10 +302,18 @@ fun parseFrigateWsRecordings(
     for ((startMs, endMs) in segments) {
         val last = spans.lastOrNull()
         if (last != null && startMs - last.endMs <= toleranceMs) {
-            spans[spans.lastIndex] = last.copy(endMs = maxOf(last.endMs, endMs))
+            // Inside the drawn span. The last run always ends where the span ends, so the gap to it
+            // is the gap to the span; sub-second (or overlapping) extends the run, wider opens a new one.
+            val run = last.runs.last()
+            val runs = if (startMs - run.endMs <= runToleranceMs) {
+                last.runs.dropLast(1) + run.copy(endMs = maxOf(run.endMs, endMs))
+            } else {
+                last.runs + FootageRun(startMs, endMs)
+            }
+            spans[spans.lastIndex] = last.copy(endMs = maxOf(last.endMs, endMs), runs = runs)
             continue
         }
-        spans += FootageSpan(startMs, endMs, playable = true)
+        spans += FootageSpan(startMs, endMs, playable = true, runs = listOf(FootageRun(startMs, endMs)))
     }
     return spans
 }

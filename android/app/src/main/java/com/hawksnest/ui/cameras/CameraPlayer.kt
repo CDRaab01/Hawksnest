@@ -56,6 +56,7 @@ import com.hawksnest.core.logic.chooseRecordedSource
 import com.hawksnest.core.logic.clipContaining
 import com.hawksnest.core.logic.clipSpanEndMs
 import com.hawksnest.core.logic.FootageSpan
+import com.hawksnest.core.logic.footageLaneRefreshKey
 import com.hawksnest.core.logic.footageSpans
 import com.hawksnest.core.logic.offsetInClipMs
 import com.hawksnest.core.logic.TimeRange
@@ -174,12 +175,28 @@ fun CameraPlayer(
     // resolves — the lane just appears, nothing blocks on it. Mirrors the web CameraPlayer.
     // Keyed on the window too: it opens at the 24h fallback and widens to the real retention when
     // frigateRetentionDays resolves — without the key the lane would stay 24h on a 3-day strip.
-    val frigateLane: List<FootageSpan> by produceState(emptyList(), cam.id, startMs, endMs) {
-        value = if (isRing) {
-            emptyList()
-        } else {
-            runCatching { viewModel.cameraFootage(cameraName, startMs, endMs) }.getOrDefault(emptyList())
-        }
+    //
+    // A battery camera records DURING the session (each PIR wake is new footage), so its lane is
+    // refetched every time HA flips its Frigate camera entity's state (`idle` ⇄ `streaming` around
+    // a wake — the same entity and state HomeViewModel's `asleep` reads). For every other camera
+    // the key is constant and the lane is fetched once per open, as before. `footageLaneRefreshKey`
+    // is the pure, tested rule. The initial value is the CURRENT state, not null, so the flow's
+    // first emission changes nothing and the open costs one fetch, not two.
+    val sleeps = isFrigate && cam.isBattery
+    val laneRefreshKey: String? by remember(cam.id, sleeps) { viewModel.laneRefreshKeys(cam.entityId, sleeps) }
+        .collectAsState(initial = footageLaneRefreshKey(sleeps, viewModel.entity(cam.entityId)?.state))
+    // Reset on a camera change ONLY — not on every refetch. A lane that blanked while a refresh was
+    // in flight would flash every island off the strip and, worse, flip `vodRangeFor` to the plain
+    // page under a mounted player. `mutableStateOf` compares structurally, so a refetch that comes
+    // back equal is a no-op: nothing downstream re-keys (ARCHITECTURE.md's identity rule).
+    var frigateLane by remember(cam.id) { mutableStateOf<List<FootageSpan>>(emptyList()) }
+    LaunchedEffect(cam.id, startMs, endMs, laneRefreshKey) {
+        if (isRing) return@LaunchedEffect
+        // A failed refresh keeps what is on screen; a failed first fetch leaves the empty list the
+        // camera change reset to. Either way nothing is invented.
+        val spans = runCatching { viewModel.cameraFootage(cameraName, startMs, endMs) }.getOrNull()
+            ?: return@LaunchedEffect
+        frigateLane = spans
     }
     val footageLane = if (isRing) ringLane else frigateLane
 
