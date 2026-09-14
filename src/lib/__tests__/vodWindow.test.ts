@@ -135,4 +135,47 @@ describe("vodRangeFor", () => {
     const island = [{ startMs: head - 10 * 60_000, endMs: head + 10 * 60_000, playable: true }];
     expect(vodRangeFor(head, bounds, island)).toEqual(vodRangeFor(head + 60_000, bounds, island));
   });
+
+  // One drawn span (the 15 s drawing tolerance bridged an 8 s hole) made of two contiguous runs.
+  // Frigate's VOD plays whatever exists back-to-back, so a range that straddled the hole would
+  // show a frame 8 s late for every moment after it.
+  const bridged = {
+    startMs: head - 60_000,
+    endMs: head + 60_000,
+    playable: true,
+    runs: [
+      { startMs: head - 60_000, endMs: head - 10_000 },
+      { startMs: head - 2_000, endMs: head + 60_000 },
+    ],
+  };
+
+  it("scrub past a bridged hole mounts the second run", () => {
+    // The range starts at the RUN, so playlist time == wall-clock offset from head - 2 s.
+    expect(vodRangeFor(head, bounds, [bridged])).toEqual({ startMs: head - 2_000, endMs: head + 60_000 });
+    // And inside the first run, the first run — never the span.
+    expect(vodRangeFor(head - 30_000, bounds, [bridged])).toEqual({
+      startMs: head - 60_000,
+      endMs: head - 10_000,
+    });
+  });
+
+  it("scrub into a bridged hole yields null", () => {
+    // Drawn as footage, but nothing was recorded here and the VOD cannot show it.
+    expect(vodRangeFor(head - 5_000, bounds, [bridged])).toBeNull();
+    // Half-open like footageSpanAt: the first run's end is the hole's first instant.
+    expect(vodRangeFor(head - 10_000, bounds, [bridged])).toBeNull();
+    expect(vodRangeFor(head - 2_000, bounds, [bridged])).not.toBeNull();
+  });
+
+  it("a solid span yields the same range as before", () => {
+    // A 24/7 camera's span is one run == the span, so the URL is byte-identical to the run-less
+    // form — no regression on the cameras this never applied to.
+    const solid = { startMs: 0, endMs: 100 * DAY, playable: true };
+    const withRun = { ...solid, runs: [{ startMs: 0, endMs: 100 * DAY }] };
+    expect(vodRangeFor(head, bounds, [withRun])).toEqual(vodRangeFor(head, bounds, [solid]));
+    expect(vodRangeFor(head, bounds, [withRun])).toEqual(page);
+    const island = { startMs: head - 2 * 60_000, endMs: head + 3 * 60_000, playable: true };
+    const islandRun = { ...island, runs: [{ startMs: island.startMs, endMs: island.endMs }] };
+    expect(vodRangeFor(head, bounds, [islandRun])).toEqual(vodRangeFor(head, bounds, [island]));
+  });
 });

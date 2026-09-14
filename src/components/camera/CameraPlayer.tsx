@@ -16,7 +16,9 @@ import {
 } from "../../lib/ringTimeline";
 import {
   chooseRecordedSource,
+  footageLaneRefreshKey,
   footageSpans,
+  sameFootageSpans,
   type FootageSpan,
   type RingFootage,
 } from "../../lib/ringFootage";
@@ -268,17 +270,34 @@ export function CameraPlayer({
   // bundled with its timeline fetch below; this is the Frigate counterpart (already coalesced
   // by the source). [] until it resolves — the lane just appears, nothing blocks on it.
   const [frigateFootage, setFrigateFootage] = useState<FootageSpan[]>([]);
+  // Cleared on a camera change ONLY — not on every refetch. A lane that blanked while a refresh
+  // was in flight would flash every island off the strip and, worse, flip `vodRangeFor` to the
+  // plain page under a mounted player.
   useEffect(() => {
     setFrigateFootage([]);
+  }, [cameraName]);
+  // A battery camera records DURING the session (each PIR wake is new footage), so its lane is
+  // refetched every time HA flips its Frigate camera entity's state (`idle` ⇄ `streaming` around a
+  // wake — the same entity and state the tile's "Asleep" reads). For every other camera the key
+  // is constant and the lane is fetched once per open, as before. `footageLaneRefreshKey` is the
+  // pure, tested rule; the entity is read live off the store so the effect sees each transition.
+  const sleeps = isFrigate && isBatteryCamera(camera);
+  const laneEntity = useEntity(sleeps ? camera.snapshotEntity.entity_id : "");
+  const laneRefreshKey = footageLaneRefreshKey(sleeps, laneEntity?.state);
+  useEffect(() => {
     if (isRing || !isFrigate) return;
     let active = true;
     fetchCameraFootage(cameraName, window.start, window.end)
-      .then((spans) => active && setFrigateFootage(spans))
-      .catch(() => active && setFrigateFootage([]));
+      // Same footage → same array. The VOD page memo takes the lane as a dependency, so an
+      // equal-but-new array would rebuild it (and could remount the player) for nothing.
+      .then((spans) => active && setFrigateFootage((prev) => (sameFootageSpans(prev, spans) ? prev : spans)))
+      // A failed refresh keeps what is on screen; a failed first fetch leaves the [] the camera
+      // change reset to. Either way nothing is invented.
+      .catch(() => undefined);
     return () => {
       active = false;
     };
-  }, [isRing, isFrigate, cameraName, window.start, window.end]);
+  }, [isRing, isFrigate, cameraName, window.start, window.end, laneRefreshKey]);
 
   // Ring's OWN timeline, via the ring-timeline service — real event times, real spans, and
   // directly playable URLs. Preferred over the selector for ring cameras because the selector

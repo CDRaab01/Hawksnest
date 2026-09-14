@@ -9,6 +9,7 @@ import {
 } from "../../../store/connection";
 import { useEntityStore } from "../../../store/entityStore";
 import { resetGo2rtcForTest } from "../../../lib/go2rtc";
+import { parseFrigateWsRecordings, type FootageSpan } from "../../../lib/ringFootage";
 import type { HassEntity } from "../../../lib/ha";
 import type { LogicalCamera } from "../../../lib/cameraModel";
 
@@ -32,7 +33,7 @@ vi.mock("../../../store/connection", async (importOriginal) => {
 const signed = signedRecordingUrlAt as unknown as ReturnType<typeof vi.fn>;
 const footage = fetchCameraFootage as unknown as ReturnType<typeof vi.fn>;
 
-function frigateCamera(base: string, name: string): LogicalCamera {
+function frigateCamera(base: string, name: string, { battery = false } = {}): LogicalCamera {
   const entity: HassEntity = {
     entity_id: `camera.${base}`,
     state: "idle",
@@ -52,12 +53,15 @@ function frigateCamera(base: string, name: string): LogicalCamera {
     dingId: null,
     motionId: null,
     sirenSwitchId: null,
-    batteryId: null,
+    // `sensor.<base>_battery` is the tell that a camera SLEEPS (`isBatteryCamera`).
+    batteryId: battery ? `sensor.${base}_battery` : null,
   };
 }
 
 const BEDROOM = frigateCamera("bedroom", "Bedroom");
 const KITCHEN = frigateCamera("kitchen", "Kitchen");
+/** A battery Reolink behind the Home Hub: a Frigate camera that is parked `idle` between wakes. */
+const FRONT = frigateCamera("front", "Front", { battery: true });
 
 /**
  * 15:00Z, which sits in the MIDDLE of a VOD page.
@@ -199,6 +203,125 @@ describe("CameraPlayer — gap-aware scrub (event-only cameras)", () => {
     await recordedVideo();
     // The signed range is the island, so playlist time == wall-clock offset from its start.
     expect(signed).toHaveBeenCalledWith("bedroom", island.startMs, island.endMs);
+  });
+
+  it("mounts the contiguous RUN under the playhead, not the drawn span — the real `front` island", async () => {
+    const now = NOON_ISH.getTime();
+    // One keyboard step is the strip's tick interval — 15 minutes at the default 1 h viewport
+    // the test setup's stubbed layout yields — so the scrubbed moment is now − 15 min. Frigate's
+    // recordings table for `front` on 2026-09-13 (local start, duration s), re-based so that
+    // 20:47:30 — the moment scrubbed to — lands on it:
+    //   20:43:42 0.38 | 20:44:25 0.04 | 20:44:48 2.27 | 20:45:15 10.06 | 20:45:24 14.79
+    //   20:46:31 9.92 | 20:47:14 1.75 | 20:47:24 15.46
+    // The hub's watchdog restarts ffmpeg around a wake, so the island is scraps and holes.
+    const head = now - 15 * 60_000;
+    const base = head - 228_000; // 20:43:42 in this frame; 20:47:30 is +228 s
+    const row = (offsetS: number, durationS: number) => {
+      const start = (base + offsetS * 1000) / 1000;
+      return { start_time: start, end_time: start + durationS };
+    };
+    const spans = parseFrigateWsRecordings([
+      row(0, 0.38),
+      row(43, 0.04),
+      row(66, 2.27),
+      row(93, 10.06),
+      row(102, 14.79),
+      row(169, 9.92),
+      row(212, 1.75),
+      row(222, 15.46),
+    ]);
+    // The lane DRAWS the last two rows as one span (an 8 s hole, inside the 15 s drawing
+    // tolerance) — but 20:47:30 sits in its second run, 20:47:24 → 20:47:39.46.
+    const island = spans[spans.length - 1];
+    expect(island.startMs).toBe(base + 212_000);
+    expect(island.runs).toHaveLength(2);
+    const run = island.runs![1];
+    expect(run.startMs).toBe(base + 222_000);
+
+    footage.mockResolvedValueOnce(spans);
+    renderPlayer(FRONT);
+    await laneLanded();
+    scrubBack(1);
+
+    await recordedVideo();
+    // Signed for the RUN: the playlist's zero is 20:47:24, so the 6 s wall-clock seek shows
+    // 20:47:30. Signed for the span, Frigate would have concatenated the 1.75 s scrap and the
+    // 15.46 s segment back-to-back and the same seek would have shown a frame ~8 s late.
+    expect(signed).toHaveBeenCalledWith("front", run.startMs, run.endMs);
+    expect(signed).not.toHaveBeenCalledWith("front", island.startMs, island.endMs);
+  });
+});
+
+/**
+ * A battery camera records DURING the session — every PIR wake is new footage — so its lane
+ * cannot be fetched once per open like a 24/7 camera's. HA flips the Frigate camera entity's
+ * state around each wake (`idle` → `streaming` → `idle`); each transition is exactly one refetch,
+ * and the spans already on screen stay until the new ones land.
+ */
+describe("CameraPlayer — battery camera lane refresh", () => {
+  const now = NOON_ISH.getTime();
+  const island: FootageSpan[] = [
+    { startMs: now - 50 * 60_000, endMs: now - 40 * 60_000, playable: true },
+  ];
+
+  /** HA publishing the camera entity with a new state (or only new attributes). */
+  function publish(camera: LogicalCamera, state: string, attributes: Record<string, unknown> = {}) {
+    act(() => {
+      useEntityStore.getState().upsertEntities([
+        { ...camera.liveEntity, state, attributes: { ...camera.liveEntity.attributes, ...attributes } },
+      ]);
+    });
+  }
+
+  async function settle() {
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  }
+
+  it("refetches the lane exactly once per entity state transition, keeping the old spans meanwhile", async () => {
+    let releaseRefresh: (spans: FootageSpan[]) => void = () => undefined;
+    footage
+      .mockResolvedValueOnce(island)
+      .mockImplementationOnce(() => new Promise<FootageSpan[]>((resolve) => (releaseRefresh = resolve)))
+      .mockResolvedValueOnce(island);
+    publish(FRONT, "idle");
+    renderPlayer(FRONT);
+    await waitFor(() => expect(footage).toHaveBeenCalledTimes(1));
+    await settle();
+    // The lane is drawn (" · 24/7" is the strip's own tell that footage spans exist).
+    expect(screen.getByText(/24\/7/)).toBeInTheDocument();
+
+    // The PIR woke it: one transition, one refetch…
+    publish(FRONT, "streaming");
+    await waitFor(() => expect(footage).toHaveBeenCalledTimes(2));
+    // …and while that refetch is in flight the lane must not flash to empty.
+    expect(screen.getByText(/24\/7/)).toBeInTheDocument();
+    // Attribute-only churn (battery %, snapshot republish) is not a transition.
+    publish(FRONT, "streaming", { battery_level: 87 });
+    await settle();
+    expect(footage).toHaveBeenCalledTimes(2);
+
+    act(() => releaseRefresh(island));
+    await settle();
+    // Back to sleep: the third and last refetch, which is when the new footage is on disk.
+    publish(FRONT, "idle");
+    await waitFor(() => expect(footage).toHaveBeenCalledTimes(3));
+    await settle();
+    expect(screen.getByText(/24\/7/)).toBeInTheDocument();
+    expect(footage).toHaveBeenCalledTimes(3);
+  });
+
+  it("never refetches for a camera that does not sleep", async () => {
+    footage.mockResolvedValueOnce(island);
+    publish(BEDROOM, "idle");
+    renderPlayer(BEDROOM);
+    await waitFor(() => expect(footage).toHaveBeenCalledTimes(1));
+
+    // A 24/7 camera's state says nothing about new footage — it is all new footage.
+    publish(BEDROOM, "streaming");
+    await settle();
+    publish(BEDROOM, "idle");
+    await settle();
+    expect(footage).toHaveBeenCalledTimes(1);
   });
 });
 
