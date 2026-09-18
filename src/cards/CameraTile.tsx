@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Camera, VideoOff } from "lucide-react";
 import { PanelCard } from "../components/PanelCard";
 import { Skeleton } from "../components/Skeleton";
@@ -8,6 +8,7 @@ import { useHaBaseUrl } from "../store/entityStore";
 import { resolveName } from "../lib/resolve";
 import { snapshotUrlAt, isCameraLive, snapshotFreshnessMs } from "../lib/cameraUrl";
 import { isFrigateCamera } from "../lib/frigate";
+import { useMediaAspect } from "../lib/mediaAspect";
 import { relativeTime } from "../lib/relativeTime";
 import type { CardProps } from "./types";
 
@@ -26,6 +27,7 @@ export function CameraTile({
   ringing = false,
   battery = false,
   motionChangedMs = null,
+  onWide,
 }: CardProps & {
   name?: string;
   /** Logical camera id — names the tile for the tile→player View Transition. */
@@ -41,9 +43,21 @@ export function CameraTile({
   battery?: boolean;
   /** When its motion sensor last changed — the honest "last seen" for a sleeping camera. */
   motionChangedMs?: number | null;
+  /**
+   * Reports whether this camera's picture is a dual-lens panorama, once its
+   * snapshot has been measured. The wall uses it to give panoramas a full-width
+   * tile instead of cropping their two lenses off in a normal grid cell.
+   */
+  onWide?: (isWide: boolean) => void;
 }) {
   const name = nameOverride ?? resolveName(entity, overrides);
+  // A panorama (dual-lens Reolink, ~32:9) renders at its true shape with the whole
+  // scene shown; a normal camera keeps the cropped-to-fill grid cell — see mediaAspect.
+  const { isWide, style: aspectStyle, onImageLoad } = useMediaAspect();
   const aspect = density === "compact" ? "aspect-video" : "aspect-[4/3]";
+  useEffect(() => {
+    onWide?.(isWide);
+  }, [isWide, onWide]);
   const isFrigate = isFrigateCamera(entity);
   // A Frigate battery camera parked off: HA reports the camera entity `idle` while Frigate's
   // pipeline is stopped and `streaming` while its PIR holds it awake. Gated to Frigate battery
@@ -77,10 +91,13 @@ export function CameraTile({
     <PanelCard className="overflow-hidden">
       <div
         className={[
-          aspect,
+          isWide ? "" : aspect,
           "relative w-full bg-[radial-gradient(120%_120%_at_20%_0%,#2a2f37_0%,#0e1116_70%)]",
         ].join(" ")}
-        style={transitionName ? { viewTransitionName: transitionName } : undefined}
+        style={{
+          ...(isWide ? aspectStyle : {}),
+          ...(transitionName ? { viewTransitionName: transitionName } : {}),
+        }}
         data-transition={transitionName}
       >
         {visible ? (
@@ -88,7 +105,8 @@ export function CameraTile({
             src={visible}
             alt={`${name} live snapshot`}
             className={[
-              "absolute inset-0 h-full w-full object-cover",
+              // Panoramas show the whole scene (contain); normal cameras fill the cell (cover).
+              isWide ? "absolute inset-0 h-full w-full object-contain" : "absolute inset-0 h-full w-full object-cover",
               // First frame: hidden under the skeleton until it decodes, then a
               // gentle reveal. Refresh swaps stay at full opacity (no flicker).
               "transition-opacity duration-emphasized ease-decel motion-reduce:transition-none",
@@ -128,7 +146,8 @@ export function CameraTile({
             alt=""
             aria-hidden="true"
             className="hidden"
-            onLoad={() => {
+            onLoad={(e) => {
+              onImageLoad(e);
               setFailed(false);
               setLoaded(src);
             }}
