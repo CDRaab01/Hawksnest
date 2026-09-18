@@ -475,6 +475,22 @@ scroll. Fullscreen lives in the same component — on Android it rotates to land
 system bars, which is why `MainActivity` now declares `configChanges` for orientation (without it
 the rotation recreates the activity and costs a 2–4 s WebRTC renegotiation).
 
+**Every camera surface renders at the picture's true aspect ratio, not a hardcoded 16:9**
+(`lib/mediaAspect.ts`, `useMediaAspect`). The fleet is no longer all 16:9: the two outdoor
+Reolinks are dual-lens cameras whose two lenses stitch into one ~32:9 panorama (`1536×432`), and
+the doorbell is 4:3. The old blanket `aspect-video` box letterboxed a panorama into a thin strip in
+the player and — worse, with `object-cover` — cropped its two lenses off entirely on the wall. The
+hook measures the ratio from the media itself (`videoWidth/videoHeight` on `loadedmetadata`,
+`naturalWidth/naturalHeight` on an image's `load`), defaulting to 16:9 until then, so no per-camera
+resolution table is needed and the 4:3 doorbell is corrected by the same path. Each live/recorded
+transport, the image fallback tiers, and the scrubbed-past placeholder set their own element's
+`aspect-ratio`; the wall (`CameraWall` + `CameraTile`) additionally gives a panorama a full-width
+tile (`col-span` across the grid) and `object-contain`, so both lenses show as one banner —
+Reolink's own presentation — with the `ZoomableFrame` above providing the pinch-zoom into it. The
+wide/normal split is one threshold (`WIDE_ASPECT_THRESHOLD`, unit-tested with the pure
+`aspectFromDimensions`/`isWideAspect` helpers). *(Android's twin — the Compose players and tile
+grid — is the matching follow-up; see the divergence note in CLAUDE.md.)*
+
 **The 24/7 continuous track is a second, separate source** (`/footage`, `lib/ringFootage.ts`,
 mirrored in `core/logic/RingFootage.kt`). `video_search` returns only discrete *events*, so before
 this a quiet 3–5 AM window read as "no recording" on the seven cameras that record all night. Ring

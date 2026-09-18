@@ -42,6 +42,7 @@ import type { CameraEvent } from "../../lib/cameraEvents";
 import { clipContaining, offsetInClipSeconds, clipSpanEndMs } from "../../lib/clipSeek";
 import { ringEventsFromSelect } from "../../lib/ringEvents";
 import { snapshotUrl } from "../../lib/cameraUrl";
+import { useMediaAspect } from "../../lib/mediaAspect";
 import { loadCredentials } from "../../store/credentials";
 import { go2rtcMaybeAvailable, go2rtcStreamsKnown, primeGo2rtcStreams } from "../../lib/go2rtc";
 import { LivePlayer } from "../LivePlayer";
@@ -980,12 +981,19 @@ function ScrubbedPlaceholder({
   state: "resolving" | "failed" | "encrypted" | "none";
   onRetry?: () => void;
 }) {
+  // Match the placeholder to the camera's true shape so a panorama's snapshot
+  // isn't cropped to its centre behind the message — see mediaAspect.
+  const { style: aspectStyle, onImageLoad } = useMediaAspect();
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-panel">
+    <div
+      className="relative w-full overflow-hidden rounded-lg bg-panel"
+      style={aspectStyle}
+    >
       {snapshot && (
         <img
           src={snapshot}
           alt=""
+          onLoad={onImageLoad}
           className="absolute inset-0 h-full w-full object-cover"
         />
       )}

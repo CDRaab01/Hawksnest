@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useMediaAspect } from "../lib/mediaAspect";
 
 /** play()/pause() throw "not implemented" in jsdom and can reject on autoplay
  *  policy in browsers — swallow both so the player never crashes its host. */
@@ -71,6 +72,10 @@ export function HlsPlayer({
   // genuinely describe *which media is loaded*.
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+
+  // Render at the footage's true shape (a dual-lens Reolink is ~32:9, the doorbell
+  // 4:3) rather than a hardcoded 16:9 box that would letterbox it — see mediaAspect.
+  const { style: aspectStyle, onVideoMeta } = useMediaAspect();
 
   // React applies the `muted` attribute only at mount; live toggles must go
   // through the DOM property (same workaround as the WebRTC players).
@@ -206,8 +211,10 @@ export function HlsPlayer({
       playsInline
       controls={false}
       onError={() => onError?.()}
+      onLoadedMetadata={onVideoMeta}
       aria-label="Camera footage"
-      className={className ?? "aspect-video w-full rounded-lg bg-black object-contain"}
+      className={className ?? "w-full rounded-lg bg-black object-contain"}
+      style={className ? undefined : aspectStyle}
     />
   );
 }

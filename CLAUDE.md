@@ -144,6 +144,11 @@ share of it:
   attention). Those three have **no `src/lib` twins** — web's `DevicesScreen` is still a flat
   per-area list and `AreaScreen` a flat grid. This breaks the 1:1 port rule above and is tracked
   as its own piece of work; don't assume parity on those two surfaces when changing either.
+- **Known divergence, deliberate, not yet closed: camera aspect handling.** Web renders every
+  camera at its true aspect ratio (`lib/mediaAspect.ts` — the dual-lens Reolinks are ~32:9
+  panoramas, the doorbell 4:3, no longer forced into 16:9), and the wall gives a panorama a
+  full-width tile. The Android players + tile grid still assume 16:9; porting `useMediaAspect` into
+  the Compose players and the wall grid is the matching follow-up (ARCHITECTURE.md §1 camera stack).
 - **React compares by identity, so identity is a contract here.** Two rules the camera stack
   learned the hard way (details in ARCHITECTURE.md): the entity sink must reuse unchanged entity
   objects (`toEntityRecord`), and a callback prop must never key a media-source effect. Breaking
