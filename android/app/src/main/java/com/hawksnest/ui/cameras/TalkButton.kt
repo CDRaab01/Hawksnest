@@ -104,6 +104,10 @@ fun TalkButton(
     }
 
     DisposableEffect(Unit) { onDispose { session?.close() } }
+    // A latched mic must not survive the screen turning off either — unmounting can't cover that
+    // (a STOPPED activity keeps its composition; see StopWhileBackgrounded). No restart: an open
+    // mic is something the owner turns on, never something that comes back by itself.
+    StopWhileBackgrounded(onStop = { stopTalk() })
 
     val pulse = HawksnestTheme.pulse
     val active = state == TalkState.TALKING || state == TalkState.CONNECTING

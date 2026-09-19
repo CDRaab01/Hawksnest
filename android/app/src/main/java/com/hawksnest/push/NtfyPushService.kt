@@ -52,8 +52,16 @@ class NtfyPushService : Service() {
 
     // A bounded read timeout (> ntfy's ~45s keepalive) so a silently-dropped
     // network surfaces as an error and triggers a reconnect instead of hanging.
+    //
+    // No OkHttp ping: the app client's 20s `pingInterval` exists for the HA WebSocket, but it also
+    // applies to HTTP/2 connections — which is what this stream is behind the Tailscale Serve TLS
+    // front. Inherited, it woke the radio every 20s around the clock on the one connection that
+    // is *meant* to sit idle in a pocket, to detect a drop the read timeout above already detects.
     private val streamClient: OkHttpClient by lazy {
-        okHttpClient.newBuilder().readTimeout(75, TimeUnit.SECONDS).build()
+        okHttpClient.newBuilder()
+            .readTimeout(75, TimeUnit.SECONDS)
+            .pingInterval(0, TimeUnit.SECONDS)
+            .build()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

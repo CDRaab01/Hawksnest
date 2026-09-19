@@ -110,9 +110,23 @@ fun RtspPlayer(
 
     // Nothing rendered within the deadline: an unreachable camera can leave RTSP setup hanging
     // without ever raising an error, and a silent black frame is worse than a fast step-down.
+    // Screen off / app backgrounded: drop the RTSP session (a fixed ~5 Mbps main stream that was
+    // otherwise pulled behind a dark screen) and re-prepare on return. See StopWhileBackgrounded.
+    // `everStopped` keeps the ready-deadline below from reading "stopped before the first frame"
+    // as "camera unreachable" and condemning the camera in RtspHealth; after a restart the stall
+    // timer covers a camera that really has gone away.
+    var everStopped by remember(url) { mutableStateOf(false) }
+    StopWhileBackgrounded(
+        onStop = {
+            everStopped = true
+            player.stop()
+        },
+        onRestart = { player.prepare() },
+    )
+
     LaunchedEffect(url) {
         delay(READY_DEADLINE_MS)
-        if (!ready && !failed) {
+        if (!ready && !failed && !everStopped) {
             failed = true
             RtspHealth.report(camera, false)
             currentOnFail()

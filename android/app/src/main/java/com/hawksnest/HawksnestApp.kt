@@ -44,6 +44,9 @@ class HawksnestApp : Application(), ImageLoaderFactory {
         // FIRST, before anything else can throw: a crash during startup is exactly the one we
         // most want captured, and installing this later would miss it.
         crashReporter.install()
+        // The HA socket runs only while something is on screen (see ConnectionManager). Registered
+        // before start() and before any activity can exist, so the very first onStart is counted.
+        registerActivityLifecycleCallbacks(ForegroundTracker(connectionManager::setForeground))
         connectionManager.start()
         // Mirror entity changes into any home-screen widgets while this process is alive. Purely
         // additive — widgets read for themselves when the app isn't running.

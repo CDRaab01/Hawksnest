@@ -170,6 +170,19 @@ fun VideoPlayer(
         player.playWhenReady = !paused
     }
 
+    // Screen off / app backgrounded: stop() drops the loader and the decoder (and ExoPlayer's
+    // audio wakelock with them) but keeps the media item and position, so coming back is a
+    // prepare() — a recording resumes where it was, a live feed rejoins at the live edge. Without
+    // this an HLS live view kept downloading segments behind a dark screen. See
+    // StopWhileBackgrounded for why it is a lifecycle callback and not a recomposition.
+    StopWhileBackgrounded(
+        onStop = { player.stop() },
+        onRestart = {
+            player.prepare()
+            if (liveStream) player.seekToDefaultPosition()
+        },
+    )
+
     AndroidView(
         modifier = modifier,
         factory = { ctx ->

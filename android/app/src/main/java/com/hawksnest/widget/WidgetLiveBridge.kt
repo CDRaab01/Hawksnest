@@ -24,6 +24,9 @@ import javax.inject.Singleton
  * process already knows. This costs one collector and no extra network, and it is why opening the
  * app makes the home screen snap current.
  *
+ * "Running" means on screen: the socket stops shortly after the last activity does (see
+ * [ConnectionManager.setForeground]), and this collector simply goes quiet with it.
+ *
  * It is a bonus, not the mechanism — when the app is closed there is no socket, and widgets fall
  * back to reading on render and after each action. Nothing here is load-bearing for correctness.
  */

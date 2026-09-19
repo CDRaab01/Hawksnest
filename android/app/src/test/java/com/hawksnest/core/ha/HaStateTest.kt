@@ -96,4 +96,22 @@ class HaStateTest {
         assertNull(state.staleSinceMs.value)
         assertNull(state.nextRetryAtMs.value)
     }
+
+    @Test
+    fun `restartStaleClock moves a running grace window to now and keeps the as-of time`() {
+        val state = connectedState(entity("light.kitchen", "on"))
+        state.setStatus(ConnectionStatus.CONNECTING)
+        val lastConnected = state.lastConnectedMs.value
+        Thread.sleep(5)
+        state.restartStaleClock()
+        assertTrue(state.staleSinceMs.value!! > lastConnected!!)
+        assertEquals(lastConnected, state.lastConnectedMs.value)
+    }
+
+    @Test
+    fun `restartStaleClock does not start a grace window that was not running`() {
+        val state = connectedState(entity("light.kitchen", "on"))
+        state.restartStaleClock()
+        assertNull(state.staleSinceMs.value)
+    }
 }
