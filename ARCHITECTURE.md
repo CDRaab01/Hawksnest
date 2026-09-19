@@ -514,6 +514,39 @@ lives.
 Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Full guide:
 `android/README.md`.
 
+- **Nothing runs behind a dark screen (2026-09-19).** Two rules, both learned from a battery audit,
+  both invisible in tests and in the foreground:
+  - **The HA socket lives only while an activity is started.** `ConnectionManager` used to open it
+    in `Application.onCreate` and never close it — harmless until push arrived, because the ntfy
+    foreground service keeps the process alive indefinitely, so the phone held an unfiltered
+    `subscribe_entities` firehose in a pocket (radio + CPU woken per state change in the house, a
+    full entity-map copy + Ring dedupe + shortcut scan per delta). `ForegroundTracker` (a
+    started-activity count on `ActivityLifecycleCallbacks`) drives
+    `ConnectionManager.setForeground`: the live source stops `BACKGROUND_GRACE_MS` (30 s — an app
+    switch, rotation or in-flight control echo is not a reconnect) after the last activity stops
+    and reconnects on the next start. The stop goes through `HaState.setStatus(CONNECTING)`, so
+    locks/alarm mask exactly as on a real drop; `HaState.restartStaleClock()` restarts the 120 s
+    grace at resume so the return shows the dimmed "Reconnecting" second, not the Offline screen.
+    A process created with no activity (widget tap, boot, push service) never connects at all.
+    `ConnectionManager.settled()` makes the calls a *restarting screen* issues
+    (`webrtcOffer`/`streamUrl`/`signedRecordingUrlAt`/`callService`) wait ≤8 s for an in-progress
+    connect, because "not connected yet" otherwise reads to the live ladder as "tier failed" and
+    steps a healthy camera down — and a launcher shortcut fires from `onCreate`, before `onStart`
+    has asked for the socket back. **Anything that must work with the app closed may not ride this
+    socket** (push = ntfy's own stream; widgets = REST via `WidgetHaClient`). The ntfy stream's
+    client also turns OFF the inherited 20 s OkHttp ping (it applies to HTTP/2, i.e. to this
+    stream behind Tailscale Serve); its 75 s read timeout already detects a dead connection.
+  - **Every camera transport stops at `ON_STOP`, synchronously** (`ui/cameras/StopWhileBackgrounded`).
+    Players used to live as long as their composable, but a STOPPED activity keeps its
+    composition: power button / screen timeout with a camera open unmounted nothing, so video kept
+    streaming and libwebrtc's AudioTrack — which plays from negotiation even while muted — kept an
+    AudioMix wakelock, screen off, until the process died. **It must be a lifecycle callback, not a
+    state flip:** Compose pauses the frame clock at ON_STOP, so nothing recomposes (and no
+    `onDispose` runs) until the next ON_START — exactly the window that matters. WebRTC/go2rtc
+    close the session (idempotent) and renegotiate via a restart key; ExoPlayer (HLS/VOD, RTSP)
+    `stop()`s — keeping item + position — and `prepare()`s; MJPEG cancels its reader; `TalkButton`
+    closes a latched mic and does **not** reopen it. PiP is PAUSED, not stopped, so a minimized
+    live camera keeps playing; screen-off *in* PiP stops it.
 - `core/ha/` — HA WebSocket/REST client (the Kotlin analogue of the web store). **All user-facing
   control calls go through `ControlGate`** (via `ConnectionManager.control`): it is the crash-safety
   layer (a failed call becomes a message on the app-level snackbar, never an uncaught coroutine
@@ -1062,8 +1095,9 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     handles both: `widgetCandidates` takes the registry maps as parameters, and each filter
     degrades to a no-op on an empty map (`isPrimaryEntity` falls back to the suffix denylist,
     `dedupeRingMqtt` returns its input), so the fallback list is worse but never wrong.
-  - **Refresh** is on render, after every action, on tapping an error, and — while the app happens
-    to be running — pushed from the live socket by `widget/WidgetLiveBridge` (throttled to one
+  - **Refresh** is on render, after every action, on tapping an error, and — while the app is on
+    screen (the socket stops 30 s after it isn't; see "Nothing runs behind a dark screen") —
+    pushed from the live socket by `widget/WidgetLiveBridge` (throttled to one
     pass every 3 s). `updatePeriodMillis` is the platform's 30-minute floor and is cosmetic only.
     There is deliberately **no background polling**: it would cost battery for a widget that is
     only reachable on the tailnet anyway.

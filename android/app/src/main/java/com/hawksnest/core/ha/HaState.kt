@@ -136,6 +136,16 @@ class HaState @Inject constructor() {
         _error.value = error
     }
 
+    /**
+     * Restart the stale-grace window from now, if one is running. For a reconnect we *chose* to
+     * need (the socket is stopped while the app is off screen — see [ConnectionManager]): the
+     * window should measure how long the reconnect is taking, not how long the phone was in a
+     * pocket. Lock/alarm states stay masked and [lastConnectedMs] keeps the true "as of" time.
+     */
+    fun restartStaleClock() {
+        if (_staleSinceMs.value != null) _staleSinceMs.value = System.currentTimeMillis()
+    }
+
     fun setBaseUrl(baseUrl: String) { _baseUrl.value = baseUrl }
 
     /** Set/clear the next scheduled reconnect attempt (drives the Offline "Retrying in Ns"). */

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -123,7 +124,13 @@ fun Go2rtcPlayer(
     }
 
     val session = remember { mutableStateOf<Go2rtcSession?>(null) }
-    DisposableEffect(src, wakeable) {
+    // Stop with the activity, renegotiate on return (same as WebRtcPlayer; see StopWhileBackgrounded).
+    val restarts = remember { mutableIntStateOf(0) }
+    StopWhileBackgrounded(
+        onStop = { session.value?.close() },
+        onRestart = { restarts.intValue += 1 },
+    )
+    DisposableEffect(src, wakeable, restarts.intValue) {
         connecting.value = true
         val s = Go2rtcSession(
             scope,

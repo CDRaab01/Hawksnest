@@ -70,6 +70,15 @@ the **Move** button in the player chrome, live view only.
 - [ ] **Event scrub** works from the event selector (same last-~5-events model).
 - [ ] **Backgrounding.** Home out mid-stream and return → live resumes without a stuck frame or an
       orphaned player holding the connection.
+- [ ] **Screen off stops the stream (Android).** Open a live camera, unmute, press power: sound
+      stops at once. Wait 30 s, unlock → "Connecting…" then live again on the SAME tier (not a
+      step-down to HLS/snapshot). Repeat from PiP. Proof it really stopped, over adb:
+      `dumpsys batterystats --reset`, 10 min screen-off with a camera open, then
+      `dumpsys batterystats com.hawksnest` shows no `AudioMix` wakelock and ~no Wi-Fi rx.
+- [ ] **The HA socket sleeps with the app (Android).** Background the app for > 30 s and return:
+      Home shows the dimmed "Reconnecting" state for about a second, never the Offline screen,
+      and locks read "unavailable" → real state. A launcher shortcut ("Lock up") from that
+      backgrounded state still works, and a push still arrives while backgrounded.
 
 ## Doorbell (both)
 

@@ -252,7 +252,8 @@ private fun PickerScreen(
 
     LaunchedEffect(kind) {
         val ha = connectionManager.state
-        // The socket is already starting (HawksnestApp.onCreate), so wait a beat for it: HaSource
+        // The socket is already starting (this activity's onStart asked for it — see
+        // ConnectionManager.setForeground), so wait a beat for it: HaSource
         // loads the registries *before* it reports CONNECTED, which means status alone is proof
         // the categories and platforms below are populated. DEMO doesn't qualify — a picker
         // offering fixture lights would be a trap.
