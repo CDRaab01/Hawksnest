@@ -126,6 +126,11 @@ dependencies {
     // M3 ColorSchemes onto the widget theme (see ui/glance/PulseGlanceTheme.kt).
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
+    // WorkManager — the widgets' one periodic background refresh (widget/WidgetRefreshScheduler).
+    // Glance already ships it transitively (its SessionWorker), at an ancient 2.7.1; declared
+    // here because we now call it directly, at the version Spotter and Dragonfly run under the
+    // same Glance.
+    implementation(libs.androidx.work.runtime.ktx)
 
     // Hilt
     implementation(libs.hilt.android)

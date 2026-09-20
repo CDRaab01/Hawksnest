@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.GlanceId
+import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.state.GlanceStateDefinition
@@ -21,8 +22,12 @@ import com.hawksnest.core.logic.resolveName
 import com.hawksnest.core.logic.toSnapshot
 import com.hawksnest.core.logic.widgetIsOptimistic
 import com.hawksnest.core.logic.widgetKeepsStaleReading
+import com.hawksnest.core.logic.widgetPending
+import com.hawksnest.core.logic.widgetRefreshFailureNeedsRedraw
+import com.hawksnest.core.logic.widgetRefreshNeedsRedraw
 import com.hawksnest.di.ApplicationScope
 import com.hawksnest.widget.glanceWidget
+import com.hawksnest.widget.glanceWidgetClass
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -259,6 +264,70 @@ class WidgetRepository @Inject constructor(
         val name = resolveName(entity, overrides)
         lastFetchAt[glanceId] = nowMs()
         write(kind, glanceId) { it.putSnapshot(entity.toSnapshot(name, nowMs()), json) }
+    }
+
+    /**
+     * The periodic background pass (`WidgetRefreshWorker`): read every placed widget's entity
+     * once, and redraw only the widgets whose picture is now wrong. Returns how many widgets are
+     * placed, so the worker can stand itself down when there are none.
+     *
+     * Deliberately NOT `refresh()` in a loop. That path always ends in `write`, and `write` always
+     * ends in a Glance update — a `SessionWorker` job under a wakelock, per widget, to redraw a
+     * lamp as the same lamp. Here an unchanged reading is stored without being drawn.
+     */
+    suspend fun refreshPlaced(): Int {
+        val manager = GlanceAppWidgetManager(context)
+        val reader = WidgetBatchReader(client::state)
+        var placed = 0
+        for (kind in WidgetKind.entries) {
+            for (glanceId in manager.getGlanceIds(glanceWidgetClass(kind))) {
+                placed++
+                val stored = prefs(glanceId)
+                val entityId = stored.entityId() ?: continue
+                // A tap is mid-flight: `act` owns this widget until its echo settles, and a read
+                // landing now could draw the pre-command state over the optimistic one.
+                if (widgetPending(stored.pendingSince(), nowMs())) continue
+                applyBackgroundRead(kind, glanceId, stored, reader.state(entityId))
+            }
+        }
+        return placed
+    }
+
+    private suspend fun applyBackgroundRead(
+        kind: WidgetKind,
+        glanceId: GlanceId,
+        stored: Preferences,
+        result: HaCall<HassEntity>,
+    ) {
+        // Same reason as in `fetch`: the redraw below re-runs `provideGlance`, which asks for a
+        // refresh, which must find that one has just happened.
+        lastFetchAt[glanceId] = nowMs()
+        when (result) {
+            is HaCall.Ok -> {
+                val entity = result.value
+                val fresh = entity.toSnapshot(resolveName(entity, overrides), nowMs())
+                val redraw = widgetRefreshNeedsRedraw(
+                    kind = kind,
+                    shown = stored.snapshot(json),
+                    fresh = fresh,
+                    blockerShown = stored.blocker() != null,
+                )
+                if (redraw) {
+                    write(kind, glanceId) { it.putSnapshot(fresh, json) }
+                } else {
+                    // Stored, not drawn: the pixels are already right, but the reading's age must
+                    // stay honest for whichever render comes next.
+                    updateAppWidgetState(context, glanceId) { it.putSnapshot(fresh, json) }
+                }
+            }
+            is HaCall.Failed -> {
+                if (!widgetRefreshFailureNeedsRedraw(stored.blocker(), result.blocker)) return
+                write(kind, glanceId) { prefs ->
+                    prefs.putBlocker(result.blocker)
+                    if (!widgetKeepsStaleReading(kind)) prefs.maskState()
+                }
+            }
+        }
     }
 
     /** The reading a widget currently holds, if any. */

@@ -122,10 +122,13 @@ Things worth knowing before relying on them:
 - **The lock and alarm always show when they were read** — "Locked · 10:42". A widget's picture
   stays on the home screen until something redraws it, which may be a long time, so the picture
   has to date itself. If the time looks old, it is: tap it to refresh.
-- **Nothing polls in the background.** A widget reads when it is drawn, after every action, and
-  whenever you tap an error. While the app is open its widgets also follow the live socket, so
-  opening Hawksnest makes the home screen snap current. That is the whole freshness story — the
-  platform's own 30-minute update period is cosmetic.
+- **One background read every 30 minutes, for all widgets at once.** A widget reads when it is
+  drawn, after every action, and whenever you tap an error. While the app is open its widgets
+  also follow the live socket, so opening Hawksnest makes the home screen snap current. With the
+  app closed, a single WorkManager job (`widget/WidgetRefreshScheduler`) reads every placed
+  widget's entity in one wake and redraws only the ones that changed. The platform's own
+  `updatePeriodMillis` is set to 0 on purpose: it woke the phone once per widget kind and redrew
+  every widget whether or not anything had changed.
 - **Unlock and disarm are confirm-taps, not slides.** The in-app controls make you slide precisely
   so a pocket can't open the front door; widgets can't draw a slide, so a second tap stands in for
   the deliberate gesture.

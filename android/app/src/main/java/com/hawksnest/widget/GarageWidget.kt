@@ -10,7 +10,6 @@ import androidx.glance.GlanceModifier
 import androidx.glance.LocalSize
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
@@ -171,6 +170,6 @@ private fun GarageBody(prefs: Preferences, json: Json) {
 /** The narrow bucket — the provider's own minimum width. */
 private val NARROW_WIDTH = 110.dp
 
-class GarageWidgetReceiver : GlanceAppWidgetReceiver() {
+class GarageWidgetReceiver : HawksnestWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = GarageWidget()
 }

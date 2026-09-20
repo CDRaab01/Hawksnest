@@ -1,6 +1,8 @@
 package com.hawksnest.widget
 
+import android.content.Context
 import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import com.hawksnest.core.logic.WidgetKind
 
 /**
@@ -26,4 +28,32 @@ internal fun glanceWidgetClass(kind: WidgetKind): Class<out GlanceAppWidget> = w
     WidgetKind.SWITCH -> SwitchWidget::class.java
     WidgetKind.SCENE_PAD -> ScenePadWidget::class.java
     WidgetKind.GARAGE -> GarageWidget::class.java
+}
+
+/** The manifest receiver behind each kind — what the platform counts placed widgets by. */
+internal fun glanceReceiverClass(kind: WidgetKind): Class<out GlanceAppWidgetReceiver> = when (kind) {
+    WidgetKind.LIGHT -> LightWidgetReceiver::class.java
+    WidgetKind.LOCK -> LockWidgetReceiver::class.java
+    WidgetKind.ALARM -> AlarmWidgetReceiver::class.java
+    WidgetKind.TEMPERATURE -> TemperatureWidgetReceiver::class.java
+    WidgetKind.SWITCH -> SwitchWidgetReceiver::class.java
+    WidgetKind.SCENE_PAD -> ScenePadWidgetReceiver::class.java
+    WidgetKind.GARAGE -> GarageWidgetReceiver::class.java
+}
+
+/**
+ * What every widget receiver shares: keeping the periodic refresh job in step with whether any
+ * widget exists. `onEnabled` is a provider's first instance and `onDisabled` its last, which is
+ * per *kind* — so neither decides anything itself; both just ask the scheduler to recount.
+ */
+abstract class HawksnestWidgetReceiver : GlanceAppWidgetReceiver() {
+    override fun onEnabled(context: Context) {
+        super.onEnabled(context)
+        WidgetRefreshScheduler.sync(context)
+    }
+
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        WidgetRefreshScheduler.sync(context)
+    }
 }

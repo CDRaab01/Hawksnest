@@ -24,8 +24,9 @@ import kotlin.math.roundToInt
  *
  * The expiry alone isn't enough, though, and the reason is worth stating: a drawn widget is
  * pixels. Nothing redraws it because a reading aged out, so a frame that said "Locked" when it was
- * true can still be on the home screen an hour later. Rather than schedule redraws forever (a
- * permanent background poll, for a widget only reachable on the tailnet anyway), the security
+ * true can still be on the home screen an hour later. Rather than schedule a redraw for the
+ * moment each reading expires (a permanent background poll, for a widget only reachable on the
+ * tailnet anyway — the one 30-minute job in `WidgetRefreshScheduler` is a floor, not that), the security
  * views carry [LockWidgetView.readAtMs] / [AlarmWidgetView.readAtMs] and the widget prints the
  * clock time beside the state. A stale frame then reads "Locked · 10:42" and tells the truth
  * about itself no matter when it is looked at.
@@ -75,6 +76,91 @@ fun widgetIsOptimistic(kind: WidgetKind): Boolean = when (kind) {
  */
 fun widgetKeepsStaleReading(kind: WidgetKind): Boolean =
     kind != WidgetKind.LOCK && kind != WidgetKind.ALARM
+
+// --- background refresh ------------------------------------------------------
+
+/**
+ * Kinds whose face prints the clock time of the reading beside it ("Locked · 10:42").
+ *
+ * For these the stamp is part of the picture, so a background read that found nothing changed has
+ * still changed what should be on screen: "Locked · 10:42" seen at two in the afternoon reads as a
+ * lock nobody has heard from since the morning, when in fact it was confirmed ten minutes ago.
+ * The lock and the alarm lean on the stamp as their whole claim to be believed; the garage's tilt
+ * sensor only ever transmits on movement, so without this its stamp would sit on the day the door
+ * last moved and look like today.
+ */
+fun widgetPrintsReadTime(kind: WidgetKind): Boolean = when (kind) {
+    WidgetKind.LOCK, WidgetKind.ALARM, WidgetKind.GARAGE, WidgetKind.TEMPERATURE -> true
+    WidgetKind.LIGHT, WidgetKind.SWITCH, WidgetKind.SCENE_PAD -> false
+}
+
+/**
+ * After a successful background read: does the widget need drawing again, or is the picture on
+ * the home screen already right?
+ *
+ * This is the point of the background refresh. A redraw is not free the way a DataStore write
+ * is — every Glance update runs a `SessionWorker` job under a wakelock for tens of seconds — and
+ * a lamp that was off half an hour ago is, nearly always, still off. Such a read is stored
+ * (so the reading's age stays honest for whatever render comes next) and drawn by nobody.
+ *
+ * [shown] is what the widget last stored, [blockerShown] whether it is currently showing a
+ * failure. `fetchedAtMs` is deliberately NOT compared: it differs on every read by construction.
+ */
+fun widgetRefreshNeedsRedraw(
+    kind: WidgetKind,
+    shown: WidgetSnapshot?,
+    fresh: WidgetSnapshot,
+    blockerShown: Boolean,
+): Boolean = when {
+    // Never read, masked, or showing an error the fresh reading now replaces.
+    shown == null || blockerShown -> true
+    widgetPrintsReadTime(kind) -> true
+    else -> shown.state != fresh.state ||
+        shown.attributes != fresh.attributes ||
+        shown.name != fresh.name
+}
+
+/**
+ * After a FAILED background read: redraw only on the way *into* a failure, or from one failure
+ * into a different one. HA being unreachable for a night is one redraw per widget, not one per
+ * period — the second "Can't reach Hawksnest" is the same pixels as the first.
+ */
+fun widgetRefreshFailureNeedsRedraw(shown: WidgetBlocker?, failure: WidgetBlocker): Boolean =
+    shown != failure
+
+/**
+ * Failures that are about the path to HA rather than about one entity. Once a batch has hit one
+ * of these, asking again for the next widget's entity would only wait out the same timeout — ten
+ * seconds each, under a wakelock, to learn nothing.
+ */
+fun widgetFailureIsGlobal(blocker: WidgetBlocker): Boolean = when (blocker) {
+    WidgetBlocker.SIGNED_OUT, WidgetBlocker.UNREACHABLE, WidgetBlocker.UNAUTHORIZED -> true
+    WidgetBlocker.NOT_CONFIGURED, WidgetBlocker.ENTITY_MISSING, WidgetBlocker.NO_RESPONSE -> false
+}
+
+/** What to do with the one periodic refresh job. See `widget/WidgetRefreshScheduler`. */
+enum class WidgetScheduleAction { CANCEL, KEEP, REPLACE }
+
+/**
+ * Decide how to (re)assert the periodic refresh.
+ *
+ * KEEP is the normal answer and the important one: this runs on every process start, and a policy
+ * that re-enqueued would push the next run a full period into the future each time — a phone
+ * whose process is recreated more often than the period would never refresh at all. But a bare
+ * KEEP has the opposite failure: it keeps the OLD schedule forever, so a release that changes the
+ * interval or the constraints would save, ship, and silently do nothing. Hence [signature]: a
+ * string of everything the schedule is made of, remembered at enqueue time. Same signature, keep;
+ * different (or never recorded), replace once.
+ */
+fun widgetScheduleAction(
+    placedWidgets: Int,
+    storedSignature: String?,
+    signature: String,
+): WidgetScheduleAction = when {
+    placedWidgets <= 0 -> WidgetScheduleAction.CANCEL
+    storedSignature == signature -> WidgetScheduleAction.KEEP
+    else -> WidgetScheduleAction.REPLACE
+}
 
 // --- temperature widget ------------------------------------------------------
 

@@ -536,6 +536,18 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     socket** (push = ntfy's own stream; widgets = REST via `WidgetHaClient`). The ntfy stream's
     client also turns OFF the inherited 20 s OkHttp ping (it applies to HTTP/2, i.e. to this
     stream behind Tailscale Serve); its 75 s read timeout already detects a dead connection.
+    **Its reconnect wait resets only after a stream has proven healthy** (`push/NtfyStream.kt`:
+    `NtfyStream` + `NtfyBackoff`, both pure/tested). The loop used to treat "returned normally"
+    as "the server closed a healthy stream" and reset to 2 s — but it never checked the status
+    code, so a 502 from Tailscale Serve while the ntfy forwarder behind it is dead (the state
+    after *every host reboot*) read as a clean close: one HTTPS request every 2 s, forever, from
+    a foreground service in a battery-exempt app. Now a non-2xx throws; health is "read at least
+    one line AND outlived a keepalive interval (60 s)" — lines alone are not enough, because ntfy
+    sends an `open` frame on accept and an accept-then-hang-up would rebuild the loop; the cap is
+    5 min (12 requests/h during a server outage, vs 1,800); and a `ConnectivityManager`
+    default-network callback, held for the service's lifetime, means **no attempts at all with no
+    network** and an immediate, backoff-resetting retry when one appears (including a
+    Wi-Fi→cellular handover) — which is what makes the long cap affordable.
   - **Every camera transport stops at `ON_STOP`, synchronously** (`ui/cameras/StopWhileBackgrounded`).
     Players used to live as long as their composable, but a STOPPED activity keeps its
     composition: power button / screen timeout with a camera open unmounted nothing, so video kept
@@ -1098,9 +1110,34 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   - **Refresh** is on render, after every action, on tapping an error, and — while the app is on
     screen (the socket stops 30 s after it isn't; see "Nothing runs behind a dark screen") —
     pushed from the live socket by `widget/WidgetLiveBridge` (throttled to one
-    pass every 3 s). `updatePeriodMillis` is the platform's 30-minute floor and is cosmetic only.
-    There is deliberately **no background polling**: it would cost battery for a widget that is
-    only reachable on the tailnet anyway.
+    pass every 3 s).
+    **Background freshness is ONE WorkManager job, not `updatePeriodMillis` (2026-09-19).** Every
+    provider XML declares `updatePeriodMillis="0"`. It used to be the 30-minute platform floor and
+    was documented as "cosmetic" — it was neither cosmetic nor cheap. A tick is one platform alarm
+    *per provider*; each started a Glance session per widget, whose render kicked a REST read,
+    whose result was written back and redrawn. With nine widgets placed it measured as the #2
+    partial wakelock on the owner's phone (124 Glance `SessionWorker` jobs, 43 min of job runtime,
+    8 min of wakelock in 5 h 45), nearly all of it redrawing a lamp as the same lamp. And once the
+    socket began stopping 30 s after the app leaves the screen, that tick had quietly become the
+    *only* thing keeping a temperature or a lock current in the background — so it could not
+    simply be zeroed. `widget/WidgetRefreshScheduler` replaces it with one unique periodic job
+    (`WidgetRefreshWorker`, 30 min — the same freshness as before — constraint `CONNECTED`), and
+    `WidgetRepository.refreshPlaced` does the pass: one read per *distinct* entity
+    (`WidgetBatchReader`, which also hands the first path-level failure — unreachable, signed
+    out, token rejected — to every later widget instead of waiting out a timeout each), and a
+    Glance update **only where the picture changed** (`widgetRefreshNeedsRedraw`). An unchanged
+    reading is stored without being drawn, so its age stays honest for the next render. The kinds
+    that print their read time (`widgetPrintsReadTime`: lock, alarm, garage, temperature) redraw
+    on every successful read, because there the stamp *is* part of the picture; lights, switches
+    and scene pads redraw only on change. A failed read redraws only on the way *into* a failure.
+    Three rules the scheduler exists to hold: it is enqueued with **KEEP** (it is asserted on
+    every process start, and a policy that re-enqueued would push the next run a full period out
+    each time) but guarded by a **schedule signature** (a bare KEEP keeps an old interval forever
+    — change `SIGNATURE` whenever the request changes); it exists only while a widget is placed
+    (receivers' `onEnabled`/`onDisabled` via `HawksnestWidgetReceiver`, plus the worker standing
+    itself down on an empty home screen); and the worker **never returns `retry()`** — the next
+    period is the retry, since WorkManager's backoff persists across force-stop and can spiral.
+    Taps are untouched: `act` → `WidgetEcho` still reads and redraws immediately.
     **The render-triggered refresh must be throttled** (`WidgetRepository.lastFetchAt`, 10 s,
     in-memory): writing a widget's state redraws it, a redraw re-runs `provideGlance`, and
     `provideGlance` asks for a refresh — so an unthrottled refresh feeds itself forever at
