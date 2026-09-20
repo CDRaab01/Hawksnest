@@ -9,7 +9,6 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.LocalSize
 import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.LinearProgressIndicator
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
@@ -82,8 +81,8 @@ class LightWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val deps = WidgetEntryPoint.get(context)
-        // Every render kicks a read. This is the widget's main freshness mechanism — the platform's
-        // own update period is capped at 30 minutes, which is far too coarse to trust on its own.
+        // Every render kicks a read. This is the widget's main freshness mechanism — the background
+        // refresh (WidgetRefreshScheduler) comes every 30 minutes, far too coarse to trust alone.
         deps.repository().refreshAsync(WidgetKind.LIGHT, id)
         val json = deps.json()
         provideContent {
@@ -209,6 +208,6 @@ private val VERBOSE_MIN_WIDTH = 220.dp
 /** The narrow bucket — the provider's own minimum width. */
 private val NARROW_WIDTH = 110.dp
 
-class LightWidgetReceiver : GlanceAppWidgetReceiver() {
+class LightWidgetReceiver : HawksnestWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = LightWidget()
 }

@@ -10,7 +10,6 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.LocalSize
 import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
@@ -208,6 +207,6 @@ private fun androidx.glance.layout.RowScope.SmallKey(view: ScenePadKeyView?, sma
 private val PAD_MIN_WIDTH = 150.dp
 private val PAD_MIN_HEIGHT = 150.dp
 
-class ScenePadWidgetReceiver : GlanceAppWidgetReceiver() {
+class ScenePadWidgetReceiver : HawksnestWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = ScenePadWidget()
 }

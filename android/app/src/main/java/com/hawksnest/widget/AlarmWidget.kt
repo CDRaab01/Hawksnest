@@ -9,7 +9,6 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.LocalSize
 import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
@@ -173,6 +172,6 @@ private fun segmentGlyph(state: String): Int = when (state) {
     else -> R.drawable.ic_glyph_shield
 }
 
-class AlarmWidgetReceiver : GlanceAppWidgetReceiver() {
+class AlarmWidgetReceiver : HawksnestWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = AlarmWidget()
 }

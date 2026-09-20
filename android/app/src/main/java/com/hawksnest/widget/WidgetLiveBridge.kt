@@ -28,7 +28,8 @@ import javax.inject.Singleton
  * [ConnectionManager.setForeground]), and this collector simply goes quiet with it.
  *
  * It is a bonus, not the mechanism — when the app is closed there is no socket, and widgets fall
- * back to reading on render and after each action. Nothing here is load-bearing for correctness.
+ * back to reading on render, after each action, and in the one periodic pass
+ * ([WidgetRefreshScheduler]). Nothing here is load-bearing for correctness.
  */
 @Singleton
 class WidgetLiveBridge @Inject constructor(

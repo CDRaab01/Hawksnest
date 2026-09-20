@@ -11,7 +11,6 @@ import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.LocalSize
 import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
@@ -239,6 +238,6 @@ private fun bandColor(view: TemperatureWidgetView): ColorProvider = when {
 /** The narrow bucket — the provider's own minimum width. */
 private val NARROW_WIDTH = 110.dp
 
-class TemperatureWidgetReceiver : GlanceAppWidgetReceiver() {
+class TemperatureWidgetReceiver : HawksnestWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = TemperatureWidget()
 }
