@@ -5,7 +5,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** Ports `cameraModel.test.ts` 1:1. */
 class CameraModelTest {
@@ -43,6 +45,29 @@ class CameraModelTest {
         assertEquals("binary_sensor.front_door_ding", c.dingId)
         assertEquals("binary_sensor.front_door_motion", c.motionId)
         assertEquals("switch.front_door_siren", c.sirenSwitchId)
+        assertTrue(c.ringSelectorLive)
+    }
+
+    // The live rig, verbatim: the Ring "Front Driveway" was deleted and a Frigate camera took the
+    // `front` base, but the Ring device's entities stayed registered — the selector still holding a
+    // frozen `options` list. Adopting them made a Frigate camera render a Ring timeline of moments
+    // that never happened, plus a Siren button whose `switch.turn_on` could not land.
+    @Test
+    fun `a retired ring camera's dead siblings do not claim its replacement`() {
+        fun dead(id: String) = HassEntity(id, "unavailable", buildJsonObject {})
+        val cams = resolveCameras(
+            map(
+                ent("camera.front", "Front"),
+                dead("select.front_event_select"),
+                dead("switch.front_siren"),
+            ),
+        )
+        assertEquals(1, cams.size)
+        // The selector id is KEPT — it is the handle ring clip resolution calls select_option on —
+        // but it is flagged not-live, and the siren is dropped outright.
+        assertEquals("select.front_event_select", cams[0].eventSelectId)
+        assertFalse(cams[0].ringSelectorLive)
+        assertNull(cams[0].sirenSwitchId)
     }
 
     @Test
@@ -55,6 +80,7 @@ class CameraModelTest {
         assertEquals(null, c.eventSelectId)
         assertEquals(null, c.dingId)
         assertEquals(null, c.sirenSwitchId)
+        assertFalse(c.ringSelectorLive)
         assertEquals("camera.driveway", c.liveEntity.entityId)
         assertEquals("camera.driveway", c.snapshotEntity.entityId)
     }

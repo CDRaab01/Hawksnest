@@ -58,6 +58,8 @@ data class CameraUi(
     val streamUrl: String? = null,
     /** ring-mqtt event selector (`select.<base>_event_select`), or null. */
     val eventSelectId: String? = null,
+    /** Whether that selector is reporting — see `LogicalCamera.ringSelectorLive`. */
+    val ringSelectorLive: Boolean = false,
     /** ring-mqtt recorded-event playback stream (`camera.<base>_event`), or null. */
     val eventStreamId: String? = null,
     /** Doorbell press sensor (`binary_sensor.<base>_ding`), or null. */
@@ -234,6 +236,7 @@ class HomeViewModel @Inject constructor(
                 snapshotUrl = snapshotUrl(lc.snapshotEntity, resolvedBase),
                 streamUrl = streamUrl(lc.liveEntity, resolvedBase),
                 eventSelectId = lc.eventSelectId,
+                ringSelectorLive = lc.ringSelectorLive,
                 eventStreamId = lc.eventStreamId,
                 dingId = lc.dingId,
                 motionId = lc.motionId,

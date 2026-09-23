@@ -17,6 +17,30 @@ describe("recordedBackendOf", () => {
   it("prefers ring when both claim it — the Ring path owns the retry/expiry mechanics", () => {
     expect(recordedBackendOf({ hasRingSelector: true, hasFrigateCamera: true })).toBe("ring");
   });
+
+  // camera.front, verbatim: a Frigate camera whose base name still carries the retired Ring
+  // camera's `unavailable` selector. Ring cannot answer, so it must not win.
+  it("is frigate when the ring selector is registered but not reporting", () => {
+    expect(
+      recordedBackendOf({
+        hasRingSelector: true,
+        hasFrigateCamera: true,
+        ringSelectorLive: false,
+      }),
+    ).toBe("frigate");
+  });
+
+  // A ring-mqtt restart must not cost a ring-only camera its timeline for the whole session:
+  // a dead selector loses only to a backend that can actually answer.
+  it("is still ring when the selector is dead and nothing else records the camera", () => {
+    expect(
+      recordedBackendOf({
+        hasRingSelector: true,
+        hasFrigateCamera: false,
+        ringSelectorLive: false,
+      }),
+    ).toBe("ring");
+  });
 });
 
 describe("hasRealRecordings", () => {

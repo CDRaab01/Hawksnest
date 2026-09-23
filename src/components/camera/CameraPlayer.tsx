@@ -138,8 +138,9 @@ export function CameraPlayer({
       recordedBackendOf({
         hasRingSelector: camera.eventSelectId !== null,
         hasFrigateCamera: isFrigateCamera(camera.liveEntity),
+        ringSelectorLive: camera.ringSelectorLive,
       }),
-    [camera.eventSelectId, camera.liveEntity],
+    [camera.eventSelectId, camera.ringSelectorLive, camera.liveEntity],
   );
   // Ring keeps its own name because the paths below are Ring-specific mechanics
   // (selector resolution, ring-timeline signatures), not "has recordings".
@@ -347,8 +348,8 @@ export function CameraPlayer({
   const events = useMemo(() => {
     if (!isRing) return fetched.filter((e) => e.hasClip);
     if (timeline) return timeline.events;
-    return ringEventsFromSelect(ringSelect, cameraName, window.end);
-  }, [isRing, timeline, ringSelect, cameraName, window.end, fetched]);
+    return ringEventsFromSelect(ringSelect, cameraName);
+  }, [isRing, timeline, ringSelect, cameraName, fetched]);
 
   const isLive = playhead === "live";
   const headTime = isLive ? window.end : playhead;

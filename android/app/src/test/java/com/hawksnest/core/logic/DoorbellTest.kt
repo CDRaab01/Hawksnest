@@ -14,7 +14,16 @@ class DoorbellTest {
 
     private fun cam(id: String, name: String, dingId: String?): LogicalCamera {
         val e = HassEntity(entityId = "${id}_x", state = "idle", attributes = JsonObject(emptyMap()))
-        return LogicalCamera(id, name, e, e, null, null, dingId, null)
+        return LogicalCamera(
+            id = id,
+            name = name,
+            liveEntity = e,
+            snapshotEntity = e,
+            eventStreamId = null,
+            eventSelectId = null,
+            dingId = dingId,
+            motionId = null,
+        )
     }
 
     private fun ding(id: String, state: String, whenMs: Long): HassEntity = HassEntity(
