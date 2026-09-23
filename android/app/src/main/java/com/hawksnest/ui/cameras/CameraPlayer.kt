@@ -105,6 +105,7 @@ fun CameraPlayer(
         recordedBackendOf(
             hasRingSelector = cam.eventSelectId != null,
             hasFrigateCamera = isFrigateCamera(viewModel.entity(cam.entityId)),
+            ringSelectorLive = cam.ringSelectorLive,
         )
     }
     val isRing = backend == RecordedBackend.RING

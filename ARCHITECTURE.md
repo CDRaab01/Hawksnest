@@ -125,7 +125,22 @@ frame. The seed only has to differ across sessions; increments stay monotonic wi
 It used to be `isRing = camera.eventSelectId !== null`, one flag standing in for three unrelated
 questions — where recorded events come from, whether playback is a per-clip resolution or a seekable
 VOD, and whether the go2rtc live tier applies — which only held while the sole NVR was Ring. Ring
-wins when a camera looks like both, because the Ring path owns the retry/signature-expiry mechanics.
+wins when a camera looks like both, because the Ring path owns the retry/signature-expiry mechanics
+— **but only while Ring can actually answer**. The vote is `hasRingSelector` *plus*
+`ringSelectorLive`, because **retiring a backend does not unregister its entities**: deleting the
+Ring "Front Driveway" (2026-09-12) left `select.front_event_select` and `switch.front_siren`
+registered-but-`unavailable`, and the Frigate camera that took the `front` base name inherited
+them — so a camera whose footage lives in Frigate rendered a Ring timeline (see the ring-events
+note below) and a Siren button whose `switch.turn_on` could not land. A dead selector now loses to
+a backend that *can* answer, and only to that: with nothing else recording, Ring still wins, so a
+ring-only camera whose selector blips `unavailable` during a ring-mqtt restart keeps its timeline
+instead of dropping to `"none"` for the life of the view (both platforms pin this decision at open).
+That liveness rule is the same one `dingIdFor` has always applied to the doorbell sensor, now
+generalised in `cameraModel.ts`/`CameraModel.kt` to the ring selector and the siren switch — the
+selector *id* is still bound when dead, because it is the handle clip resolution calls
+`select_option` on, but its liveness travels separately. `motionId` is deliberately left out:
+`DEAD_STATES` includes `"unknown"`, which is a legitimate pre-first-report state for a battery
+camera's PIR.
 Frigate membership comes from `lib/frigate.ts` (`isFrigateCamera`, Kotlin twin
 `core/logic/Frigate.kt`): the frigate-hass-integration stamps `client_id` + `camera_name` onto the
 `camera.*` entity it creates, and membership is read off those attributes — synchronous, no fetch.
@@ -429,6 +444,21 @@ produces nothing playable at all on the wired cameras. Cameras are matched to Ri
 is Ring's "Front Driveway"). Ring signs those URLs for ~15 minutes, so the player refetches a minute
 ahead of the earliest expiry and once more on a playback error before calling a clip failed. When
 the service is unreachable the player falls back to the ring-mqtt selector path below, which is:
+
+**That fallback no longer invents times.** An option the selector cannot be timed from — and
+`Motion 1` is exactly that — used to be plotted at `now - i * 6 min`, drawn in the same ink, at the
+same height, with the same `hasClip`, as a real recording. `camera.front` made the cost visible: it
+had inherited 30 frozen options from the retired Ring camera above and rendered a comb of thirty
+evenly spaced "moments", none of which had happened. `ringEventsFromOptions` now **drops** an
+option with no recoverable time, and the `nowMs` parameter is gone from both platforms' signatures
+so no time *can* be invented; `ringEventOptions` likewise returns empty for a selector that is not
+reporting, since HA restores a retired mqtt entity with its last `options` list intact. Time
+recovery is one strict helper, `ringOptionTimeMs`, requiring a full ISO-8601 instant **with** a zone
+designator so both platforms resolve a string to the same millisecond. The web's previous heuristic
+(`Date.parse` over the option with its leading word stripped) was worse than the comb and silently
+so: `Date.parse("1")` is not `NaN` in V8, it is 2001-01-01, so every option was timed two decades
+out. The honest consequence of all this is that a Ring camera the `ring-timeline` service cannot
+match shows an **empty** timeline rather than a fabricated one.
 
 Ring clip **URLs come off the selector itself**: ring-mqtt 5.x has no `camera.<base>_event` entity —
 selecting an option makes it fetch Ring's signed cloud recording (an expiring S3 mp4) and republish

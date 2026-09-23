@@ -199,8 +199,9 @@ class CameraPlayerViewModel @Inject constructor(
     /**
      * Ring timeline events at their REAL times: the selector's current options (`Motion N`, kept as
      * the playable handles) paired with real event times decoded from the `eventId` attribute history
-     * (Ring Snowflake). Falls back to even spacing per-option when a time can't be recovered, so the
-     * timeline degrades gracefully rather than emptying.
+     * (Ring Snowflake). An option whose time can't be recovered is **dropped** — the timeline
+     * emptying is the honest answer, and the even-spacing fallback it replaced drew moments that
+     * had never happened (see `ringEventsFromOptions`).
      */
     suspend fun ringEvents(eventSelectId: String, cameraName: String, startMs: Long, endMs: Long): List<CameraEvent> {
         val options = ringEventOptions(entity(eventSelectId))
@@ -211,7 +212,7 @@ class CameraPlayerViewModel @Inject constructor(
             .mapNotNull { ringEventIdToMs(it) }
             .filter { it in startMs..endMs }
             .sortedDescending()
-        return ringEventsFromOptions(options, timesDesc, cameraName, endMs)
+        return ringEventsFromOptions(options, timesDesc, cameraName)
     }
 
     fun recordingUrl(camera: String, startMs: Long, endMs: Long): String? =

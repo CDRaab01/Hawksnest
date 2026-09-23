@@ -22,17 +22,34 @@ enum class RecordedBackend {
 }
 
 /**
- * Ring wins when a camera somehow looks like both. That ordering is not arbitrary:
- * the Ring path is the one with a resolution step, a retry, and signed URLs that
- * expire, and its behaviour is pinned by a regression suite. A camera carrying a
- * ring-mqtt event selector is a Ring camera regardless of what else knows its name.
+ * Ring wins whenever it can actually answer. That ordering is not arbitrary: the Ring path is
+ * the one with a resolution step, a retry, and signed URLs that expire, and its behaviour is
+ * pinned by a regression suite.
+ *
+ * The one exception is a selector that is **registered but not reporting**. Retiring a Ring
+ * camera does not unregister its entities, so a replacement camera on another backend inherits
+ * the base name along with a dead `select.<base>_event_select` — and a dead selector's frozen
+ * `options` used to be plotted as a timeline of moments that never happened. A dead selector
+ * therefore loses to a backend that *can* answer, and only to that: with nothing else recording,
+ * Ring still wins, so a ring-only camera whose selector blips `unavailable` (a ring-mqtt restart)
+ * keeps its timeline instead of dropping to [RecordedBackend.NONE] — which matters because
+ * callers pin this decision for the life of the view.
+ *
+ * Accepted consequence: a camera that is genuinely *both* a live Ring camera and a Frigate one
+ * would fall to Frigate for one session if its selector happened to be down at open. No such
+ * camera exists on this rig, Frigate footage is real, and it self-heals on reopen.
  *
  * @param hasRingSelector the camera has a ring-mqtt event-selector entity
  * @param hasFrigateCamera Frigate's integration lists this camera (see [isFrigateCamera] — fails closed)
+ * @param ringSelectorLive that selector is reporting, i.e. Ring can still answer for this camera
  */
-fun recordedBackendOf(hasRingSelector: Boolean, hasFrigateCamera: Boolean): RecordedBackend =
+fun recordedBackendOf(
+    hasRingSelector: Boolean,
+    hasFrigateCamera: Boolean,
+    ringSelectorLive: Boolean = true,
+): RecordedBackend =
     when {
-        hasRingSelector -> RecordedBackend.RING
+        hasRingSelector && (ringSelectorLive || !hasFrigateCamera) -> RecordedBackend.RING
         hasFrigateCamera -> RecordedBackend.FRIGATE
         else -> RecordedBackend.NONE
     }

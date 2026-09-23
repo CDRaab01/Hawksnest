@@ -37,6 +37,33 @@ describe("resolveCameras", () => {
     expect(c.dingId).toBe("binary_sensor.front_door_ding");
     expect(c.motionId).toBe("binary_sensor.front_door_motion");
     expect(c.sirenSwitchId).toBe("switch.front_door_siren");
+    expect(c.ringSelectorLive).toBe(true);
+  });
+
+  // The live rig, verbatim: the Ring "Front Driveway" was deleted and a Frigate camera took the
+  // `front` base, but the Ring device's entities stayed registered — the selector still holding a
+  // frozen `options` list. Adopting them made a Frigate camera render a Ring timeline of moments
+  // that never happened, plus a Siren button whose `switch.turn_on` could not land.
+  it("does not let a retired ring camera's dead siblings claim its replacement", () => {
+    const dead = (id: string): HassEntity => ({
+      entity_id: id,
+      state: "unavailable",
+      attributes: {},
+    });
+    const cams = resolveCameras(
+      map(
+        ent("camera.front", "Front"),
+        dead("select.front_event_select"),
+        dead("switch.front_siren"),
+      ),
+      {},
+    );
+    expect(cams).toHaveLength(1);
+    // The selector id is KEPT — it is the handle ring clip resolution calls select_option on —
+    // but it is flagged not-live, and the siren is dropped outright.
+    expect(cams[0].eventSelectId).toBe("select.front_event_select");
+    expect(cams[0].ringSelectorLive).toBe(false);
+    expect(cams[0].sirenSwitchId).toBeNull();
   });
 
   it("maps a plain HA camera to a logical camera with no siblings", () => {
@@ -47,6 +74,7 @@ describe("resolveCameras", () => {
       name: "Driveway",
       eventStreamId: null,
       eventSelectId: null,
+      ringSelectorLive: false,
       dingId: null,
       motionId: null,
       sirenSwitchId: null,
