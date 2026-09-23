@@ -96,8 +96,15 @@ class CameraPlayerViewModel @Inject constructor(
     /** Report live-vs-recorded so MainActivity can gate PiP entry (live only). */
     fun reportLive(isLive: Boolean) = cameraSession.reportLive(isLive)
 
-    /** Report the live video's real (width, height) so the PiP window takes the source aspect. */
+    /**
+     * Report the media's real (width, height). Shapes the **player frame** as well as the PiP
+     * window: every camera surface renders at the picture's true aspect ratio rather than a
+     * hardcoded 16:9 (`core/logic/MediaAspect.kt`, the twin of web's `lib/mediaAspect.ts`).
+     */
     fun reportVideoSize(width: Int, height: Int) = cameraSession.reportVideoSize(width, height)
+
+    /** The measured picture size, or null until the first frame lands. */
+    val videoSize: kotlinx.coroutines.flow.StateFlow<Pair<Int, Int>?> = cameraSession.videoSize
 
     /**
      * Whether to attempt the go2rtc live tier for [cameraName], asked once per camera open.

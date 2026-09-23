@@ -58,6 +58,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.alarmView
+import com.hawksnest.core.logic.aspectFromDimensions
+import com.hawksnest.core.logic.DEFAULT_ASPECT
+import com.hawksnest.core.logic.isWideAspect
+import com.hawksnest.core.logic.wallRows
 import com.hawksnest.core.logic.graceExpired
 import com.hawksnest.core.logic.relativeTime
 import com.hawksnest.core.logic.snapshotBucket
@@ -272,6 +276,12 @@ private fun HomeContent(
     onDoorbellDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Each camera's measured picture shape, learned from its decoded snapshot — no per-camera
+    // resolution table (core/logic/MediaAspect.kt). `wideCameraIds` is the subset wide enough to
+    // deserve a full-width row; both only ever grow, which is what stops a snapshot refresh from
+    // looping recomposition.
+    var cameraAspects by remember { mutableStateOf(mapOf<String, Float>()) }
+    var wideCameraIds by remember { mutableStateOf(setOf<String>()) }
     val ring = ui.doorbell
     Column(
         modifier = modifier,
@@ -313,7 +323,10 @@ private fun HomeContent(
                     )
                 },
             )
-            ui.cameras.chunked(2).forEach { rowCams ->
+            // A dual-lens panorama gets a full-width row instead of a cropped half-width cell —
+            // the Compose answer to the web wall's `col-span` (see core/logic/MediaAspect.kt).
+            // Which cameras are wide is learned from the decoded snapshots, not a table.
+            wallRows(ui.cameras) { it.id in wideCameraIds }.forEach { rowCams ->
                 Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
                     rowCams.forEach { cam ->
                         CameraTile(
@@ -323,10 +336,21 @@ private fun HomeContent(
                             // asked for, so the on-open tick would buy the same stale image twice.
                             snapshotModel = bustCache(cam.snapshotUrl, snapshotBucket(cam.isFrigate && !cam.isBattery, sharedBucket, onOpenBucket)),
                             onClick = { onOpenLightbox(cam) },
+                            aspect = cameraAspects[cam.id] ?: DEFAULT_ASPECT,
+                            onAspect = { ratio ->
+                                // Only ever GROW the set, and only on a real change, so a snapshot
+                                // refresh cannot loop recomposition (the web wall's `markWide`).
+                                if (isWideAspect(ratio) && cam.id !in wideCameraIds) {
+                                    wideCameraIds = wideCameraIds + cam.id
+                                }
+                                if (cameraAspects[cam.id] != ratio) {
+                                    cameraAspects = cameraAspects + (cam.id to ratio)
+                                }
+                            },
                             modifier = Modifier.weight(1f),
                         )
                     }
-                    if (rowCams.size == 1) Spacer(Modifier.weight(1f))
+                    if (rowCams.size == 1 && rowCams[0].id !in wideCameraIds) Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -512,6 +536,10 @@ private fun CameraTile(
     snapshotModel: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The picture's measured shape; [DEFAULT_ASPECT] until a frame decodes. */
+    aspect: Float = DEFAULT_ASPECT,
+    /** Reports that shape back up so the wall can give a panorama its own row. */
+    onAspect: ((Float) -> Unit)? = null,
 ) {
     val pulse = HawksnestTheme.pulse
     val name = cam.name
@@ -520,25 +548,38 @@ private fun CameraTile(
         Box(
             Modifier
                 .fillMaxWidth()
-                .aspectRatio(16f / 9f)
+                .aspectRatio(aspect)
                 .clickable(onClick = onClick),
         ) {
+            // Crop is right for a normal camera: the cell is 16:9, the picture is 16:9, and
+            // filling it beats hairline bars. It is wrong for a 32:9 panorama, where it kept only
+            // the centre ~50% and cropped one lens off entirely.
+            val scale = if (isWideAspect(aspect)) ContentScale.Fit else ContentScale.Crop
             // Prefer the frame captured while the user last watched this camera live (LiveFrameStore)
             // over ring-mqtt's stale interval snapshot — so a tile updates to "what I just saw live"
             // the moment they return to the grid. Falls back to the refreshing snapshot until then.
             val liveFrame = LiveFrameStore.get(cam.id)
             if (liveFrame != null) {
+                LaunchedEffect(liveFrame.bitmap.width, liveFrame.bitmap.height) {
+                    aspectFromDimensions(liveFrame.bitmap.width, liveFrame.bitmap.height)
+                        ?.let { onAspect?.invoke(it) }
+                }
                 Image(
                     bitmap = liveFrame.bitmap,
                     contentDescription = "Camera snapshot",
-                    contentScale = ContentScale.Crop,
+                    contentScale = scale,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
                 // A parked battery camera gets no fetch at all: Frigate answers with its grey
                 // error image (at HTTP 200) while the pipeline is off, which would decode as a
                 // "frame". The last live frame above, if any, is the truthful picture.
-                CameraSnapshot(model = if (cam.asleep) null else snapshotModel, modifier = Modifier.fillMaxSize())
+                CameraSnapshot(
+                    model = if (cam.asleep) null else snapshotModel,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = scale,
+                    onAspect = onAspect,
+                )
             }
             // A camera HA reports unavailable (a closed/offline Ring camera that can't serve a
             // frame) gets a clear "No signal" over the dimmed last frame. This is HA's reliable

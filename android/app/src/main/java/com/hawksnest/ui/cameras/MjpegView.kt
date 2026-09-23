@@ -50,6 +50,9 @@ fun MjpegView(
     streamUrl: String,
     snapshotUrl: String?,
     modifier: Modifier = Modifier,
+    /** The decoded frame's real (width, height), so the frame around this tier takes the
+     *  picture's shape — see `core/logic/MediaAspect.kt`. */
+    onVideoSize: ((Int, Int) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val client = remember { entryPoint(context).okHttpClient() }
@@ -70,6 +73,7 @@ fun MjpegView(
 
     val current = frame
     if (current != null) {
+        LaunchedEffect(current.width, current.height) { onVideoSize?.invoke(current.width, current.height) }
         Image(
             bitmap = current,
             contentDescription = "Live camera",
@@ -78,7 +82,11 @@ fun MjpegView(
         )
     } else {
         // No frame yet — hold the (self-refreshing) snapshot so the view is never blank.
-        RefreshingSnapshot(url = snapshotUrl, modifier = modifier)
+        RefreshingSnapshot(
+            url = snapshotUrl,
+            modifier = modifier,
+            onAspect = { r -> onVideoSize?.invoke((r * 1000f).toInt(), 1000) },
+        )
     }
 }
 

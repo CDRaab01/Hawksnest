@@ -35,7 +35,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.aspectFromDimensions
 import com.hawksnest.core.logic.canReachSpeaker
+import com.hawksnest.core.logic.DEFAULT_ASPECT
 import com.hawksnest.core.logic.NO_ZOOM
 import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
@@ -291,6 +293,13 @@ fun CameraPlayer(
     // would fix it isn't available there.
     val inPip by viewModel.inPip.collectAsState()
     LaunchedEffect(inPip) { if (inPip) zoom = NO_ZOOM }
+    // The frame takes the PICTURE's shape, not a hardcoded 16:9 — the fleet is no longer all
+    // 16:9 (the two Home Hub cameras are 1536x432 dual-lens panoramas, the doorbell is 4:3).
+    // Measured from the media itself via the size the renderers already report for PiP, so there
+    // is no per-camera resolution table; DEFAULT_ASPECT holds until the first frame arrives.
+    // The snapshot tiers, which decode rather than render, report through `reportImageSize`.
+    val videoSize by viewModel.videoSize.collectAsState()
+    val frameAspect = videoSize?.let { (w, h) -> aspectFromDimensions(w, h) } ?: DEFAULT_ASPECT
     // Live vs recorded feeds the PiP gate in MainActivity — only a LIVE camera minimizes.
     LaunchedEffect(playhead == null) { viewModel.reportLive(playhead == null) }
 
@@ -604,9 +613,9 @@ fun CameraPlayer(
         //
         // ZoomableFrame wraps the WHOLE ladder rather than any one tier: all seven already share
         // this one `frame` modifier, so pinch-zoom applies to every one of them identically and
-        // cannot drift. Fullscreen swaps the fixed 16:9 box for the whole screen — the `when`
-        // stays in the same composition slot either way, so the player is NOT torn down and
-        // re-created (which on the WebRTC tiers is a 2-4s renegotiation).
+        // cannot drift. Fullscreen swaps the box for the whole screen — the `when` stays in the
+        // same composition slot either way, so the player is NOT torn down and re-created (which
+        // on the WebRTC tiers is a 2-4s renegotiation).
         ZoomableFrame(
             zoom = zoom,
             onZoomChange = { zoom = it },
@@ -616,7 +625,7 @@ fun CameraPlayer(
             modifier = if (fullscreen || inPip) {
                 Modifier.fillMaxSize()
             } else {
-                Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                Modifier.fillMaxWidth().aspectRatio(frameAspect)
             },
         ) { zoomed ->
         val frame = zoomed.fillMaxSize()
@@ -706,6 +715,7 @@ fun CameraPlayer(
                 camera = cameraName,
                 onFail = { rtspFailed = true },
                 muted = muted,
+                onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
             )
             isLive && (canGo2rtc == true || useSub) && !go2rtcFailed -> Go2rtcPlayer(
@@ -737,13 +747,25 @@ fun CameraPlayer(
             // live = true pins the HLS feed near the live edge (no fast-forward catch-up). loop
             // stays true so the demo clip — DEMO_CLIP_URI, which VideoPlayer excludes from live
             // handling — keeps looping as a fake-live feed.
-            liveUrl != null -> VideoPlayer(liveUrl!!, frame, loop = true, live = true, muted = muted)
+            liveUrl != null -> VideoPlayer(
+                liveUrl!!,
+                frame,
+                loop = true,
+                live = true,
+                muted = muted,
+                onVideoSize = viewModel::reportVideoSize,
+            )
             cam.streamUrl != null -> MjpegView(
                 streamUrl = cam.streamUrl!!,
                 snapshotUrl = cam.snapshotUrl,
+                onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
             )
-            else -> RefreshingSnapshot(url = cam.snapshotUrl, modifier = frame)
+            else -> RefreshingSnapshot(
+                url = cam.snapshotUrl,
+                modifier = frame,
+                onAspect = { r -> viewModel.reportVideoSize((r * 1000f).toInt(), 1000) },
+            )
         }
 
             // The only on-screen way out of fullscreen (back also works). Inside the frame so it
