@@ -518,8 +518,24 @@ transport, the image fallback tiers, and the scrubbed-past placeholder set their
 tile (`col-span` across the grid) and `object-contain`, so both lenses show as one banner —
 Reolink's own presentation — with the `ZoomableFrame` above providing the pinch-zoom into it. The
 wide/normal split is one threshold (`WIDE_ASPECT_THRESHOLD`, unit-tested with the pure
-`aspectFromDimensions`/`isWideAspect` helpers). *(Android's twin — the Compose players and tile
-grid — is the matching follow-up; see the divergence note in CLAUDE.md.)*
+`aspectFromDimensions`/`isWideAspect` helpers).
+
+**Android is in lockstep** (`core/logic/MediaAspect.kt`, same constants and same pure helpers, so a
+drift is a visible diff). `useMediaAspect` itself does not port — it is React state plumbing; the
+Compose measurement seam is `CameraSession.videoSize`, the size the WebRTC renderers already
+reported to shape the PiP window, now also shaping the player frame (`ZoomableFrame`'s
+`aspectRatio`, which used to be a hardcoded `16f / 9f`). **Every tier in the ladder has to report
+it**, or the box changes shape when the ladder steps down: the two WebRTC renderers already did,
+and the RTSP/HLS/VOD tiers now report `onVideoSizeChanged` (rotation-corrected the same way), MJPEG
+reports its decoded bitmap, and the snapshot tiers report the decoded drawable's intrinsic size —
+the analogue of the web's `naturalWidth`/`naturalHeight`. `CameraSnapshot` also flips its default
+from `ContentScale.Crop` to `Fit`: Crop kept only the centre ~50% of a 1536×432 panorama, which is
+what "it isn't showing the wide view" actually looked like, and the grid tile passes Crop back
+explicitly only for a camera that is *not* wide (its cell is deliberately 16:9). The one intentional
+asymmetry is the wall itself: web gets a `col-span` from CSS grid, while Android's wall is a
+`Column` of 2-up `Row`s with no `GridItemSpan` to reach for, so `wallRows` (Kotlin-only, by design,
+unit-tested including the "behaves exactly like `chunked(2)` when nothing is wide" guard) packs a
+panorama into its own full-width row.
 
 **The 24/7 continuous track is a second, separate source** (`/footage`, `lib/ringFootage.ts`,
 mirrored in `core/logic/RingFootage.kt`). `video_search` returns only discrete *events*, so before

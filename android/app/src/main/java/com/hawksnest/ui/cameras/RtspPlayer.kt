@@ -45,9 +45,13 @@ fun RtspPlayer(
     /** Audio gate — defaults muted; the chrome's MuteButton is the way to sound. */
     muted: Boolean = true,
     modifier: Modifier = Modifier,
+    /** The media's real (width, height), so the frame around this tier takes the picture's shape
+     *  rather than a hardcoded 16:9 — see `core/logic/MediaAspect.kt`. */
+    onVideoSize: ((Int, Int) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val currentOnFail by rememberUpdatedState(onFail)
+    val currentOnVideoSize by rememberUpdatedState(onVideoSize)
     var ready by remember(url) { mutableStateOf(false) }
     var failed by remember(url) { mutableStateOf(false) }
     // Rises while playback is stalled; reset whenever it is not.
@@ -87,6 +91,15 @@ fun RtspPlayer(
 
             override fun onPlayerError(error: PlaybackException) {
                 fail()
+            }
+
+            // Rotation-corrected the same way the WebRTC renderers do it, so a rotated source
+            // reports the shape the picture is actually drawn in.
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                val swap = videoSize.unappliedRotationDegrees % 180 != 0
+                val w = if (swap) videoSize.height else videoSize.width
+                val h = if (swap) videoSize.width else videoSize.height
+                if (w > 0 && h > 0) currentOnVideoSize?.invoke(w, h)
             }
 
             fun fail() {
