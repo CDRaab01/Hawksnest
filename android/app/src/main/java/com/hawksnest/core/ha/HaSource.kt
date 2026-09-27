@@ -125,6 +125,16 @@ class HaSource(
         c.callService(domain, service, data.entityId, data.extra)
     }
 
+    override suspend fun callServiceForResponse(
+        domain: String,
+        service: String,
+        data: ServiceData,
+    ): kotlinx.serialization.json.JsonObject? {
+        val c = conn ?: throw IllegalStateException("Not connected to Home Assistant.")
+        return c.callService(domain, service, data.entityId, data.extra, returnResponse = true)
+            .let { it["result"] as? kotlinx.serialization.json.JsonObject }
+    }
+
     override suspend fun fetchHistory(entityId: String, hours: Int): List<HistoryPoint> {
         val c = conn ?: throw IllegalStateException("Not connected to Home Assistant.")
         val startIso = Instant.now().minusSeconds(hours * 3600L).toString()

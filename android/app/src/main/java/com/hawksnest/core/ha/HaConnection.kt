@@ -149,19 +149,28 @@ class HaConnection(
         ws?.send(HaMessages.command(nextId.getAndIncrement(), "subscribe_entities").toString())
     }
 
+    /**
+     * Call a service and return HA's result frame.
+     *
+     * The frame was always awaited (the call is non-optimistic — callers rely on HA having
+     * accepted it); it was simply discarded. Returning it lets a caller read a service's response
+     * when it asked for one via [returnResponse]; everyone else ignores it exactly as before.
+     */
     suspend fun callService(
         domain: String,
         service: String,
         entityId: String?,
         serviceData: Map<String, Any?> = emptyMap(),
-    ) {
+        returnResponse: Boolean = false,
+    ): JsonObject {
         authGate.await()
         val id = nextId.getAndIncrement()
         val def = CompletableDeferred<JsonObject>()
         pending[id] = def
         val sock = ws
+        val frame = HaMessages.callService(id, domain, service, entityId, serviceData, returnResponse)
         // If the socket is gone or the send fails, unblock the caller instead of suspending forever.
-        if (sock == null || !sock.send(HaMessages.callService(id, domain, service, entityId, serviceData).toString())) {
+        if (sock == null || !sock.send(frame.toString())) {
             pending.remove(id)?.completeExceptionally(HaClosedException())
             throw HaClosedException()
         }
@@ -170,7 +179,7 @@ class HaConnection(
             pending.remove(id)?.completeExceptionally(HaClosedException())
             throw HaClosedException()
         }
-        def.await()
+        return def.await()
     }
 
     fun ping() {

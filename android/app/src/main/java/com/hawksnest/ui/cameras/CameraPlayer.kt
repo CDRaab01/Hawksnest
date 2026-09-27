@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -53,6 +54,7 @@ import com.hawksnest.core.logic.RecordedSource
 import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.isFrigateCamera
+import com.hawksnest.core.logic.shouldRecordLiveView
 import com.hawksnest.core.logic.recordedBackendOf
 import com.hawksnest.core.logic.chooseRecordedSource
 import com.hawksnest.core.logic.clipContaining
@@ -339,6 +341,19 @@ fun CameraPlayer(
     }
 
     val isLive = playhead == null
+
+    // Watching a camera leaves a mark on its own timeline, the way Ring does it: a live view opens
+    // a real Frigate manual event for its duration, so it is playable afterwards rather than a
+    // note that something happened (core/logic/LiveViewRecording.kt). DisposableEffect, not a
+    // state flip: leaving the player — including via the ON_STOP that already tears the transports
+    // down — must end the event, because an unended one keeps the camera recording.
+    val recordLiveView = shouldRecordLiveView(backend, isLive)
+    DisposableEffect(cam.id, recordLiveView) {
+        if (recordLiveView) {
+            viewModel.startLiveViewRecording(cam.entityId, cameraName, cam.isBattery)
+        }
+        onDispose { viewModel.stopLiveViewRecording() }
+    }
     val headTime = playhead ?: endMs
 
     // --- Clip export ---------------------------------------------------------------------

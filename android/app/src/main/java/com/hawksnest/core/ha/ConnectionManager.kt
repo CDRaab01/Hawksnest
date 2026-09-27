@@ -154,6 +154,13 @@ class ConnectionManager @Inject constructor(
         settled()?.callService(domain, service, data)
     }
 
+    /** [Source.callServiceForResponse] through the active source; null when nothing is connected. */
+    suspend fun callServiceForResponse(
+        domain: String,
+        service: String,
+        data: ServiceData,
+    ): kotlinx.serialization.json.JsonObject? = settled()?.callServiceForResponse(domain, service, data)
+
     /**
      * The user-facing control path: [callService] wrapped in [ControlGate] — crash-safe (failures
      * land on [controlErrors], never as an uncaught coroutine exception) with [pendingControls]

@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hawksnest.core.logic.DEFAULT_SPAN_MS
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.isLiveViewEvent
 import com.hawksnest.core.logic.ClipEdge
 import com.hawksnest.core.logic.ClipSelection
 import com.hawksnest.core.logic.pickHandle
@@ -340,7 +341,10 @@ fun Timeline24h(
                 }
             }
 
-            // Recording blocks — solid effort-blue, tall like Ring's; every block is a playable clip.
+            // Recording blocks — tall like Ring's; every block is a playable clip. Two colours,
+            // matching what Ring shows: effort-blue for something the camera DETECTED, and the
+            // orange streak channel for a live view somebody opened (LiveViewRecording.kt). They
+            // are different kinds of answer to "why is there video here", so they read differently.
             val blockTop = size.height * 0.16f
             val blockH = size.height * 0.68f
             for (ev in events) {
@@ -349,7 +353,7 @@ fun Timeline24h(
                 val w = (timeToX(endT, v, wpx) - x1).coerceAtLeast(3f)
                 if (x1 + w < 0f || x1 > wpx) continue // off-screen
                 drawRoundRect(
-                    color = pulse.effort,
+                    color = if (isLiveViewEvent(ev)) pulse.streak else pulse.effort,
                     topLeft = Offset(x1, blockTop),
                     size = Size(w, blockH),
                     cornerRadius = CornerRadius(3f, 3f),
