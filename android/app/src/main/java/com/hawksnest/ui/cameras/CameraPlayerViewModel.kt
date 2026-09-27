@@ -3,7 +3,16 @@ package com.hawksnest.ui.cameras
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.hawksnest.core.logic.LIVE_VIEW_LABEL
+import com.hawksnest.core.logic.LIVE_VIEW_RENEW_BEFORE_SEC
+import com.hawksnest.core.logic.LIVE_VIEW_SEGMENT_SEC
+import com.hawksnest.core.logic.eventIdFromCreateResponse
+import com.hawksnest.core.logic.frigateEnabledTopic
+import com.hawksnest.core.logic.liveViewGuardEntity
+import com.hawksnest.core.logic.needsFrigateWake
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.ServiceData
@@ -95,6 +104,103 @@ class CameraPlayerViewModel @Inject constructor(
 
     /** Report live-vs-recorded so MainActivity can gate PiP entry (live only). */
     fun reportLive(isLive: Boolean) = cameraSession.reportLive(isLive)
+
+    // ---- Live-view recording (core/logic/LiveViewRecording.kt) -------------------------------
+
+    /** The open live-view recording, if any. One player, one session. */
+    private var liveViewJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Record a live view of [cameraEntityId] until [stopLiveViewRecording] is called.
+     *
+     * Runs as one long-lived coroutine that mints a bounded Frigate event and renews it while the
+     * view is still open, so an app that dies mid-view leaks at most one segment rather than a
+     * camera that records forever. Failures are swallowed on purpose: a camera you cannot mark is
+     * still a camera you can watch, and the live tiers must not care.
+     *
+     * [cameraName] is the Frigate/HA base name, needed for the battery-camera wake below.
+     */
+    fun startLiveViewRecording(cameraEntityId: String, cameraName: String, isBattery: Boolean) {
+        if (liveViewJob?.isActive == true) return
+        liveViewJob = viewModelScope.launch {
+            // A parked battery camera records nothing until Frigate is turned on for it, and the
+            // HA parking automation must be told to leave it alone while someone is watching.
+            if (needsFrigateWake(isBattery)) {
+                runCatching { setLiveViewGuard(cameraName, on = true) }
+                runCatching { publishFrigateEnabled(cameraName, on = true) }
+            }
+            var eventId: String? = null
+            try {
+                while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                    val next = runCatching { createLiveViewEvent(cameraEntityId) }.getOrNull()
+                    // Chain the renewal before ending the previous segment so the timeline has no
+                    // gap; if minting failed there is nothing to chain and we simply stop trying.
+                    eventId?.let { prev -> runCatching { endLiveViewEvent(cameraEntityId, prev) } }
+                    eventId = next ?: break
+                    delay((LIVE_VIEW_SEGMENT_SEC - LIVE_VIEW_RENEW_BEFORE_SEC) * 1000L)
+                }
+            } finally {
+                // NonCancellable: this runs on the way out of a cancelled scope, and an event left
+                // unended is a camera left recording.
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    eventId?.let { runCatching { endLiveViewEvent(cameraEntityId, it) } }
+                    if (needsFrigateWake(isBattery)) {
+                        runCatching { publishFrigateEnabled(cameraName, on = false) }
+                        runCatching { setLiveViewGuard(cameraName, on = false) }
+                    }
+                }
+            }
+        }
+    }
+
+    /** End the open live-view recording, if any. Idempotent. */
+    fun stopLiveViewRecording() {
+        liveViewJob?.cancel()
+        liveViewJob = null
+    }
+
+    private suspend fun createLiveViewEvent(entityId: String): String? =
+        eventIdFromCreateResponse(
+            connection.callServiceForResponse(
+                "frigate", "create_event",
+                ServiceData(
+                    entityId = entityId,
+                    extra = mapOf(
+                        "label" to LIVE_VIEW_LABEL,
+                        "duration" to LIVE_VIEW_SEGMENT_SEC,
+                        "include_recording" to true,
+                    ),
+                ),
+            ),
+        )
+
+    private suspend fun endLiveViewEvent(entityId: String, eventId: String) {
+        connection.callService(
+            "frigate", "end_event",
+            ServiceData(entityId = entityId, extra = mapOf("event_id" to eventId)),
+        )
+    }
+
+    /** Turn the camera's Frigate pipeline on/off — the same topic the HA parking automation uses. */
+    private suspend fun publishFrigateEnabled(cameraName: String, on: Boolean) {
+        connection.callService(
+            "mqtt", "publish",
+            ServiceData(
+                extra = mapOf(
+                    "topic" to frigateEnabledTopic(cameraName),
+                    "payload" to if (on) "ON" else "OFF",
+                ),
+            ),
+        )
+    }
+
+    /** Hold off the parking automation while someone is watching. */
+    private suspend fun setLiveViewGuard(cameraName: String, on: Boolean) {
+        connection.callService(
+            "input_boolean", if (on) "turn_on" else "turn_off",
+            ServiceData(entityId = liveViewGuardEntity(cameraName)),
+        )
+    }
 
     /**
      * Report the media's real (width, height). Shapes the **player frame** as well as the PiP

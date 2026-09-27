@@ -56,6 +56,19 @@ interface Source {
         throw UnsupportedOperationException("This source cannot perform writes.")
     }
 
+    /**
+     * As [callService], but asks HA to return the service's own response and hands it back.
+     *
+     * Only for services declaring `SupportsResponse` — `frigate.create_event` is the one that
+     * matters here, because the event id it mints is the only handle for ending that event. Null
+     * when the source cannot answer (the fixture source simulates no responses).
+     */
+    suspend fun callServiceForResponse(
+        domain: String,
+        service: String,
+        data: ServiceData = ServiceData(),
+    ): kotlinx.serialization.json.JsonObject? = null
+
     /** Fetch recent state history for one entity over the last [hours]. */
     suspend fun fetchHistory(entityId: String, hours: Int): List<HistoryPoint> {
         throw UnsupportedOperationException("This source cannot provide history.")

@@ -460,6 +460,47 @@ so: `Date.parse("1")` is not `NaN` in V8, it is 2001-01-01, so every option was 
 out. The honest consequence of all this is that a Ring camera the `ring-timeline` service cannot
 match shows an **empty** timeline rather than a fabricated one.
 
+**Watching a camera marks its own timeline** (`core/logic/LiveViewRecording.kt`, Android only for
+now) — the behaviour Ring has, where opening a live view leaves an entry you can scrub back to.
+Drawn in the orange `streak` channel rather than `effort`-blue, because "somebody looked" and "the
+camera saw something" are different answers to *why is there video here*.
+
+The footage was never the hard part: nine of the eleven Frigate cameras record 24/7, so a live view
+is over video that exists anyway. What was missing was a marker, and the choice of marker matters.
+An HA helper's history was the obvious option and is wrong — **HA's recorder keeps history far
+longer than Frigate keeps video**, so those blocks would outlive their own footage and 404, which
+is the exact defect the paragraph above just removed. Instead the client opens a real Frigate
+**manual event** for the duration (`frigate.create_event` → `frigate.end_event`, already shipped by
+the integration with `SupportsResponse.OPTIONAL`, so **no HA configuration is involved**). That
+makes the block genuinely playable and ties its lifetime to the footage it points at.
+
+Three things it has to get right, all of them about the failure case rather than the happy path:
+
+- **Bounded segments.** `duration: 0` means "until ended", which is correct until the app dies
+  mid-view and that camera records forever. Events are minted at `LIVE_VIEW_SEGMENT_SEC` (300 s,
+  the service's own maximum) and chained while the view is open, so a crash leaks one segment. The
+  renewal is minted *before* the previous is ended, so the chain has no gap.
+- **Ending is a `DisposableEffect`, not a state flip.** The same reason the transports are stopped
+  from a lifecycle callback: a STOPPED activity keeps its composition, so nothing recomposes to
+  notice. The teardown runs `NonCancellable` — it executes on the way out of a cancelled scope, and
+  an unended event is a camera left recording.
+- **The two Home Hub battery cameras are parked in Frigate** (`enabled: false`) until their PIR
+  fires, so live-viewing one records nothing. The client publishes `ON` to
+  `frigate/<cam>/enabled/set` for the session — *and* sets
+  `input_boolean.hawksnest_live_view_<cam>`, because the `Hawksnest: Frigate on demand — <cam>`
+  automation parks the camera two minutes after the PIR clears and would otherwise stop the
+  recording halfway through. That is the likely case, not the edge case: the reason someone opens
+  the front camera is usually the same PIR hit that started the automation. `Hawksnest: release a
+  stuck live-view guard` parks the camera anyway after 30 minutes if the client never clears it.
+
+Two things deliberately **not** done. Ring cameras are out of scope — Ring records live views
+server-side and `ring-timeline` already carries a `kind` per event, so surfacing those is a
+different job, and blocked on that service's slug matching. And nothing filters the review stream:
+Frigate promotes a manual event to `severity: alert` regardless of `review.alerts.labels`
+(measured — `live_view` became an alert while the list was `[person, car]`), but the HA
+notification automation gates on an explicit label allow-list, so a live view cannot page anyone.
+The only cost is a cosmetic row in Frigate's own review UI.
+
 Ring clip **URLs come off the selector itself**: ring-mqtt 5.x has no `camera.<base>_event` entity —
 selecting an option makes it fetch Ring's signed cloud recording (an expiring S3 mp4) and republish
 the selector with a `recordingUrl` attribute, so `store/ringClip.ts` (mirrored in
