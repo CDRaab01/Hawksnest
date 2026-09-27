@@ -144,6 +144,17 @@ share of it:
   attention). Those three have **no `src/lib` twins** — web's `DevicesScreen` is still a flat
   per-area list and `AreaScreen` a flat grid. This breaks the 1:1 port rule above and is tracked
   as its own piece of work; don't assume parity on those two surfaces when changing either.
+- **Known divergence, deliberate, not yet closed: live-view recording is Android-only.** Watching
+  a camera opens a Frigate manual event so the view lands on its own timeline in orange
+  (`core/logic/LiveViewRecording.kt`, ARCHITECTURE.md §1). There is **no `src/lib` twin** — web
+  neither records a live view nor colours one, though it will render an orange block if Android
+  made it, since the label travels with the Frigate event. Deliberate: the phone is where cameras
+  actually get watched, and a browser tab left open on a wall tablet would record all day, so the
+  web port needs an idle/visibility gate this does not. **Two things outside this repo are part of
+  the feature** and have no representation here: the `input_boolean.hawksnest_live_view_{front,
+  backyard_patio}` guard helpers (storage-backed, created by `C:\Code\ha-live-view-helpers.py`) and
+  the guard conditions in `hawksnest-automation`'s on-demand automations. If the helpers ever go
+  missing the guard fails **open** — the camera still parks — which is the safe direction.
 - **Camera aspect handling is now in lockstep (divergence closed).** Both platforms render every
   camera at its true aspect ratio — the dual-lens Reolinks are ~32:9 panoramas and the doorbell is
   4:3, so nothing is forced into 16:9. The shared constants and pure helpers live in
