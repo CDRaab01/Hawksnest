@@ -173,12 +173,23 @@ function alignUp(t: number, step: number): number {
 /**
  * Round clock/date labels across `[t0, t1]`, spaced on a human step (hours or
  * days, never "every 47 minutes"). Returns [] when the span is empty.
+ *
+ * The step is the one whose tick count comes closest to `target`, not the
+ * first one at or above `span / target`. Rounding up could halve the ticks: a
+ * 30-day chart asked for 7.5-day spacing, got 14, and because the grid is
+ * anchored at local midnight, which in any zone west of UTC falls before `t0`,
+ * the first tick then slid a whole step late. Two date labels across a month,
+ * and a test that only passed in UTC. Ties go to the finer step (TIME_STEPS is
+ * finest-first).
  */
 export function timeAxis(t0: number, t1: number, target = 4): TimeTick[] {
   const span = t1 - t0;
   if (!Number.isFinite(span) || span <= 0) return [];
-  const raw = span / Math.max(1, target);
-  const step = TIME_STEPS.find((s) => s >= raw) ?? TIME_STEPS[TIME_STEPS.length - 1];
+  const want = Math.max(1, target);
+  let step = TIME_STEPS[0];
+  for (const s of TIME_STEPS) {
+    if (Math.abs(span / s - want) < Math.abs(span / step - want)) step = s;
+  }
   const ticks: TimeTick[] = [];
   for (let t = alignUp(t0, step); t <= t1; t += step) {
     ticks.push({ t, label: formatAxisTime(t, span) });
