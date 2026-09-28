@@ -1185,7 +1185,13 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   - **Refresh** is on render, after every action, on tapping an error, and — while the app is on
     screen (the socket stops 30 s after it isn't; see "Nothing runs behind a dark screen") —
     pushed from the live socket by `widget/WidgetLiveBridge` (throttled to one
-    pass every 3 s). `updatePeriodMillis` is the platform's 30-minute floor and is cosmetic only.
+    pass every 3 s). **The bridge publishes live readings only** (`HaState.liveEntitiesOrNull`:
+    CONNECTED and no stale window). Stopping the socket behind a dark screen is a drop, a drop
+    masks locks and the alarm to `unavailable`, and the process is still alive to see it: before
+    this gate every lock and alarm widget turned "Unavailable" 30 s after leaving the app, stamped
+    with the current time. The read order in `liveEntitiesOrNull` (entities first, stale clock
+    second) is what makes a masked map impossible to return. `updatePeriodMillis` is the
+    platform's 30-minute floor and is cosmetic only.
     There is deliberately **no background polling**: it would cost battery for a widget that is
     only reachable on the tailnet anyway.
     **The render-triggered refresh must be throttled** (`WidgetRepository.lastFetchAt`, 10 s,

@@ -12,6 +12,7 @@ import com.hawksnest.widget.data.WidgetRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -25,7 +26,11 @@ import javax.inject.Singleton
  * app makes the home screen snap current.
  *
  * "Running" means on screen: the socket stops shortly after the last activity does (see
- * [ConnectionManager.setForeground]), and this collector simply goes quiet with it.
+ * [ConnectionManager.setForeground]). That stop is a drop like any other, so `HaState` masks locks
+ * and the alarm to `unavailable`, and this collector is still alive to see it. Only live readings
+ * are published ([HaState.liveEntitiesOrNull]); anything else leaves each widget on its last real
+ * reading, which dates itself and expires on its own schedule. Without that gate, leaving the app
+ * turned every lock and alarm widget to "Unavailable" thirty seconds later.
  *
  * It is a bonus, not the mechanism — when the app is closed there is no socket, and widgets fall
  * back to reading on render and after each action. Nothing here is load-bearing for correctness.
@@ -48,10 +53,15 @@ class WidgetLiveBridge @Inject constructor(
         started = true
         scope.launch { recoverExistingWidgets() }
         scope.launch {
+            val state = connectionManager.state
+            // Wake on the status and the stale clock as well as the entities: a reconnect's fresh
+            // snapshot can land before the status flips to CONNECTED, and it still has to be
+            // published once it does. The combined values are only a trigger; the pass reads the
+            // current state itself, in the order liveEntitiesOrNull depends on.
             // A StateFlow is already conflated, so the trailing delay is the whole throttle: a
             // firehose of entity deltas becomes one pass every few seconds over the newest map.
-            connectionManager.state.entities.collect { entities ->
-                sync(entities)
+            combine(state.entities, state.status, state.staleSinceMs) { _, _, _ -> }.collect {
+                state.liveEntitiesOrNull()?.let { sync(it) }
                 delay(SYNC_INTERVAL_MS)
             }
         }
