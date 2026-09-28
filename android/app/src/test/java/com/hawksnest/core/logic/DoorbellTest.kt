@@ -66,6 +66,37 @@ class DoorbellTest {
         )
     }
 
+    /** A ding as it arrives over the compressed websocket: last_changed in epoch SECONDS. */
+    private fun wsDing(id: String, state: String, whenMs: Long): HassEntity = HassEntity(
+        entityId = id,
+        state = state,
+        attributes = JsonObject(emptyMap()),
+        // Plain decimal like HA's own frames ("1727460000.123"), not Double.toString's "1.7E9".
+        lastChanged = java.math.BigDecimal.valueOf(whenMs).movePointLeft(3).toPlainString(),
+    )
+
+    @Test
+    fun `reads a websocket press time in epoch seconds`() {
+        // Every live update arrives in this shape. The ISO-only parser failed on it and fell back
+        // to "now", so each press looked brand new: the 30 s window never closed and the banner's
+        // dismiss was undone by the next push.
+        val cameras = listOf(cam("camera.front_door_reolink", "Front Door", "binary_sensor.front_door_reolink_visitor"))
+        val entities = mapOf(
+            "binary_sensor.front_door_reolink_visitor" to
+                wsDing("binary_sensor.front_door_reolink_visitor", "on", NOW - 5_000),
+        )
+        assertEquals(NOW - 5_000, activeDoorbellPress(cameras, entities, NOW)?.whenMs)
+    }
+
+    @Test
+    fun `a websocket press older than the window has expired`() {
+        val cameras = listOf(cam("camera.front", "Front", "binary_sensor.front_ding"))
+        val entities = mapOf(
+            "binary_sensor.front_ding" to wsDing("binary_sensor.front_ding", "on", NOW - 60_000),
+        )
+        assertNull(activeDoorbellPress(cameras, entities, NOW, 30_000))
+    }
+
     @Test
     fun `picks the most recent press across cameras`() {
         val cameras = listOf(
