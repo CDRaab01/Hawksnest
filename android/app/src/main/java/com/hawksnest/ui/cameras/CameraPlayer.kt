@@ -345,8 +345,8 @@ fun CameraPlayer(
     // Watching a camera leaves a mark on its own timeline, the way Ring does it: a live view opens
     // a real Frigate manual event for its duration, so it is playable afterwards rather than a
     // note that something happened (core/logic/LiveViewRecording.kt). DisposableEffect, not a
-    // state flip: leaving the player — including via the ON_STOP that already tears the transports
-    // down — must end the event, because an unended one keeps the camera recording.
+    // state flip: leaving the player must end the event, because an unended one keeps the camera
+    // recording.
     val recordLiveView = shouldRecordLiveView(backend, isLive)
     DisposableEffect(cam.id, recordLiveView) {
         if (recordLiveView) {
@@ -354,6 +354,18 @@ fun CameraPlayer(
         }
         onDispose { viewModel.stopLiveViewRecording() }
     }
+    // Turning the screen off does NOT dispose the effect above: a stopped activity keeps its
+    // composition (see StopWhileBackgrounded). The renewal loop used to run on until the socket
+    // stopped thirty seconds later; then the end-event, park and guard-release calls all failed
+    // silently, and a battery camera stayed awake until HA's 30-minute guard backstop fired. End
+    // the recording synchronously at ON_STOP, while the socket is still up to carry those calls,
+    // and start a fresh one if the view comes back.
+    StopWhileBackgrounded(
+        onStop = { viewModel.stopLiveViewRecording() },
+        onRestart = {
+            if (recordLiveView) viewModel.startLiveViewRecording(cam.entityId, cameraName, cam.isBattery)
+        },
+    )
     val headTime = playhead ?: endMs
 
     // --- Clip export ---------------------------------------------------------------------
