@@ -56,7 +56,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.ha.ConnectionStatus
+import com.hawksnest.core.logic.ALARM_TRANSITIONAL
 import com.hawksnest.core.logic.ARM_BUTTONS
+import com.hawksnest.core.logic.armButtonEnabled
 import com.hawksnest.core.logic.alarmView
 import com.hawksnest.core.logic.aspectFromDimensions
 import com.hawksnest.core.logic.DEFAULT_ASPECT
@@ -304,8 +306,7 @@ private fun HomeContent(
 
         SecurityHero(
             ui,
-            busy = ui.alarmEntityId?.let { it in pending } == true ||
-                ui.alarmRawState in setOf("arming", "disarming", "pending"),
+            inFlight = ui.alarmEntityId?.let { it in pending } == true,
             enabled = controlsEnabled,
             onArm = onArm,
             onDisarm = { onArm("alarm_disarm") },
@@ -415,7 +416,8 @@ private fun LifeSafetyStrip(ui: HomeUi) {
 @Composable
 private fun SecurityHero(
     ui: HomeUi,
-    busy: Boolean,
+    /** This app's own arm/disarm call is still waiting on HA. */
+    inFlight: Boolean,
     onArm: (String) -> Unit,
     onDisarm: () -> Unit,
     enabled: Boolean = true,
@@ -423,8 +425,11 @@ private fun SecurityHero(
     val pulse = HawksnestTheme.pulse
     val haptics = rememberHaptics()
     // Which circle was tapped, so only its spinner shows while HA arms/disarms. Cleared on settle.
+    // The spinner covers HA's exit delay too; the buttons' enabled state does not (see
+    // armButtonEnabled — Off has to stay live through a countdown).
     var tapped by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(busy) { if (!busy) tapped = null }
+    val settling = inFlight || ui.alarmRawState in ALARM_TRANSITIONAL
+    LaunchedEffect(settling) { if (!settling) tapped = null }
     // While reconnecting the alarm entity is masked to `unavailable` (never a stale mode), so no
     // circle reads active; drop the channel tint too so the hero doesn't imply a posture.
     PanelCard(channel = if (enabled) ui.alarm?.let { pulse.color(it.channel) } else null, raised = true) {
@@ -439,8 +444,8 @@ private fun SecurityHero(
                         icon = ARM_ICON[b.service] ?: Icons.Filled.LockOpen,
                         active = enabled && ui.alarmRawState == b.state,
                         channel = pulse.color(alarmView(b.state).channel),
-                        busy = busy && tapped == b.service,
-                        enabled = enabled && !busy,
+                        busy = settling && tapped == b.service,
+                        enabled = enabled && armButtonEnabled(b, ui.alarmRawState, inFlight),
                         onClick = {
                             haptics.toggleOn()
                             tapped = b.service
