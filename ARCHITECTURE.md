@@ -804,7 +804,8 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   Fixed section order (the hierarchy IS the design, no per-user section config):
   Needs attention (offline / battery ≤20%, absent when healthy) → Pinned → Security (locks
   then alarm, full cards — a lock never becomes a tile) → Lights & switches (2-col
-  `ControlTile` grid, room as caption) → Climate & fans → Covers → Media → one Cameras
+  `ControlTile` grid, room as caption) → Sirens (rows, never tiles; see below) → Climate &
+  fans → Covers → Media → one Cameras
   summary row and one Sensors summary row, each opening a sheet built from the shared
   device-group components. The v2 chip filter is GONE — sections are the categories.
   Search still bypasses everything (flat `searchResults`, one tap to detail); long-press →
@@ -822,6 +823,14 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   whose only symptoms lived in diagnostic entities. Web's `entityHealth.needsAttention`
   carries the same unavailable-only floor; `online` keeps the broader no-live-reading meaning
   for entity-detail display.
+  **Sirens are their own card kind** (`CardType.SIREN`, `core/logic/Siren.kt`, 2026-09-28): a
+  `switch.*_siren` (ring-mqtt's camera sirens, the alarm panel's `switch.mfa_alarm_siren`) is a
+  switch only in HA's plumbing. As a SWITCH it sat in the tile grid as a one-tap toggle, truncated
+  to "Basement Stora…", and a stray tap sounded it. Every surface that draws one (Sirens rows,
+  search results, full cards) now uses `ui/components/SirenToggle`: two taps to sound, one to
+  silence, the same asymmetry as the doorbell panel. Reolink's `switch.*_siren_on_event` is a
+  config toggle and deliberately stays a SWITCH; the `siren` domain is untouched. **Android-only
+  for now** — the web's `cards.ts` still maps these to its switch card.
   **Domain contract** (`core/logic/Cards.kt NON_DEVICE_DOMAINS`, lockstep with `src/lib/ha.ts`):
   besides automations/scripts/scenes/people/zones/sun, the hub also excludes `button`/`event`/
   `image` (since 2026-08-07) — measured against the live house they were ~73 of 305 rows and all
