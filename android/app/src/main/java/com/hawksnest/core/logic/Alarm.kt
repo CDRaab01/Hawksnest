@@ -78,3 +78,17 @@ val ARM_BUTTONS: List<ArmButton> = listOf(
     ArmButton("Home", "alarm_arm_home", "armed_home"),
     ArmButton("Away", "alarm_arm_away", "armed_away"),
 )
+
+/**
+ * Whether one Off / Home / Away button takes a tap right now. Home's hero and the Devices segment
+ * control both ask this, so they cannot disagree again.
+ *
+ * - While this app's own command is in flight ([inFlight]), none do: one command at a time, and
+ *   the button that sent it holds a spinner until HA answers.
+ * - HA's own transitions never lock the buttons. `pending` is the entry countdown after a door
+ *   opens on an armed house and `arming` is the exit delay, and both are exactly when you reach
+ *   for Off. Home used to treat them as busy, so the countdown ran with Off refusing taps.
+ * - The mode the panel is already in is not sent again.
+ */
+fun armButtonEnabled(button: ArmButton, rawState: String?, inFlight: Boolean): Boolean =
+    !inFlight && rawState != button.state

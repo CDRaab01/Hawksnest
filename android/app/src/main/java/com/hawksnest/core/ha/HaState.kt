@@ -137,6 +137,27 @@ class HaState @Inject constructor() {
     }
 
     /**
+     * The entity map, but only while it is a live reading: null while disconnected, in demo, or
+     * inside a stale window.
+     *
+     * For consumers that SAVE state somewhere it outlives the moment — the home-screen widgets. A
+     * dropped socket masks locks and the alarm to `unavailable` on purpose (see [setStatus]). On
+     * screen that mask is right; saved as a widget's reading it becomes "Front Door · Unavailable"
+     * on a locked door, stamped with the current time as if it were fresh.
+     *
+     * **Read order is load-bearing.** [setStatus] stamps [staleSinceMs] BEFORE it masks the
+     * entities, so reading the entities first and the stale clock second means a masked map is
+     * never returned: if the map we read is already masked, the stamp that preceded it is visible
+     * too. Read the other way round, there is a window where both look live.
+     */
+    fun liveEntitiesOrNull(): Map<String, HassEntity>? {
+        val snapshot = _entities.value
+        if (_staleSinceMs.value != null) return null
+        if (_status.value != ConnectionStatus.CONNECTED) return null
+        return snapshot
+    }
+
+    /**
      * Restart the stale-grace window from now, if one is running. For a reconnect we *chose* to
      * need (the socket is stopped while the app is off screen — see [ConnectionManager]): the
      * window should measure how long the reconnect is taking, not how long the phone was in a

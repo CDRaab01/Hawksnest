@@ -7,6 +7,7 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.DeviceIndex
 import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.ha.haTimeMs
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.AlarmView
 import com.hawksnest.core.logic.DoorbellPress
@@ -26,22 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.OffsetDateTime
 import javax.inject.Inject
-
-/**
- * Parse an entity's `last_changed` to epoch ms for the camera age badge. Over the
- * compressed websocket HA sends it as epoch seconds (a numeric string); the REST
- * shape is ISO-8601 — accept both, null when absent/unparseable.
- */
-private fun lastChangedMs(raw: String?): Long? {
-    if (raw.isNullOrEmpty()) return null
-    raw.toDoubleOrNull()?.let { return (it * 1000).toLong() }
-    return runCatching { Instant.parse(raw).toEpochMilli() }
-        .recoverCatching { OffsetDateTime.parse(raw).toInstant().toEpochMilli() }
-        .getOrNull()
-}
 
 data class CameraUi(
     /** Stable logical id (`camera.<base>`) — ring-mqtt's split entities collapse to one. */
@@ -227,9 +213,9 @@ class HomeViewModel @Inject constructor(
                 // attr first IF the snapshot capture time is ever exposed on the entity (today it
                 // isn't — ring-mqtt sets no json_attributes_topic), then fall back to last_updated,
                 // which DOES bump on each ~30s snapshot republish for an open camera.
-                lastChangedMs = lastChangedMs(lc.snapshotEntity.stringAttr("timestamp"))
-                    ?: lastChangedMs(lc.snapshotEntity.lastUpdated)
-                    ?: lastChangedMs(lc.snapshotEntity.lastChanged),
+                lastChangedMs = haTimeMs(lc.snapshotEntity.stringAttr("timestamp"))
+                    ?: haTimeMs(lc.snapshotEntity.lastUpdated)
+                    ?: haTimeMs(lc.snapshotEntity.lastChanged),
                 // The _snapshot still IS ring-mqtt's freshest frame (republished ~every 30s for an
                 // open camera); cache-busting re-fetches it. Do NOT source from the live entity —
                 // camera_proxy on an idle go2rtc stream returns stale/black or errors.
@@ -249,7 +235,7 @@ class HomeViewModel @Inject constructor(
                 // `streaming` while its PIR holds it awake. Gated to Frigate battery cameras so a
                 // Ring tile (whose `idle` means nothing of the sort) is untouched.
                 asleep = isFrigateCamera(lc.liveEntity) && lc.isBattery && lc.snapshotEntity.state == "idle",
-                motionChangedMs = lc.motionId?.let { entities[it] }?.let { lastChangedMs(it.lastChanged) },
+                motionChangedMs = lc.motionId?.let { entities[it] }?.let { haTimeMs(it.lastChanged) },
             )
         }
         val doorbell = activeDoorbellPress(logical, entities, System.currentTimeMillis())

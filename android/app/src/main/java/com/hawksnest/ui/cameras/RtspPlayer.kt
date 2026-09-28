@@ -169,6 +169,10 @@ fun RtspPlayer(
                 this.player = player
             }
         },
+        // `factory` runs once per view, but `player` is rebuilt whenever the url changes. Without
+        // this the view stayed bound to the released player: its last frame frozen on screen,
+        // the new stream connected and invisible. Same guard VideoPlayer has.
+        update = { view -> if (view.player !== player) view.player = player },
     )
 }
 

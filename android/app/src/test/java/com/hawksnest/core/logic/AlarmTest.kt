@@ -8,6 +8,35 @@ import kotlin.test.assertTrue
 /** Ported from `src/lib/__tests__/alarm.test.ts`. */
 class AlarmTest {
 
+    private val off = ARM_BUTTONS.first { it.service == "alarm_disarm" }
+    private val home = ARM_BUTTONS.first { it.service == "alarm_arm_home" }
+    private val away = ARM_BUTTONS.first { it.service == "alarm_arm_away" }
+
+    @Test
+    fun `Off takes a tap during the entry countdown`() {
+        // `pending` is the countdown after a door opens on an armed house. Home's hero used to
+        // count it as busy and refuse every tap, Off included, for the whole countdown.
+        assertTrue(armButtonEnabled(off, "pending", inFlight = false))
+    }
+
+    @Test
+    fun `Off takes a tap during the exit delay`() {
+        assertTrue(armButtonEnabled(off, "arming", inFlight = false))
+    }
+
+    @Test
+    fun `nothing takes a tap while this app's own command is in flight`() {
+        ARM_BUTTONS.forEach { assertFalse(armButtonEnabled(it, "armed_away", inFlight = true)) }
+    }
+
+    @Test
+    fun `the mode the panel is already in is not sent again`() {
+        assertFalse(armButtonEnabled(off, "disarmed", inFlight = false))
+        assertTrue(armButtonEnabled(home, "disarmed", inFlight = false))
+        assertTrue(armButtonEnabled(away, "disarmed", inFlight = false))
+        assertFalse(armButtonEnabled(away, "armed_away", inFlight = false))
+    }
+
     @Test
     fun `disarmed is settled (recovery, shield-check)`() {
         val v = alarmView("disarmed")

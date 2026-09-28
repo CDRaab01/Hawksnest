@@ -18,6 +18,11 @@ data class ControlDeck<T>(
     val security: List<T> = emptyList(),
     /** LIGHT + SWITCH — the tile grid. */
     val lights: List<T> = emptyList(),
+    /**
+     * SIREN — never in the tile grid, where a siren was one careless tap from sounding and its
+     * truncated name hid what it was. Its own rows, each confirming before it sounds.
+     */
+    val sirens: List<T> = emptyList(),
     /** CLIMATE (full cards) + FAN (rows). */
     val climate: List<T> = emptyList(),
     /** COVER — empty in this house today; the section renders only when non-empty. */
@@ -132,7 +137,7 @@ fun <T> buildControlDeck(
     // Everything read-only, grouped per device once; camera-bearing groups split off to
     // their own summary, the rest keep their per-room shape.
     val controlCards = setOf(
-        CardType.LOCK, CardType.ALARM, CardType.LIGHT, CardType.SWITCH,
+        CardType.LOCK, CardType.ALARM, CardType.LIGHT, CardType.SWITCH, CardType.SIREN,
         CardType.CLIMATE, CardType.FAN, CardType.COVER, CardType.MEDIA_PLAYER,
     )
     val readonly = devices.filter { cardOf(it) !in controlCards }
@@ -169,6 +174,7 @@ fun <T> buildControlDeck(
         attention = attention,
         security = security,
         lights = of(CardType.LIGHT, CardType.SWITCH),
+        sirens = of(CardType.SIREN),
         climate = of(CardType.CLIMATE, CardType.FAN),
         covers = of(CardType.COVER),
         media = of(CardType.MEDIA_PLAYER),

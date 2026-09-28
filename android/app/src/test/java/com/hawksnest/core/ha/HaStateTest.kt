@@ -114,4 +114,51 @@ class HaStateTest {
         state.restartStaleClock()
         assertNull(state.staleSinceMs.value)
     }
+
+    // --- liveEntitiesOrNull: what the home-screen widgets are allowed to save -------------------
+
+    @Test
+    fun `liveEntitiesOrNull returns the real readings while connected`() {
+        val state = connectedState(entity("lock.front", "locked"))
+        assertEquals("locked", state.liveEntitiesOrNull()!!["lock.front"]!!.state)
+    }
+
+    @Test
+    fun `liveEntitiesOrNull never hands out the masked map after a drop`() {
+        // The regression this pins: the app backgrounds, ConnectionManager stops the socket, the
+        // drop masks the lock to "unavailable", and the widget bridge saved that as the lock's
+        // reading. The door was locked the whole time.
+        val state = connectedState(
+            entity("lock.front", "locked"),
+            entity("alarm_control_panel.home", "armed_home"),
+        )
+        state.setStatus(ConnectionStatus.CONNECTING)
+
+        assertEquals("unavailable", state.entities.value["lock.front"]!!.state)
+        assertNull(state.liveEntitiesOrNull())
+        // And the stamp that makes it null is set whenever the map is masked.
+        assertNotNull(state.staleSinceMs.value)
+    }
+
+    @Test
+    fun `liveEntitiesOrNull stays null through a reconnect until it is really live`() {
+        val state = connectedState(entity("lock.front", "locked"))
+        state.setStatus(ConnectionStatus.CONNECTING)
+        state.restartStaleClock()
+        // A fresh snapshot can arrive before the status flips.
+        state.setEntities(mapOf("lock.front" to entity("lock.front", "locked")))
+        assertNull(state.liveEntitiesOrNull())
+
+        state.setStatus(ConnectionStatus.CONNECTED)
+        assertEquals("locked", state.liveEntitiesOrNull()!!["lock.front"]!!.state)
+    }
+
+    @Test
+    fun `liveEntitiesOrNull is null in demo and before the first connect`() {
+        assertNull(HaState().liveEntitiesOrNull())
+        val demo = HaState()
+        demo.setEntities(mapOf("lock.front" to entity("lock.front", "locked")))
+        demo.setStatus(ConnectionStatus.DEMO)
+        assertNull(demo.liveEntitiesOrNull())
+    }
 }
