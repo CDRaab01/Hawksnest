@@ -15,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,25 +64,33 @@ fun CameraLightbox(
             .verticalScroll(rememberScrollState()),
         contentAlignment = Alignment.Center,
     ) {
-        CameraPlayer(
-            cam = current,
-            cameras = cameras.ifEmpty { listOf(initial) },
-            onSelectCamera = { current = it },
-            // Only honour the deep-linked event on the camera the tap named —
-            // switching cameras inside the lightbox should land live, not on an
-            // unrelated camera's timeline at that timestamp.
-            initialEventId = initialEventId.takeIf { current.id == initial.id },
-            viewModel = viewModel,
-            // In PiP the window IS the video (its aspect is set from the source), so the
-            // page padding would render as a black border around a tiny picture.
-            modifier = if (inPip) {
-                Modifier.fillMaxSize()
-            } else {
-                Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            },
-        )
+        // One player per camera. Switching (the in-player switcher, or a doorbell push that
+        // retargets an open lightbox) must tear the old camera's player down and mount a fresh
+        // one. Recomposing the same player with a new `cam` left per-camera state behind: the
+        // stream views bind their player or renderer once, in AndroidView's factory, so the new
+        // camera's stream connected and played into a surface nobody showed, while the old
+        // camera's last frame stayed on screen under the new camera's name, labelled Live.
+        key(current.id) {
+            CameraPlayer(
+                cam = current,
+                cameras = cameras.ifEmpty { listOf(initial) },
+                onSelectCamera = { current = it },
+                // Only honour the deep-linked event on the camera the tap named —
+                // switching cameras inside the lightbox should land live, not on an
+                // unrelated camera's timeline at that timestamp.
+                initialEventId = initialEventId.takeIf { current.id == initial.id },
+                viewModel = viewModel,
+                // In PiP the window IS the video (its aspect is set from the source), so the
+                // page padding would render as a black border around a tiny picture.
+                modifier = if (inPip) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                },
+            )
+        }
         if (!inPip) {
             IconButton(
                 onClick = onDismiss,
