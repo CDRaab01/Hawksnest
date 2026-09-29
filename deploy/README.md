@@ -38,6 +38,14 @@ browser ──http──> Hawksnest pod (nginx :80)
 - `windows/portproxy-hawksnest.ps1` — *legacy* NAT-mode LAN/Tailscale exposure
   `0.0.0.0:8080 → wsl:30080`. Broken under mirrored WSL networking; kept for the NAT-mode case.
 - `../.github/workflows/deploy.yml` — self-hosted-runner build + import + apply.
+- `render-direct-streams.sh` — run by the pod's `render-direct-streams` **initContainer**, not by
+  nginx. It renders the Android app's direct-stream settings (the camera account and each wired
+  camera's LAN IP) from the `frigate-credentials` Secret into a memory-backed volume, which nginx
+  serves at `/hawksnest/direct-streams` only to requests carrying a token Home Assistant accepts.
+  Only the initContainer mounts the Secret. It never fails the pod: missing keys just mean no file
+  and a 404, which the app treats as "not provided". **After changing the camera password or an IP
+  in `frigate-credentials`, restart the deployment** (`kubectl -n home-automation rollout restart
+  deploy/hawksnest`); the file is rendered once per pod start.
 
 ## Bring-up (on the Dragonfly host)
 1. **Deploy.** Either run the **Deploy** GitHub Action (self-hosted runner), or by hand:
