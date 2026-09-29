@@ -1,5 +1,9 @@
 package com.hawksnest.ui.settings
 
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,6 +53,8 @@ import com.hawksnest.ui.theme.HawksnestTheme
  */
 @Composable
 fun SettingsScreen(
+    /** Back to wherever Settings was opened from (Home's gear, or a widget's "fix it" tap). */
+    onBack: (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val status by viewModel.status.collectAsState()
@@ -91,6 +97,20 @@ fun SettingsScreen(
             .padding(HawksnestTheme.spacing.lg),
         verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
     ) {
+        // A title and a way back. Settings has no bottom bar, and a widget can open it as the only
+        // screen above Home, so without this the system back gesture was the only exit.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            }
+            Text(
+                "Settings",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
         SectionHeader("Connection")
         PanelCard {
             Row(verticalAlignment = Alignment.CenterVertically) {

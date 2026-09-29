@@ -181,6 +181,9 @@ class ConnectionManager @Inject constructor(
         }
     }
 
+    /** Put [message] on the control snackbar for a control that could not even be attempted. */
+    fun reportControlError(message: String) = controlGate.report(message)
+
     /** Read one automation's Config-API config (live HA REST; in-memory in demo). Null if absent. */
     suspend fun getAutomationConfig(id: String): JsonObject? = current?.getAutomationConfig(id)
 

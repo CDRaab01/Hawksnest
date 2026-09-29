@@ -1,5 +1,6 @@
 package com.hawksnest.push
 
+import com.hawksnest.core.logic.CameraStart
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -7,24 +8,30 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * What a tapped notification wants opened: a camera, and optionally the exact
- * moment that triggered the alert.
+ * What a tapped notification or button wants opened: a camera, optionally the exact moment that
+ * triggered the alert, and how the player should start.
  *
- * [eventId] is a Frigate event id carried in the notification's `click` URL. Null
- * for a doorbell/alarm tap, which has no single moment to land on.
+ * [eventId] is a Frigate event id carried in the notification's `click` URL. Null for a
+ * doorbell/alarm tap, which has no single moment to land on.
  */
-data class CameraTarget(val cameraId: String, val eventId: String? = null)
+data class CameraTarget(
+    val cameraId: String,
+    val eventId: String? = null,
+    val start: CameraStart = CameraStart.LIVE,
+)
+
+/** A notification's own words, pinned over Home when an alarm that went off is tapped. */
+data class AlertBanner(val title: String, val body: String)
 
 /**
- * A tiny app-scoped bus for "a tapped notification wants to open camera X".
+ * The app-scoped bus for everything that opens the app somewhere specific: notification taps and
+ * buttons, widget taps, the widgets' "fix it in Settings" errors.
  *
- * A notification tap can't just carry a nav route because a specific camera opens
- * in the CameraLightbox overlay, not via a NavHost destination. So the tap sets
- * [cameraTarget] here (from MainActivity, cold start via the launch intent or warm
- * via onNewIntent); the nav shell reacts by bringing Home forward, and HomeScreen
- * opens the lightbox for that camera once the camera list is loaded — via
- * CameraSession, which renders it at the nav-graph root — then [consume]s it so it
- * fires once.
+ * None of these can simply be a start destination. A camera opens in the lightbox overlay, not a
+ * route; a device screen belongs on top of Home so Back returns into the app; and all of them can
+ * arrive while the app is already open on some other screen. So MainActivity turns an intent into
+ * a target here, from onCreate or onNewIntent alike, and the nav shell ([AppNavGraph]) acts on it
+ * from whatever screen is showing, then the consumer clears it so it fires once.
  */
 @Singleton
 class PushNav @Inject constructor() {
@@ -32,11 +39,47 @@ class PushNav @Inject constructor() {
     /** The camera (and optional moment) a tap wants opened, or null. */
     val cameraTarget: StateFlow<CameraTarget?> = _cameraTarget.asStateFlow()
 
-    fun openCamera(cameraId: String, eventId: String? = null) {
-        _cameraTarget.value = CameraTarget(cameraId, eventId)
+    fun openCamera(cameraId: String, eventId: String? = null, start: CameraStart = CameraStart.LIVE) {
+        _cameraTarget.value = CameraTarget(cameraId, eventId, start)
     }
 
     fun consume() {
         _cameraTarget.value = null
+    }
+
+    private val _entityTarget = MutableStateFlow<String?>(null)
+    /** An entity whose screen a tap wants opened, or null. */
+    val entityTarget: StateFlow<String?> = _entityTarget.asStateFlow()
+
+    fun openEntity(entityId: String) {
+        _entityTarget.value = entityId
+    }
+
+    fun consumeEntity() {
+        _entityTarget.value = null
+    }
+
+    private val _routeTarget = MutableStateFlow<String?>(null)
+    /** A plain route a tap wants opened (Settings, from a widget that is signed out), or null. */
+    val routeTarget: StateFlow<String?> = _routeTarget.asStateFlow()
+
+    fun openRoute(route: String) {
+        _routeTarget.value = route
+    }
+
+    fun consumeRoute() {
+        _routeTarget.value = null
+    }
+
+    private val _alertBanner = MutableStateFlow<AlertBanner?>(null)
+    /** The alert pinned over Home until dismissed. Setting it also brings Home forward. */
+    val alertBanner: StateFlow<AlertBanner?> = _alertBanner.asStateFlow()
+
+    fun showAlert(title: String, body: String) {
+        _alertBanner.value = AlertBanner(title, body)
+    }
+
+    fun dismissAlert() {
+        _alertBanner.value = null
     }
 }

@@ -54,6 +54,7 @@ import com.hawksnest.core.logic.RecordedSource
 import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.isFrigateCamera
+import com.hawksnest.core.logic.CameraStart
 import com.hawksnest.core.logic.shouldRecordLiveView
 import com.hawksnest.core.logic.recordedBackendOf
 import com.hawksnest.core.logic.chooseRecordedSource
@@ -96,6 +97,9 @@ fun CameraPlayer(
     viewModel: CameraPlayerViewModel,
     /** Frigate event to open on, from a tapped camera alert. Null = open live. */
     initialEventId: String? = null,
+    /** How this camera starts when something outside asked for it: a doorbell notification's
+     *  "Talk" opens the mic, the reply fallback opens the quick-reply sheet. */
+    startWith: CameraStart = CameraStart.LIVE,
     modifier: Modifier = Modifier,
 ) {
     val cameraName = cameraNameOf(cam.id)
@@ -276,7 +280,7 @@ fun CameraPlayer(
     var showPtz by remember(cam.id) { mutableStateOf(false) }
     // Keyed on cam.id so switching cameras closes the sheet: the replies would still be addressed
     // to the camera you were looking at a moment ago, which is a message played in the wrong room.
-    var showReplies by remember(cam.id) { mutableStateOf(false) }
+    var showReplies by remember(cam.id) { mutableStateOf(startWith == CameraStart.REPLY) }
 
     // Pinch-zoom over the picture. Keyed on cam.id so switching cameras starts unzoomed —
     // a magnified corner carried over to a different room is disorienting and reads as a bug.
@@ -598,7 +602,7 @@ fun CameraPlayer(
             // seven Reolinks from a feature they support. Now the same question the Reply button
             // asks, through the same predicate, so the two can never disagree about one camera.
             if (canReachSpeaker(canGo2rtc) && isLive) {
-                TalkButton(cameraName, viewModel)
+                TalkButton(cameraName, viewModel, autoStart = startWith == CameraStart.TALK)
             }
             // Prerecorded messages, played out of the camera's own speaker by go2rtc. A chip like
             // every other control here, deliberately: the 2026-08-03 attempt to give it a larger

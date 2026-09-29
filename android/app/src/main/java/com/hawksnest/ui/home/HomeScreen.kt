@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Icon
@@ -153,7 +154,7 @@ fun HomeScreen(
         if (target != null && ui.cameras.isNotEmpty()) {
             ui.cameras.firstOrNull { it.id == target.cameraId }?.let {
                 // eventId null for doorbell/alarm taps — those open live, as before.
-                viewModel.openLightbox(ui.cameras, it, target.eventId)
+                viewModel.openLightbox(ui.cameras, it, target.eventId, target.start)
             }
             viewModel.consumePushTarget()
         }
@@ -243,6 +244,10 @@ fun HomeScreen(
         if (inGrace) {
             ReconnectingBanner(asOfMs = lastUpdate.takeIf { it > 0 })
         }
+
+        // A tapped triggered-alarm alert, in its own words, above the hero where Off is.
+        val alert by viewModel.alertBanner.collectAsState()
+        alert?.let { a -> AlertBannerCard(a, onDismiss = viewModel::dismissAlert) }
 
         HomeContent(
             ui = ui,
@@ -638,6 +643,44 @@ private fun CameraTile(
             ) {
                 Text(name, style = MaterialTheme.typography.bodyMedium, color = Color.White)
             }
+        }
+    }
+}
+
+/**
+ * The alert a triggered-alarm notification carried, pinned over Home until dismissed. It says what
+ * the notification said (HA's words, so it names the sensor when HA did) and nothing more: the
+ * hero right below it is where the owner acts. Critical colour, because a triggered alarm is the
+ * one state that means "deal with this now".
+ */
+@Composable
+private fun AlertBannerCard(alert: com.hawksnest.push.AlertBanner, onDismiss: () -> Unit) {
+    val critical = MaterialTheme.colorScheme.error
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(critical.copy(alpha = 0.12f))
+            .border(1.dp, critical.copy(alpha = 0.5f), MaterialTheme.shapes.medium)
+            .padding(horizontal = HawksnestTheme.spacing.md, vertical = HawksnestTheme.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(alert.title, style = MaterialTheme.typography.titleMedium, color = critical)
+            if (alert.body.isNotBlank()) {
+                Text(
+                    alert.body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+        IconButton(onClick = onDismiss) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Dismiss alert",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

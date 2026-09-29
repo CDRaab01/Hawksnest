@@ -121,8 +121,17 @@ class HomeViewModel @Inject constructor(
 
     /** Open the camera lightbox — rendered at the nav-graph root off [CameraSession], not here,
      *  so system picture-in-picture can show it (a Dialog window can't be minimized). */
-    fun openLightbox(cameras: List<CameraUi>, initial: CameraUi, eventId: String? = null) =
-        cameraSession.open(cameras, initial, eventId)
+    fun openLightbox(
+        cameras: List<CameraUi>,
+        initial: CameraUi,
+        eventId: String? = null,
+        start: com.hawksnest.core.logic.CameraStart = com.hawksnest.core.logic.CameraStart.LIVE,
+    ) = cameraSession.open(cameras, initial, eventId, start)
+
+    /** A triggered-alarm alert's own words, pinned over Home until dismissed (see PushNav). */
+    val alertBanner: StateFlow<com.hawksnest.push.AlertBanner?> = pushNav.alertBanner
+
+    fun dismissAlert() = pushNav.dismissAlert()
 
     /** Keep the open lightbox's switcher list fresh as the camera list recomposes. */
     fun updateLightboxCameras(cameras: List<CameraUi>) = cameraSession.updateCameras(cameras)

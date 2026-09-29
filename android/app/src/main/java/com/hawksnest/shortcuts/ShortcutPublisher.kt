@@ -19,10 +19,12 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Publishes launcher shortcuts (long-press the app icon) and performs them.
@@ -82,6 +84,16 @@ class ShortcutPublisher @Inject constructor(
      * — a shortcut tap must not be a quieter way to call a service than pressing the button.
      */
     suspend fun perform(id: String) {
+        // A shortcut is often what started the process, so the socket is still connecting and the
+        // entity map is empty: resolving right away found nothing and the tap silently did nothing.
+        // Wait for the house to load, bounded, and say so if it never does.
+        val loaded = withTimeoutOrNull(HOUSE_WAIT_MS) {
+            connection.state.entities.first { it.isNotEmpty() }
+        }
+        if (loaded == null) {
+            connection.reportControlError("Couldn't reach Home Assistant, so the shortcut didn't run.")
+            return
+        }
         when (val action = resolve(id)) {
             null -> Unit
             ShortcutAction.LockUp ->
@@ -107,5 +119,8 @@ class ShortcutPublisher @Inject constructor(
 
     companion object {
         const val EXTRA_SHORTCUT = "com.hawksnest.SHORTCUT"
+
+        /** How long a shortcut waits for a cold-started app to load the house before giving up. */
+        private const val HOUSE_WAIT_MS = 15_000L
     }
 }

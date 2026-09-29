@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.hawksnest.core.logic.CameraStart
 import com.hawksnest.ui.home.CameraUi
 
 /**
@@ -48,6 +49,9 @@ fun CameraLightbox(
     nonce: Int = 0,
     /** Frigate event to open on, from a tapped camera alert. Null = open live. */
     initialEventId: String? = null,
+    /** How the requested camera starts (a notification's "Talk" opens the mic). Like
+     *  [initialEventId], it applies to that camera only; switching lands live. */
+    initialStart: CameraStart = CameraStart.LIVE,
     /** True while the activity is minimized into PiP: only the video frame should show, so the
      *  close chrome hides and the player fills the window edge to edge. */
     inPip: Boolean = false,
@@ -70,7 +74,9 @@ fun CameraLightbox(
         // stream views bind their player or renderer once, in AndroidView's factory, so the new
         // camera's stream connected and played into a surface nobody showed, while the old
         // camera's last frame stayed on screen under the new camera's name, labelled Live.
-        key(current.id) {
+        // Keyed on the open's nonce too: a second tap that opens the SAME camera differently (the
+        // notification's "Talk" while it is already showing live) must start a fresh player.
+        key(current.id, nonce) {
             CameraPlayer(
                 cam = current,
                 cameras = cameras.ifEmpty { listOf(initial) },
@@ -79,6 +85,7 @@ fun CameraLightbox(
                 // switching cameras inside the lightbox should land live, not on an
                 // unrelated camera's timeline at that timestamp.
                 initialEventId = initialEventId.takeIf { current.id == initial.id },
+                startWith = if (current.id == initial.id) initialStart else CameraStart.LIVE,
                 viewModel = viewModel,
                 // In PiP the window IS the video (its aspect is set from the source), so the
                 // page padding would render as a black border around a tiny picture.

@@ -37,12 +37,14 @@ import com.hawksnest.widget.data.WidgetEntryPoint
 import com.hawksnest.widget.data.blocker
 import com.hawksnest.widget.data.confirmService
 import com.hawksnest.widget.data.confirmSince
+import com.hawksnest.widget.data.entityId
 import com.hawksnest.widget.data.pendingSince
 import com.hawksnest.widget.data.snapshot
 import com.hawksnest.widget.ui.BlockerBody
 import com.hawksnest.widget.ui.WidgetButton
 import com.hawksnest.widget.ui.WidgetHeader
 import com.hawksnest.widget.ui.WidgetPanel
+import com.hawksnest.widget.ui.openDevice
 import com.hawksnest.widget.ui.readAtLabel
 import kotlinx.serialization.json.Json
 
@@ -105,6 +107,7 @@ private fun AlarmBody(prefs: Preferences, json: Json) {
         } else {
             WidgetHeader(
                 name = view.name,
+                onClick = openDevice(prefs.entityId()),
                 detail = view.label,
                 icon = R.drawable.ic_glyph_shield,
                 accent = view.channel,
