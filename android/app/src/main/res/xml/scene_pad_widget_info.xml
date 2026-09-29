@@ -28,4 +28,5 @@
     android:previewImage="@drawable/ic_widget_scene_pad"
     android:description="@string/widget_scene_pad_description"
     android:configure="com.hawksnest.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable"
     android:widgetCategory="home_screen" />

@@ -913,12 +913,27 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
 - **Push** (`push/`) — self-hosted **ntfy**, no FCM/Google. `NtfyPushService` is a `specialUse`
   foreground service holding one streaming connection to `<base>/<topic>/json`; each frame is
   parsed (`NtfyMessage`, pure/tested), classified (`PushRoute.kindOf`: doorbell/alarm/generic),
-  and raised via `PushNotifier` (per-kind channels). **Tap → deep-link:** a doorbell notification's
-  `click` URL carries `?camera=camera.<base>`; `PushRoute.cameraOf` extracts it, the tap intent
-  carries it (`EXTRA_CAMERA`), and `PushNav` (an app-scoped bus) hands it to the nav shell —
-  which brings Home forward (`onNewIntent` covers a warm tap) and opens that camera's lightbox.
-  A specific camera opens in an overlay, not a NavHost route, which is why this goes through
-  `PushNav` rather than a start destination. Off by default — opt in from Settings, which requests
+  and raised via `PushNotifier` (per-kind channels). **Every tap lands on the thing the alert is
+  about.** `PushRoute.tapTarget` reads the `click` URL: `/entity/<id>` (the web app's own path, so
+  the plain ntfy app and a browser land in the same place) opens that device's screen,
+  `?camera=…&event=…` opens that camera at that moment, and an alarm that went off opens Home with
+  the alert pinned as a banner, because Home is where Off is. `PushRoute.actionsFor` adds up to
+  three buttons: Watch / Talk / Reply on a doorbell, View clip / Live on a person, the device plus
+  its camera on a garage alert, and **Arm away** on a "disarmed" alert. That is the only button
+  that changes the house, and it needs the phone unlocked; nothing on a notification disarms or
+  unlocks (the launcher-shortcut rule below, for the same reason). Buttons that act in place (Reply,
+  its three quick replies, Arm away) go to the non-exported `PushActionReceiver`, which speaks REST
+  with the stored token like the widgets do, reads the result back, and rewrites the notification
+  with what actually happened. **One way in:** notification taps and buttons, widget taps and
+  launcher shortcuts all become a target on `PushNav` (an app-scoped bus) in one `MainActivity`
+  handler, from `onCreate` and `onNewIntent` alike, and the nav shell acts on it from whatever screen
+  is showing. It returns to Home by *popping* to it (`goHome`), not with the bottom bar's
+  save/restore navigate: from Settings that pattern restored the stack it had just saved and put
+  Settings straight back, so a doorbell tap there did nothing. A camera opens in an overlay, not a
+  NavHost route, which is why none of this can be a start destination. Debug builds carry a
+  `DebugPushReceiver` (`adb shell am broadcast -a com.hawksnest.debug.PUSH`, shell-only) that
+  posts a test alert through the real notifier without touching the household's topic. Off by
+  default — opt in from Settings, which requests
   `POST_NOTIFICATIONS` and offers the **battery-optimization exemption** (One UI dozes long-idle
   foreground services); `PushSettings` (DataStore) persists it; `BootReceiver` restarts the
   listener after a reboot only if enabled. The server side (ntfy Deployment + the HA doorbell/alarm
@@ -935,7 +950,8 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   and the widget makes you tap twice. `core/logic/shortcutsFor` owns that rule and is tested on
   it. Taps route through `ConnectionManager.control` like any other user action (same pending
   state, same failure snackbar), and `MainActivity` consumes the extra so a configuration change
-  cannot re-fire it.
+  cannot re-fire it. A shortcut is often what started the process, so it waits (bounded) for the
+  house to load before resolving; resolving at once found nothing and the tap silently did nothing.
 - **Appearance** — `HawksnestTheme` has always taken `darkTheme` as a parameter and the light
   palette shipped with the V1 gates; what was missing was a control. `core/logic/ThemePref`
   (Dark/Light/System) persists in `DevicePrefsStore` and `MainActivity` resolves it via the pure

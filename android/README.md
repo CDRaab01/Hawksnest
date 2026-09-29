@@ -42,7 +42,9 @@ components (`ui/components/`) are in place, plus:
   dependency, tailnet-only). `push/NtfyPushService` is a `specialUse` foreground service that holds
   one streaming connection to `<base>/<topic>/json` and raises per-kind notifications
   (`PushNotifier`); `NtfyMessage`/`PushRoute` (parse + doorbell→cameras / alarm→home routing) are
-  pure and JVM-unit-tested. Off by default — opt in under **Settings → Notifications** (requests
+  pure and JVM-unit-tested. A tap opens what the alert is about (the camera at its moment, the
+  garage door, the alarm), and each notification carries the buttons that fit it; see
+  ARCHITECTURE.md → Push. Off by default — opt in under **Settings → Notifications** (requests
   `POST_NOTIFICATIONS`); `BootReceiver` restarts it after a reboot if enabled. The ntfy server +
   the HA automations that publish doorbell/alarm events live in the **`hawksnest-automation`** repo
   (`docs/ntfy-push.md`). **On-device runtime** (delivery with the app closed, battery, reconnect,
@@ -126,6 +128,13 @@ Things worth knowing before relying on them:
   whenever you tap an error. While the app is open its widgets also follow the live socket, so
   opening Hawksnest makes the home screen snap current. That is the whole freshness story — the
   platform's own 30-minute update period is cosmetic.
+- **A widget's name opens its device.** Tap "Front Door" and you land on the front door's screen,
+  whether the app was closed, open, or sitting on Settings; Back returns to Home. The buttons below
+  the name are still the controls.
+- **Long-press → Settings changes a placed widget** (Android 12+), starting from what it is set to
+  now: the current device is listed first and marked, and the temperature thresholds and scene-pad
+  presets, colours and relay come prefilled. Backing out leaves the widget as it was. On older
+  Android, which has no such menu, the scene pad's name still opens its setup instead.
 - **Unlock and disarm are confirm-taps, not slides.** The in-app controls make you slide precisely
   so a pocket can't open the front door; widgets can't draw a slide, so a second tap stands in for
   the deliberate gesture.

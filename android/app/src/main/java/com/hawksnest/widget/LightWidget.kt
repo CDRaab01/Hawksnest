@@ -41,12 +41,14 @@ import com.hawksnest.ui.glance.channelColor
 import com.hawksnest.ui.glance.panelHigh
 import com.hawksnest.widget.data.WidgetEntryPoint
 import com.hawksnest.widget.data.blocker
+import com.hawksnest.widget.data.entityId
 import com.hawksnest.widget.data.pendingSince
 import com.hawksnest.widget.data.snapshot
 import com.hawksnest.widget.ui.BlockerBody
 import com.hawksnest.widget.ui.WidgetButton
 import com.hawksnest.widget.ui.WidgetHeader
 import com.hawksnest.widget.ui.WidgetPanel
+import com.hawksnest.widget.ui.openDevice
 import kotlinx.serialization.json.Json
 
 /**
@@ -114,6 +116,7 @@ private fun LightBody(prefs: Preferences, json: Json) {
             val note = blocker?.let { blockerCopy(it).headline } ?: view.staleness
             WidgetHeader(
                 name = view.name,
+                onClick = openDevice(prefs.entityId()),
                 detail = view.stateLabel,
                 icon = R.drawable.ic_glyph_bulb,
                 accent = if (view.on) Channel.STREAK else null,

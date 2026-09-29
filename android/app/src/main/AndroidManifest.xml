@@ -164,6 +164,12 @@
             </intent-filter>
         </activity>
 
+        <!-- The notification buttons that act in place: Reply and its three messages, Arm away.
+             Not exported: only this app's own PendingIntents reach it. -->
+        <receiver
+            android:name=".push.PushActionReceiver"
+            android:exported="false" />
+
         <!-- Restart the listener after a reboot (only if push is enabled). -->
         <receiver
             android:name=".push.BootReceiver"

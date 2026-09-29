@@ -8,9 +8,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.drawable.Icon
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.hawksnest.MainActivity
+import com.hawksnest.core.logic.CameraStart
+import com.hawksnest.core.logic.QUICK_REPLIES
+import com.hawksnest.core.logic.QuickReply
 import dagger.hilt.android.qualifiers.ApplicationContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -20,10 +24,11 @@ import javax.inject.Singleton
 /**
  * Owns the notification channels and turns an [NtfyMessage] into a posted
  * notification (or the persistent foreground notification the service runs
- * under). Channel + importance + tap destination are derived from [PushRoute],
- * so a doorbell buzzes loudly and deep-links to its camera, an alarm change
- * opens Home, and a camera object alert lands on its own mutable channel. Any
- * message carrying a snapshot renders it as a big picture.
+ * under). Channel + importance come from [PushRoute.kindOf]; where a tap lands and
+ * which buttons it carries come from [PushRoute.tapTarget] and [PushRoute.actionsFor],
+ * so a doorbell buzzes loudly and opens its camera, a garage alert opens the door,
+ * and a camera object alert lands on its own mutable channel. Any message carrying
+ * a snapshot renders it as a big picture.
  *
  * The image is fetched with **no auth headers** — every URL the automations send
  * must self-authenticate (HA's signed `camera_proxy` token). A URL needing a
@@ -75,7 +80,7 @@ class PushNotifier @Inject constructor(
             .setContentText("Listening for alerts")
             .setSmallIcon(context.applicationInfo.icon)
             .setOngoing(true)
-            .setContentIntent(contentIntent(null))
+            .setContentIntent(openIntent(PushTarget.Home(), msg = null, key = "service", dismissId = null))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
@@ -91,6 +96,7 @@ class PushNotifier @Inject constructor(
             PushKind.Pet -> CHANNEL_PET
             PushKind.Generic -> CHANNEL_GENERIC
         }
+        val id = notificationId(msg, kind)
         // Doorbell snapshot: fetch best-effort (the camera_proxy URL is self-authing via its
         // signed token). Runs on the service's IO coroutine, so a blocking fetch is fine.
         val snapshot = msg.attachUrl?.let { fetchBitmap(it) }
@@ -110,7 +116,8 @@ class PushNotifier @Inject constructor(
                 },
             )
             .setPriority(if (msg.priority >= 4) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(contentIntent(PushRoute.cameraOf(msg), PushRoute.eventOf(msg)))
+            .setContentIntent(openIntent(PushRoute.tapTarget(msg), msg, key = "$id:tap", dismissId = id))
+        PushRoute.actionsFor(msg).forEach { builder.addAction(compatAction(it, msg, id)) }
         if (snapshot != null) {
             builder.setLargeIcon(snapshot)
                 .setStyle(
@@ -123,9 +130,79 @@ class PushNotifier @Inject constructor(
         }
         val notification = builder.build()
         try {
-            nm.notify(notificationId(msg, kind), notification)
+            nm.notify(id, notification)
         } catch (e: SecurityException) {
             // POST_NOTIFICATIONS revoked between the check and here — ignore.
+        }
+    }
+
+    /**
+     * The doorbell's "Reply": the same notification, its buttons swapped for the three quick
+     * replies. In place and silent, so the snapshot of who is at the door stays on screen while
+     * you pick one.
+     */
+    fun showReplyMenu(id: Int, cameraId: String) {
+        val replies = QUICK_REPLIES.map { reply ->
+            platformAction(
+                buttonLabel(reply),
+                broadcast(PushActionReceiver.ACTION_REPLY_PLAY, key = "$id:reply:${reply.id}") {
+                    putExtra(EXTRA_NOTIFICATION_ID, id)
+                    putExtra(EXTRA_CAMERA, cameraId)
+                    putExtra(EXTRA_REPLY, reply.id)
+                },
+            )
+        }
+        update(id, text = null, actions = replies, fallbackChannel = CHANNEL_DOORBELL)
+    }
+
+    /** Progress or outcome of a quick reply, with the camera one button away either way. */
+    fun showReplyStatus(id: Int, cameraId: String, text: String, done: Boolean) {
+        val actions = if (!done) {
+            emptyList()
+        } else {
+            listOf(
+                openAction("Watch", PushTarget.Camera(cameraId), id),
+                openAction("Talk", PushTarget.Camera(cameraId, start = CameraStart.TALK), id),
+            )
+        }
+        update(id, text, actions, fallbackChannel = CHANNEL_DOORBELL)
+    }
+
+    /** Progress or outcome of "Arm away", as Home Assistant read it back. */
+    fun showArmStatus(id: Int, entityId: String, text: String, done: Boolean) {
+        val actions = if (done) listOf(openAction("View alarm", PushTarget.Entity(entityId), id)) else emptyList()
+        update(id, text, actions, fallbackChannel = CHANNEL_ALARM)
+    }
+
+    /**
+     * Rewrite a posted notification's text and buttons without buzzing again. Falls back to a fresh
+     * notification when the original was swiped away mid-call: the outcome of something that
+     * changed the house, or spoke at the door, is worth seeing either way.
+     */
+    private fun update(id: Int, text: String?, actions: List<Notification.Action>, fallbackChannel: String) {
+        val mgr = context.getSystemService(NotificationManager::class.java) ?: return
+        val active = mgr.activeNotifications.firstOrNull { it.id == id }?.notification
+        val builder = if (active != null) {
+            Notification.Builder.recoverBuilder(context, active)
+        } else {
+            Notification.Builder(context, fallbackChannel)
+                .setContentTitle("Hawksnest")
+                .setSmallIcon(context.applicationInfo.icon)
+                .setAutoCancel(true)
+        }
+        if (text != null) {
+            builder.setContentText(text)
+            // A snapshot notification's expanded view shows the content text under the picture;
+            // a text-only one shows its big text, which would still read the old message.
+            if (active?.extras?.containsKey(Notification.EXTRA_PICTURE) != true) {
+                builder.setStyle(Notification.BigTextStyle().bigText(text))
+            }
+        }
+        builder.setActions(*actions.toTypedArray()).setOnlyAlertOnce(true)
+        try {
+            mgr.notify(id, builder.build())
+        } catch (e: SecurityException) {
+            // POST_NOTIFICATIONS revoked — nothing to show it on.
         }
     }
 
@@ -160,28 +237,79 @@ class PushNotifier @Inject constructor(
         null
     }
 
+    private fun compatAction(action: PushAction, msg: NtfyMessage, id: Int): NotificationCompat.Action {
+        val intent = when (action) {
+            is PushAction.Open -> openIntent(action.target, msg, key = "$id:${action.label}", dismissId = id)
+            is PushAction.ReplyMenu -> broadcast(PushActionReceiver.ACTION_REPLY_MENU, key = "$id:reply") {
+                putExtra(EXTRA_NOTIFICATION_ID, id)
+                putExtra(EXTRA_CAMERA, action.cameraId)
+            }
+            is PushAction.ArmAway -> broadcast(PushActionReceiver.ACTION_ARM_AWAY, key = "$id:arm") {
+                putExtra(EXTRA_NOTIFICATION_ID, id)
+                putExtra(EXTRA_ENTITY, action.entityId)
+            }
+        }
+        return NotificationCompat.Action.Builder(context.applicationInfo.icon, action.label, intent)
+            // Arming changes the house, so it waits for the phone to be unlocked (Android 12+):
+            // a phone left on a table must not be a way to arm away on someone who is home.
+            .setAuthenticationRequired(action is PushAction.ArmAway)
+            .build()
+    }
+
+    private fun openAction(label: String, target: PushTarget, id: Int): Notification.Action =
+        platformAction(label, openIntent(target, msg = null, key = "$id:$label", dismissId = id))
+
+    private fun platformAction(label: String, intent: PendingIntent): Notification.Action =
+        Notification.Action.Builder(Icon.createWithResource(context, context.applicationInfo.icon), label, intent)
+            .build()
+
     /**
-     * The tap intent. Always brings the app to Home (`FLAG_ACTIVITY_SINGLE_TOP`, so a
-     * running app gets `onNewIntent` rather than a fresh task); a doorbell additionally
-     * carries the camera id so Home opens its live view. Distinct request code per
-     * camera so a doorbell PendingIntent doesn't overwrite an alarm one.
+     * An intent that opens the app on [target]. `SINGLE_TOP | CLEAR_TOP`, so a running app gets
+     * `onNewIntent` rather than a second copy of itself; MainActivity reads the extras the same way
+     * either way. [dismissId] clears the notification once it has been acted on, which a button,
+     * unlike a tap on the notification itself, doesn't do on its own.
+     *
+     * [key] must be unique per notification and button. PendingIntents that differ only in their
+     * extras are the same PendingIntent to Android, and FLAG_UPDATE_CURRENT would rewrite one
+     * button's destination with another's.
      */
-    private fun contentIntent(cameraId: String?, eventId: String? = null): PendingIntent {
+    private fun openIntent(target: PushTarget, msg: NtfyMessage?, key: String, dismissId: Int?): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        if (cameraId != null) intent.putExtra(EXTRA_CAMERA, cameraId)
-        if (eventId != null) intent.putExtra(EXTRA_EVENT, eventId)
+        when (target) {
+            is PushTarget.Camera -> {
+                intent.putExtra(EXTRA_CAMERA, target.cameraId)
+                target.eventId?.let { intent.putExtra(EXTRA_EVENT, it) }
+                if (target.start != CameraStart.LIVE) intent.putExtra(EXTRA_CAMERA_START, target.start.name)
+            }
+            is PushTarget.Entity -> intent.putExtra(MainActivity.EXTRA_OPEN_ENTITY, target.entityId)
+            is PushTarget.Home -> if (target.banner && msg != null) {
+                intent.putExtra(EXTRA_ALERT_TITLE, msg.title).putExtra(EXTRA_ALERT_BODY, msg.body)
+            }
+        }
+        dismissId?.let { intent.putExtra(EXTRA_NOTIFICATION_ID, it) }
         return PendingIntent.getActivity(
             context,
-            // The request code must vary with the EVENT too, not just the camera.
-            // FLAG_UPDATE_CURRENT only rewrites extras on a PendingIntent matching
-            // the same request code, and two alerts from one camera differ solely
-            // by event — sharing a code would make the second tap reopen the first
-            // alert's moment.
-            (listOfNotNull(cameraId ?: "home", eventId).joinToString(":")).hashCode(),
+            key.hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+    }
+
+    private fun broadcast(action: String, key: String, extras: Intent.() -> Unit): PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            key.hashCode(),
+            Intent(context, PushActionReceiver::class.java).setAction(action).apply(extras),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+    /** Button-length versions of the quick replies: three full sentences don't fit on one row. */
+    private fun buttonLabel(reply: QuickReply): String = when (reply.id) {
+        "leave" -> "Leave at door"
+        "coming" -> "Be right there"
+        "cant" -> "Can't come now"
+        else -> reply.label
     }
 
     companion object {
@@ -197,11 +325,27 @@ class PushNotifier @Inject constructor(
         const val CHANNEL_GENERIC = "alerts"
         const val CHANNEL_SERVICE = "push_service"
 
-        /** Intent extra carrying the logical camera id a doorbell tap should open. */
+        /** Intent extra carrying the logical camera id a tap or button should open. */
         const val EXTRA_CAMERA = "com.hawksnest.push.EXTRA_CAMERA"
 
         /** Intent extra carrying the Frigate event id a camera-alert tap should
          *  seek to, so you land on the moment rather than the live view. */
         const val EXTRA_EVENT = "com.hawksnest.push.EXTRA_EVENT"
+
+        /** How the camera starts, a [CameraStart] name: the doorbell's "Talk" opens the mic. */
+        const val EXTRA_CAMERA_START = "com.hawksnest.push.EXTRA_CAMERA_START"
+
+        /** A triggered alarm's own words, pinned over Home as a banner. */
+        const val EXTRA_ALERT_TITLE = "com.hawksnest.push.EXTRA_ALERT_TITLE"
+        const val EXTRA_ALERT_BODY = "com.hawksnest.push.EXTRA_ALERT_BODY"
+
+        /** The notification a button belongs to, so acting on it can update or clear it. */
+        const val EXTRA_NOTIFICATION_ID = "com.hawksnest.push.EXTRA_NOTIFICATION_ID"
+
+        /** The alarm panel "Arm away" arms. */
+        const val EXTRA_ENTITY = "com.hawksnest.push.EXTRA_ENTITY"
+
+        /** The [QuickReply.id] a reply button plays. */
+        const val EXTRA_REPLY = "com.hawksnest.push.EXTRA_REPLY"
     }
 }
