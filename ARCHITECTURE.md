@@ -106,7 +106,14 @@ attribute, and a battery cam's entity churns attribute-less mid-negotiation), ho
 watchdog + "Connecting…" overlay for battery-camera wake, and the HLS tier resolves its
 `camera/stream` URL **only when that tier is active** (an eager resolve wakes the camera twice)
 with a 15 s bound in `haSource`. Tile age badges use `snapshotFreshnessMs` (`timestamp` attr →
-`last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras.
+`last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras. **Android
+dates a tile from its picture instead** (`core/logic/CameraTiles.kt`): a Frigate snapshot is
+Frigate's current frame, so its age is when this app fetched it; a Ring snapshot's is the entity's
+update time; a grabbed live frame covers the snapshot only while it is the newer picture. Every
+wired tile used to read "2m ago" at once, which was HA rotating the camera token. Each tile is
+LIVE, STALE (older than 6 min, or its last refresh failed), ASLEEP, NO_SIGNAL or LOADING, and the
+Cameras header counts those same states ("11 live · 2 asleep · 1 no signal") instead of HA
+availability.
 
 **Snapshot refresh is per-backend, driven by two counters, not one**
 (`components/snapshotBucketContext.ts` → `useSnapshotBucket(isFrigate)`, Kotlin twin
@@ -679,9 +686,18 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   `Exception` the fetch guards. Two independent fixes, both needed: the feed is capped to the 500
   newest **after** the noise filter (so the kept events are useful ones), and the screen is a
   `LazyColumn` so cost stops scaling with the window. The cap is honest — the screen says when it
-  truncated rather than letting the day appear to end early.
+  truncated rather than letting the day appear to end early. The category filter runs **before**
+  the cap, in `HistoryViewModel`, so a quiet category can't read "No events" behind 500 noisy ones.
+  `logbook/get_events` sends a state change with no name or message (HA's own frontend fills both
+  in), so rows are named through the same `displayName` chain as Devices and worded per domain and
+  device class (`core/logic/LogbookText.kt`: "Motion cleared", "Unlocked", "Went offline").
 - **Camera live ladder** (`ui/cameras/CameraPlayer.kt`): recorded VOD (when scrubbed) →
-  **RTSP-direct** → **go2rtc-direct** → HA WebRTC → HLS → MJPEG → snapshot. The go2rtc-direct
+  **RTSP-direct** → **go2rtc-direct** → HA WebRTC → HLS → MJPEG → snapshot. `core/logic/liveTier`
+  decides the rung once and both the ladder and the status label read it, so only the real-time
+  tiers say "Live"; MJPEG says "Live · reduced", snapshots "Snapshots only", and the undecided wait
+  "Connecting". The Low/High toggle asks whether go2rtc *lists* a sub stream, not whether the
+  relay's breaker is closed (it hid the toggle after one relay failure), and choosing a quality
+  re-arms the relay. The go2rtc-direct
   tier (`Go2rtcPlayer.kt`) negotiates recvonly WebRTC straight against the dedicated go2rtc over
   its WS API (`/go2rtc/api/ws?src=<base>`, same signaling `TalkButton` speaks — both share
   `Go2rtc.kt`'s `go2rtcWsUrl`), skipping the ring-mqtt/ffmpeg hop for ~1–2 s first frame. Media
@@ -781,8 +797,10 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   Keystore wrap as the HA token. Unconfigured, the ladder behaves exactly as before. Nothing in
   the repo carries a real IP or account — it is public.
   **Fails fast, three ways**, because the tier is optional and a dead frame is worse than a
-  step-down: a 4 s RTSP connect timeout, a 5 s no-first-frame deadline (an unreachable camera can
-  hang setup without ever erroring), and a 7 s post-play stall timeout. That last one matters
+  step-down: a 4 s RTSP connect timeout, a 7 s no-first-frame deadline (an unreachable camera can
+  hang setup without ever erroring; it was 5 s until the September 2026 audit timed first frames at
+  up to 4.0 s in-app and 4.8 s camera-side, and missing it restarts the relay from scratch), and a
+  7 s post-play stall timeout. That last one matters
   because the main stream is FIXED-bitrate — a weak link degrades to a stall, not to lower quality,
   whereas go2rtc's WebRTC below it adapts. Only the first two report to `core/net/RtspHealth`; a
   stall is the network's fault, not the camera's.

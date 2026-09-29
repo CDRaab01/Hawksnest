@@ -179,8 +179,13 @@ fun RtspPlayer(
 /** RTSP SETUP/DESCRIBE deadline. Short: an unreachable camera should cost about a second. */
 private const val CONNECT_TIMEOUT_MS = 4_000L
 
-/** No first frame by this point, error or not, and the tier gives up. */
-private const val READY_DEADLINE_MS = 5_000L
+/**
+ * No first frame by this point, error or not, and the tier gives up. Seven seconds, not five: the
+ * slowest measured in-app first frame was 4.0 s and the camera side alone reached 4.8 s in probes
+ * (the new viewer waits for the next keyframe, one every 2 s). Missing the deadline is expensive,
+ * since the relay then starts from scratch, so it has to clear the slow tail, not the median.
+ */
+private const val READY_DEADLINE_MS = 7_000L
 
 /** Continuous stall after playback started — the link cannot carry a fixed-bitrate main stream. */
 private const val STALL_TIMEOUT_MS = 7_000L

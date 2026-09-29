@@ -104,14 +104,17 @@ fun AutomationsScreen(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                "${if (a.enabled) "Enabled" else "Disabled"} · ${a.lastTriggered}",
+                                (if (a.system) "System · " else "") +
+                                    "${if (a.enabled) "Enabled" else "Disabled"} · ${a.lastTriggered}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        RunButton(onRun = { viewModel.run(a.entityId) })
+                        // No Run for system automations: by hand, one parks a camera, pushes to
+                        // every phone or trips a watchdog (see isSystemAutomation).
+                        if (!a.system) RunButton(onRun = { viewModel.run(a.entityId) })
                         if (a.configId != null) {
                             IconButton(onClick = { onEdit(a.configId) }) {
                                 Icon(

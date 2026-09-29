@@ -60,6 +60,7 @@ import com.hawksnest.core.automations.verbsFor
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.logic.resolveName
+import com.hawksnest.ui.components.ConfirmDialog
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.PulseButton
 import com.hawksnest.ui.components.SectionHeader
@@ -151,9 +152,20 @@ fun AutomationEditScreen(
                             enabled = !busy,
                         )
                         if (!viewModel.isNew) {
+                            var confirmDelete by remember { mutableStateOf(false) }
+                            if (confirmDelete) {
+                                ConfirmDialog(
+                                    title = "Delete “${s.rule.alias.ifBlank { "this automation" }}”?",
+                                    text = "It's removed from Home Assistant and stops running. " +
+                                        "There's no undo.",
+                                    confirmLabel = "Delete",
+                                    onConfirm = viewModel::delete,
+                                    onDismiss = { confirmDelete = false },
+                                )
+                            }
                             PulseButton(
                                 text = "Delete",
-                                onClick = viewModel::delete,
+                                onClick = { confirmDelete = true },
                                 enabled = !busy,
                                 tonal = true,
                                 channel = HawksnestTheme.pulse.streak,

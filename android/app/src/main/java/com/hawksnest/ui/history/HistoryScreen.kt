@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import com.hawksnest.core.logic.historyCategoryLabel
 import com.hawksnest.ui.components.shimmer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.width
@@ -48,9 +49,6 @@ private data class HistoryRange(val label: String, val hours: Int)
 private val RANGES =
     listOf(HistoryRange("24h", 24), HistoryRange("7d", 24 * 7), HistoryRange("30d", 24 * 30))
 
-// Float the most useful event domains to the front of the chip row.
-private val DOMAIN_ORDER = listOf("camera", "binary_sensor", "lock", "alarm_control_panel", "light")
-
 /**
  * History hub — a filterable, day-grouped activity timeline over HA's logbook. Range + category
  * chips narrow the feed; each event taps through to its entity. Ported from the web `HistoryScreen`
@@ -81,7 +79,7 @@ fun HistoryScreen(
         contentPadding = PaddingValues(HawksnestTheme.spacing.lg),
         verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
     ) {
-        item { SectionHeader("Activity", channel = pulse.streak) }
+        item { SectionHeader("History", channel = pulse.streak) }
 
         item {
             Row(
@@ -98,7 +96,7 @@ fun HistoryScreen(
             is HistoryFeed.Loading -> item { HistorySkeleton() }
             is HistoryFeed.Error -> item { InfoCard("Couldn't load history.") }
             is HistoryFeed.Loaded -> {
-                val domains = presentDomains(f.events)
+                val domains = f.domains
                 if (domains.isNotEmpty()) {
                     item {
                         Row(
@@ -107,12 +105,13 @@ fun HistoryScreen(
                         ) {
                             Chip("All", active = domain == "all", channel = pulse.effort) { viewModel.setDomain("all") }
                             domains.forEach { d ->
-                                Chip(prettyDomain(d), active = domain == d, channel = pulse.effort) { viewModel.setDomain(d) }
+                                Chip(historyCategoryLabel(d), active = domain == d, channel = pulse.effort) { viewModel.setDomain(d) }
                             }
                         }
                     }
                 }
-                val shown = if (domain == "all") f.events else f.events.filter { it.domain == domain }
+                // Already filtered to the chosen category, before the cap (see HistoryViewModel).
+                val shown = f.events
                 if (shown.isEmpty()) {
                     item { InfoCard("No events in this window.") }
                 } else {
@@ -215,16 +214,6 @@ private fun Chip(label: String, active: Boolean, channel: Color, onClick: () -> 
             .padding(horizontal = HawksnestTheme.spacing.sm, vertical = HawksnestTheme.spacing.xs),
     )
 }
-
-private fun presentDomains(events: List<LogEvent>): List<String> {
-    val seen = events.mapNotNull { it.domain }.toSet()
-    return seen.sortedWith(
-        compareBy({ DOMAIN_ORDER.indexOf(it).let { i -> if (i == -1) 99 else i } }, { it }),
-    )
-}
-
-private fun prettyDomain(domain: String): String =
-    domain.split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
 
 private fun domainChannel(domain: String?, pulse: PulseColors): Color = when (domain) {
     "lock", "cover", "alarm_control_panel" -> pulse.recovery

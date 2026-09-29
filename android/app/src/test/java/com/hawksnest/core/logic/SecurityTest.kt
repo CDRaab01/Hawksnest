@@ -144,4 +144,12 @@ class SecurityTest {
         assertFalse(r.allClear)
         assertEquals("Garage open", r.summary)
     }
+
+    @Test
+    fun `a contact named for its state is not doubled`() {
+        kotlin.test.assertEquals("Garage bay main open", withState("Garage bay main open", "open"))
+        kotlin.test.assertEquals("Garage open", withState("Garage", "open"))
+        kotlin.test.assertEquals("Back Door unlocked", withState("Back Door", "unlocked"))
+        kotlin.test.assertEquals("Reopened door open", withState("Reopened door", "open"))
+    }
 }

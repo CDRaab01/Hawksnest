@@ -18,7 +18,20 @@ data class CameraTarget(
     val cameraId: String,
     val eventId: String? = null,
     val start: CameraStart = CameraStart.LIVE,
-)
+    /** When the tap asked for it (epoch ms). See [isFresh]. */
+    val atMs: Long = System.currentTimeMillis(),
+) {
+    /**
+     * Whether the request is still worth acting on. Home opens the camera once its camera list has
+     * loaded; with HA unreachable that can be minutes later, and a camera popping open long after
+     * the tap reads as the app doing something on its own. Past [CAMERA_TARGET_TTL_MS] the request
+     * is dropped and the owner stays where they are.
+     */
+    fun isFresh(nowMs: Long): Boolean = nowMs - atMs <= CAMERA_TARGET_TTL_MS
+}
+
+/** A minute: a cold start plus a slow first connect fits well inside it. */
+const val CAMERA_TARGET_TTL_MS = 60_000L
 
 /** A notification's own words, pinned over Home when an alarm that went off is tapped. */
 data class AlertBanner(val title: String, val body: String)

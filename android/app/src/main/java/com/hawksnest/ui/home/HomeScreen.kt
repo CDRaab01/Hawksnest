@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,11 +60,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.logic.ALARM_TRANSITIONAL
 import com.hawksnest.core.logic.ARM_BUTTONS
+import com.hawksnest.core.logic.TilePicture
 import com.hawksnest.core.logic.armButtonEnabled
 import com.hawksnest.core.logic.alarmView
 import com.hawksnest.core.logic.aspectFromDimensions
 import com.hawksnest.core.logic.DEFAULT_ASPECT
+import com.hawksnest.core.logic.cameraCountLabel
 import com.hawksnest.core.logic.isWideAspect
+import com.hawksnest.core.logic.tilePicture
 import com.hawksnest.core.logic.wallRows
 import com.hawksnest.core.logic.graceExpired
 import com.hawksnest.core.logic.relativeTime
@@ -151,7 +155,9 @@ fun HomeScreen(
         val target = pushCamera
         // Wait for the camera list before acting; once we can, open the match (if any)
         // and consume so it fires exactly once (unknown camera → just lands on Home).
-        if (target != null && ui.cameras.isNotEmpty()) {
+        if (target != null && !target.isFresh(System.currentTimeMillis())) {
+            viewModel.consumePushTarget()
+        } else if (target != null && ui.cameras.isNotEmpty()) {
             ui.cameras.firstOrNull { it.id == target.cameraId }?.let {
                 // eventId null for doorbell/alarm taps — those open live, as before.
                 viewModel.openLightbox(ui.cameras, it, target.eventId, target.start)
@@ -289,6 +295,13 @@ private fun HomeContent(
     // looping recomposition.
     var cameraAspects by remember { mutableStateOf(mapOf<String, Float>()) }
     var wideCameraIds by remember { mutableStateOf(setOf<String>()) }
+    // What each tile's own snapshot fetches have seen, by camera id. Hoisted out of the tiles so
+    // the header counts exactly the states the tiles show; the two used to disagree ("14/14 live"
+    // over a black tile).
+    val fetches = remember { mutableStateMapOf<String, TileFetch>() }
+    // Recomputed on every refresh tick (the buckets change every 10 s), which is also what lets a
+    // picture age into STALE while nothing else on screen changes.
+    val nowMs = System.currentTimeMillis()
     val ring = ui.doorbell
     Column(
         modifier = modifier,
@@ -323,7 +336,7 @@ private fun HomeContent(
                 channel = HawksnestTheme.pulse.effort,
                 trailing = {
                     Text(
-                        "${ui.liveCameraCount}/${ui.cameras.size} live",
+                        cameraCountLabel(ui.cameras.map { tileView(it, fetches[it.id], nowMs).state }),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -337,10 +350,19 @@ private fun HomeContent(
                     rowCams.forEach { cam ->
                         CameraTile(
                             cam = cam,
+                            view = tileView(cam, fetches[cam.id], nowMs),
                             // A Frigate camera that sleeps (battery, behind a Home Hub) rides the
                             // shared beat like Ring: its frame is not current the instant it is
                             // asked for, so the on-open tick would buy the same stale image twice.
                             snapshotModel = bustCache(cam.snapshotUrl, snapshotBucket(cam.isFrigate && !cam.isBattery, sharedBucket, onOpenBucket)),
+                            onSnapshotResult = { ok ->
+                                val before = fetches[cam.id] ?: TileFetch()
+                                fetches[cam.id] = if (ok) {
+                                    TileFetch(okAtMs = System.currentTimeMillis(), failed = false)
+                                } else {
+                                    before.copy(failed = true)
+                                }
+                            },
                             onClick = { onOpenLightbox(cam) },
                             aspect = cameraAspects[cam.id] ?: DEFAULT_ASPECT,
                             onAspect = { ratio ->
@@ -543,7 +565,9 @@ private fun ArmCircle(
 @Composable
 private fun CameraTile(
     cam: CameraUi,
+    view: TileView,
     snapshotModel: String?,
+    onSnapshotResult: (Boolean) -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     /** The picture's measured shape; [DEFAULT_ASPECT] until a frame decodes. */
@@ -565,10 +589,21 @@ private fun CameraTile(
             // filling it beats hairline bars. It is wrong for a 32:9 panorama, where it kept only
             // the centre ~50% and cropped one lens off entirely.
             val scale = if (isWideAspect(aspect)) ContentScale.Fit else ContentScale.Crop
-            // Prefer the frame captured while the user last watched this camera live (LiveFrameStore)
-            // over ring-mqtt's stale interval snapshot — so a tile updates to "what I just saw live"
-            // the moment they return to the grid. Falls back to the refreshing snapshot until then.
-            val liveFrame = LiveFrameStore.get(cam.id)
+            // The snapshot always keeps fetching underneath, even while a live frame covers it, so
+            // it can take over once it is the newer picture. A parked battery camera gets no fetch
+            // at all: Frigate answers with its grey error image (at HTTP 200) while the pipeline
+            // is off, which would decode as a "frame"; its last live frame is the truthful picture.
+            CameraSnapshot(
+                model = if (cam.asleep) null else snapshotModel,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = scale,
+                onAspect = onAspect,
+                onResult = onSnapshotResult,
+            )
+            // The frame grabbed while the owner last watched this camera live (LiveFrameStore),
+            // shown only while it is newer than the snapshot. It used to win for the life of the
+            // process, so a camera watched this morning showed this morning's picture all day.
+            val liveFrame = view.liveFrame
             if (liveFrame != null) {
                 LaunchedEffect(liveFrame.bitmap.width, liveFrame.bitmap.height) {
                     aspectFromDimensions(liveFrame.bitmap.width, liveFrame.bitmap.height)
@@ -579,16 +614,6 @@ private fun CameraTile(
                     contentDescription = "Camera snapshot",
                     contentScale = scale,
                     modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                // A parked battery camera gets no fetch at all: Frigate answers with its grey
-                // error image (at HTTP 200) while the pipeline is off, which would decode as a
-                // "frame". The last live frame above, if any, is the truthful picture.
-                CameraSnapshot(
-                    model = if (cam.asleep) null else snapshotModel,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = scale,
-                    onAspect = onAspect,
                 )
             }
             // A camera HA reports unavailable (a closed/offline Ring camera that can't serve a
@@ -619,16 +644,20 @@ private fun CameraTile(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
             ) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(if (live && !cam.asleep) pulse.recovery else Color.White.copy(alpha = 0.4f)))
-                // Ring-style age badge. When we're showing a frame captured from the live view, stamp
-                // ITS grab time (so a just-watched battery cam reads "now", not the 7h-old snapshot);
-                // otherwise the snapshot's age. Falls back to LIVE/— when we have no time at all.
-                // A sleeping camera's snapshot age would lie (HA re-publishes the entity without a
-                // new frame), so it reports when its motion sensor last moved instead.
+                // Green only for a picture that is actually current (see core/logic/CameraTiles.kt).
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (view.state == TilePicture.LIVE) pulse.recovery else Color.White.copy(alpha = 0.4f)))
+                // The age of the PICTURE: when a Frigate snapshot was fetched, a Ring snapshot's own
+                // update time, or when a live frame was grabbed. Never HA's token rotation, which
+                // made every wired tile read "2m ago" at once. A sleeping camera's last picture is
+                // old by design, so it reports when its motion sensor last moved instead.
+                val age = view.pictureAtMs?.let { relativeTime(it) }
                 Text(
-                    when {
-                        cam.asleep -> cam.motionChangedMs?.let { "Motion ${relativeTime(it)}" } ?: "Asleep"
-                        else -> (liveFrame?.capturedAtMs ?: cam.lastChangedMs)?.let { relativeTime(it) } ?: if (live) "LIVE" else "—"
+                    when (view.state) {
+                        TilePicture.ASLEEP -> cam.motionChangedMs?.let { "Motion ${relativeTime(it)}" } ?: "Asleep"
+                        TilePicture.NO_SIGNAL -> "—"
+                        TilePicture.LOADING -> "Loading"
+                        TilePicture.LIVE -> age ?: "Live"
+                        TilePicture.STALE -> if (view.refreshFailed) "Not updating" + (age?.let { " · $it" } ?: "") else age ?: "Stale"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White.copy(alpha = 0.9f),
@@ -645,6 +674,50 @@ private fun CameraTile(
             }
         }
     }
+}
+
+/** What a tile's own snapshot fetches have seen: when a frame last decoded, and whether the latest
+ *  refresh failed. */
+private data class TileFetch(val okAtMs: Long? = null, val failed: Boolean = false)
+
+/** Everything a tile shows about its picture, computed once and shared with the header count. */
+private data class TileView(
+    val state: TilePicture,
+    val pictureAtMs: Long?,
+    val refreshFailed: Boolean,
+    /** The grabbed live frame, when it is the newer picture and should cover the snapshot. */
+    val liveFrame: com.hawksnest.ui.cameras.LiveFrame?,
+)
+
+/**
+ * Which picture a tile shows and how old it is. A Frigate snapshot is Frigate's current frame, so
+ * its age is when it was fetched; a Ring snapshot is ring-mqtt's stored image, so its age is the
+ * entity's own update time. A live frame grabbed while watching wins only while it is newer.
+ */
+private fun tileView(cam: CameraUi, fetch: TileFetch?, nowMs: Long): TileView {
+    val loadedAt = fetch?.okAtMs
+    val snapshotAt = when {
+        loadedAt == null -> null
+        cam.isFrigate -> loadedAt
+        else -> cam.lastChangedMs
+    }
+    val grabbed = LiveFrameStore.get(cam.id)
+    val showGrabbed = grabbed != null && (cam.asleep || loadedAt == null || snapshotAt == null || grabbed.capturedAtMs > snapshotAt)
+    val refreshFailed = !showGrabbed && fetch?.failed == true
+    val pictureAt = if (showGrabbed) grabbed!!.capturedAtMs else snapshotAt
+    return TileView(
+        state = tilePicture(
+            haAvailable = cam.live,
+            asleep = cam.asleep,
+            hasPicture = showGrabbed || loadedAt != null,
+            lastFetchFailed = refreshFailed,
+            pictureAtMs = pictureAt,
+            nowMs = nowMs,
+        ),
+        pictureAtMs = pictureAt,
+        refreshFailed = refreshFailed,
+        liveFrame = grabbed.takeIf { showGrabbed },
+    )
 }
 
 /**

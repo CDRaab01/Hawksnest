@@ -63,8 +63,8 @@ fun securityReadout(
             it.stringAttr("device_class") in DOOR_CLASSES && it.state == "on" &&
             deviceByEntity[it.entityId] !in lockDevices
     }
-    val parts = unlocked.map { "${label(it)} unlocked" } +
-        openDoors.map { "${label(it)} open" }
+    val parts = unlocked.map { withState(label(it), "unlocked") } +
+        openDoors.map { withState(label(it), "open") }
     val allClear = parts.isEmpty()
     val summary = if (allClear) "All doors locked" else parts.joinToString(" · ")
 
@@ -89,3 +89,14 @@ fun securityReadout(
         offlineLabel = offlineLabel,
     )
 }
+
+/**
+ * "[name] [state]", unless the name already ends with the state. A contact named for its job
+ * ("Garage bay main open") read "Garage bay main open open".
+ */
+internal fun withState(name: String, state: String): String =
+    if (name.trim().endsWith(" $state", ignoreCase = true) || name.trim().equals(state, ignoreCase = true)) {
+        name.trim()
+    } else {
+        "$name $state"
+    }

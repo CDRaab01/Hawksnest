@@ -29,7 +29,9 @@ private val PLACEHOLDER = Brush.verticalGradient(listOf(Color(0xFF2A2F37), Color
  *
  * To avoid the tile flashing black on every refresh, we keep the last successfully-decoded frame
  * painted underneath and only let the new frame replace it once it has loaded. A failed refresh
- * leaves the last good frame in place rather than blanking to black.
+ * leaves the last good frame in place rather than blanking to black, and reports through
+ * [onResult] so the caller can say the picture is no longer current instead of passing it off as
+ * live.
  */
 @Composable
 fun CameraSnapshot(
@@ -46,6 +48,9 @@ fun CameraSnapshot(
     /** The decoded frame's intrinsic ratio, once known — the still-image analogue of a
      *  renderer's frame-size callback. */
     onAspect: ((Float) -> Unit)? = null,
+    /** Each fetch's outcome: true when a frame decoded, false when it failed. The frame stays on
+     *  screen either way, so this is how a caller learns the picture has stopped updating. */
+    onResult: ((Boolean) -> Unit)? = null,
 ) {
     if (model == null) {
         Box(modifier.background(PLACEHOLDER))
@@ -77,11 +82,15 @@ fun CameraSnapshot(
                     is AsyncImagePainter.State.Success -> {
                         lastLoaded = model
                         failed = false
+                        onResult?.invoke(true)
                         // naturalWidth/naturalHeight's analogue: the decoded drawable's own size.
                         val d = state.result.drawable
                         aspectFromDimensions(d.intrinsicWidth, d.intrinsicHeight)?.let { onAspect?.invoke(it) }
                     }
-                    is AsyncImagePainter.State.Error -> if (lastLoaded == null) failed = true
+                    is AsyncImagePainter.State.Error -> {
+                        if (lastLoaded == null) failed = true
+                        onResult?.invoke(false)
+                    }
                     else -> Unit
                 }
             },

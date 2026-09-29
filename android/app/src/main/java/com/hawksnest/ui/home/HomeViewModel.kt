@@ -93,7 +93,6 @@ data class HomeUi(
     val secureAllClear: Boolean = true,
     val offlineLabel: String? = null,
     val cameras: List<CameraUi> = emptyList(),
-    val liveCameraCount: Int = 0,
     /** The most recent active doorbell ring, if any (drives the doorbell banner). */
     val doorbell: DoorbellPress? = null,
     val roomCount: Int = 0,
@@ -266,7 +265,6 @@ class HomeViewModel @Inject constructor(
             secureAllClear = if (disconnected) false else security.allClear,
             offlineLabel = if (disconnected) null else security.offlineLabel,
             cameras = cameras,
-            liveCameraCount = cameras.count { it.live },
             doorbell = doorbell,
             roomCount = rooms.size,
             roomsPreview = rooms.take(4).joinToString(" · ") { it.area },

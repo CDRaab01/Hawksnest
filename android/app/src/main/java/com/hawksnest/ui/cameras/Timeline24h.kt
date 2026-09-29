@@ -416,7 +416,8 @@ fun Timeline24h(
             Text(
                 // Say when the gaps between those moments are still watchable — otherwise a day
                 // with few events reads as a day with little footage.
-                "${events.size} moments" + if (footage.isNotEmpty()) " · 24/7" else "",
+                "${events.size} ${if (events.size == 1) "moment" else "moments"}" +
+                    if (footage.isNotEmpty()) " · 24/7" else "",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

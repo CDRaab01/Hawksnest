@@ -30,6 +30,30 @@ fun ruleToConfig(rule: Rule): JsonObject = buildJsonObject {
     putJsonArray("action") { rule.actions.forEach { add(actionToHa(it)) } }
 }
 
+/**
+ * The config to save for [rule], edited from the automation's [original] config (null for a new
+ * one). [ruleToConfig] writes only what the editor models, and saving that alone erased everything
+ * else the automation carried: its description, variables, `max`, trace settings. Those are now
+ * kept from [original], and the editor's fields replace their counterparts in either key style
+ * (`trigger` or HA's newer `triggers`), so HA never sees both.
+ *
+ * `mode` is the one modelled field that needs care: the editor knows only single and restart, and
+ * [configToRule] reads anything else (queued, parallel) as single. An original mode outside those
+ * two is kept.
+ */
+fun mergeRuleIntoConfig(original: JsonObject?, rule: Rule): JsonObject {
+    val edited = ruleToConfig(rule)
+    if (original == null) return edited
+    val kept = original.filterKeys { it !in MODELLED_KEYS }
+    val originalMode = str(original["mode"])
+    val mode = if (originalMode != null && originalMode !in EDITABLE_MODES) originalMode else rule.mode
+    return JsonObject(kept + edited + ("mode" to JsonPrimitive(mode)))
+}
+
+private val MODELLED_KEYS =
+    setOf("id", "alias", "mode", "trigger", "triggers", "condition", "conditions", "action", "actions")
+private val EDITABLE_MODES = setOf("single", "restart")
+
 private fun triggerToHa(t: RuleTrigger): JsonObject = buildJsonObject {
     when (t) {
         is RuleTrigger.State -> {

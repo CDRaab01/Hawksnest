@@ -64,7 +64,9 @@ fun CameraLightbox(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.96f))
+            // Opaque: at 96% Home's tiles and room card showed through below the controls, which read
+            // as a second, ghostly screen rather than a player.
+            .background(Color.Black)
             .verticalScroll(rememberScrollState()),
         contentAlignment = Alignment.Center,
     ) {

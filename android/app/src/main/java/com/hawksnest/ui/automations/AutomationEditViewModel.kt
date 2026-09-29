@@ -8,7 +8,7 @@ import com.hawksnest.core.automations.Rule
 import com.hawksnest.core.automations.RuleTrigger
 import com.hawksnest.core.automations.configToRule
 import com.hawksnest.core.automations.newRule
-import com.hawksnest.core.automations.ruleToConfig
+import com.hawksnest.core.automations.mergeRuleIntoConfig
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.stringAttr
@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import javax.inject.Inject
@@ -44,7 +45,7 @@ sealed interface EditState {
 
 /**
  * Backs the automation builder. Loads an existing config (→ [configToRule]) into an editable [Rule],
- * or starts a fresh one; converts the [Rule] back to an HA config ([ruleToConfig]) and writes it via
+ * or starts a fresh one; converts the [Rule] back to an HA config ([mergeRuleIntoConfig]) and writes it via
  * the Config API on save. A config outside the V1 subset shows the read-only "edit in HA" fallback.
  */
 @HiltViewModel
@@ -93,6 +94,9 @@ class AutomationEditViewModel @Inject constructor(
         if (!isNew) load()
     }
 
+    /** The config as loaded, so a save keeps what the editor doesn't model (see mergeRuleIntoConfig). */
+    private var originalConfig: JsonObject? = null
+
     private fun load() {
         viewModelScope.launch {
             _state.value = EditState.Loading
@@ -104,6 +108,7 @@ class AutomationEditViewModel @Inject constructor(
                 _state.value = EditState.Failed("That automation no longer exists.")
                 return@launch
             }
+            originalConfig = config
             val rule = configToRule(config)
             _state.value = if (rule != null) {
                 EditState.Editing(rule, isNew = false)
@@ -127,7 +132,7 @@ class AutomationEditViewModel @Inject constructor(
         viewModelScope.launch {
             _busy.value = true
             val result = runCatching {
-                connection.saveAutomationConfig(ruleToConfig(rule.copy(alias = rule.alias.trim())))
+                connection.saveAutomationConfig(mergeRuleIntoConfig(originalConfig, rule.copy(alias = rule.alias.trim())))
             }
             if (result.isSuccess) {
                 // The Config REST POST returns on 2xx, but the new automation.* entity only

@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.LiveTier
 import com.hawksnest.core.logic.aspectFromDimensions
 import com.hawksnest.core.logic.canReachSpeaker
 import com.hawksnest.core.logic.DEFAULT_ASPECT
@@ -47,6 +48,8 @@ import com.hawksnest.core.logic.TimeWindow
 import com.hawksnest.core.logic.defaultSelection
 import com.hawksnest.core.logic.exportBounds
 import com.hawksnest.core.logic.frigateCameraName
+import com.hawksnest.core.logic.liveLabel
+import com.hawksnest.core.logic.liveTier
 import com.hawksnest.core.logic.nudge as nudgeClip
 import com.hawksnest.core.logic.setEdge as setClipEdge
 import com.hawksnest.core.logic.RecordedBackend
@@ -315,8 +318,11 @@ fun CameraPlayer(
     CameraVolumeKeys()
     CameraAudioFocus(active = !muted)
 
+    // Whether go2rtc serves a sub stream at all — NOT whether the relay is healthy. Asking the
+    // relay's breaker hid the toggle after one relay failure, which is exactly when switching to
+    // the lighter stream is the way out of the reduced fallback.
     val subAvailable: Boolean by produceState(false, cam.id) {
-        value = runCatching { viewModel.canGo2rtc("${cameraName}_sub") }.getOrDefault(false)
+        value = runCatching { viewModel.go2rtcLists("${cameraName}_sub") }.getOrDefault(false)
     }
     val useSub = qualityLow && subAvailable
     val go2rtcSrc = if (useSub) "${cameraName}_sub" else cameraName
@@ -343,6 +349,18 @@ fun CameraPlayer(
     val liveUrl: String? by produceState<String?>(null, cam.id, wantsHls) {
         value = if (wantsHls) viewModel.liveStreamUrl(cam.entityId) else null
     }
+    // Which rung of the live ladder is drawing the picture. The ladder below and the status label
+    // both read this one value, so "Live" can never be claimed by a fallback (core/logic/LiveTier).
+    val tier = liveTier(
+        canRtsp = canRtsp,
+        useSub = useSub,
+        canGo2rtc = canGo2rtc,
+        go2rtcFailed = go2rtcFailed,
+        canWebRtc = canWebRtc,
+        webRtcFailed = webRtcFailed,
+        hasHlsUrl = liveUrl != null,
+        hasMjpeg = cam.streamUrl != null,
+    )
 
     val isLive = playhead == null
 
@@ -572,7 +590,12 @@ fun CameraPlayer(
                 )
             }
             if (isLive && subAvailable) {
-                QualityToggle(low = qualityLow, onChange = { qualityLow = it })
+                QualityToggle(
+                    low = qualityLow,
+                    // Choosing a quality is also a retry: after the relay fell through to the
+                    // reduced stream, Low is the lighter stream most likely to get through.
+                    onChange = { qualityLow = it; go2rtcFailed = false },
+                )
             }
             MuteButton(muted = muted, onToggle = { muted = !muted })
             FullscreenButton(active = fullscreen, onToggle = { fullscreen = !fullscreen })
@@ -617,17 +640,18 @@ fun CameraPlayer(
             }
             cam.sirenSwitchId?.let { sirenId -> SirenButton(sirenId, viewModel) }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                val label = liveLabel(tier)
                 Box(
                     Modifier
                         .size(8.dp)
                         .clip(CircleShape)
                         .background(
-                            if (isLive) HawksnestTheme.pulse.recovery
+                            if (isLive && label.realtime) HawksnestTheme.pulse.recovery
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
                 )
                 Text(
-                    if (isLive) "Live" else "Recorded",
+                    if (isLive) label.text else "Recorded",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -740,8 +764,8 @@ fun CameraPlayer(
                 },
                 modifier = frame,
             )
-            // Low quality bypasses RTSP-direct (it plays the main stream) — see `useSub`.
-            isLive && canRtsp && !useSub -> RtspPlayer(
+            // Every live arm below keys on `tier`, the same value the status label reads.
+            isLive && tier == LiveTier.DIRECT -> RtspPlayer(
                 url = rtspUrl!!,
                 camera = cameraName,
                 onFail = { rtspFailed = true },
@@ -749,7 +773,7 @@ fun CameraPlayer(
                 onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
             )
-            isLive && (canGo2rtc == true || useSub) && !go2rtcFailed -> Go2rtcPlayer(
+            isLive && tier == LiveTier.RELAY -> Go2rtcPlayer(
                 src = go2rtcSrc,
                 cameraId = cam.id,
                 baseUrl = viewModel.baseUrl(),
@@ -765,7 +789,7 @@ fun CameraPlayer(
             // `canGo2rtc != null` holds this arm while the stream list is in flight. Starting an HA
             // WebRTC negotiation only to tear it down when go2rtc turns out to be available wastes
             // the PeerConnection; the snapshot arm below renders for the (cached, sub-second) wait.
-            isLive && canGo2rtc != null && canWebRtc && !webRtcFailed -> WebRtcPlayer(
+            isLive && tier == LiveTier.HA_WEBRTC -> WebRtcPlayer(
                 entityId = cam.entityId,
                 cameraId = cam.id,
                 viewModel = viewModel,
@@ -778,7 +802,7 @@ fun CameraPlayer(
             // live = true pins the HLS feed near the live edge (no fast-forward catch-up). loop
             // stays true so the demo clip — DEMO_CLIP_URI, which VideoPlayer excludes from live
             // handling — keeps looping as a fake-live feed.
-            liveUrl != null -> VideoPlayer(
+            tier == LiveTier.HLS -> VideoPlayer(
                 liveUrl!!,
                 frame,
                 loop = true,
@@ -786,7 +810,7 @@ fun CameraPlayer(
                 muted = muted,
                 onVideoSize = viewModel::reportVideoSize,
             )
-            cam.streamUrl != null -> MjpegView(
+            (tier == LiveTier.MJPEG || tier == LiveTier.RESOLVING) && cam.streamUrl != null -> MjpegView(
                 streamUrl = cam.streamUrl!!,
                 snapshotUrl = cam.snapshotUrl,
                 onVideoSize = viewModel::reportVideoSize,
