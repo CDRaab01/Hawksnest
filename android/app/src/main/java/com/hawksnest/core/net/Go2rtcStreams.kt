@@ -85,6 +85,13 @@ class Go2rtcStreams internal constructor(
         return true
     }
 
+    /**
+     * Whether go2rtc's (fetched) list names [src], ignoring the media breaker. The Low/High toggle
+     * asks this rather than [maybeAvailable]: after one relay failure the breaker hid the toggle,
+     * which was exactly when switching to the lighter sub stream was the way out of the fallback.
+     */
+    fun listed(src: String): Boolean = streamsCache?.contains(src) == true
+
     /** Test seam: drop the cached list so cases don't leak into each other. */
     internal fun resetForTest() {
         streamsCache = null

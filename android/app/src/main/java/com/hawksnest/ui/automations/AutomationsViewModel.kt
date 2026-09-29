@@ -3,6 +3,7 @@ package com.hawksnest.ui.automations
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hawksnest.config.overrides
+import com.hawksnest.core.automations.isSystemAutomation
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.HassEntity
@@ -30,6 +31,9 @@ data class AutomationUi(
     val lastTriggered: String,
     /** HA Config-API id (from the entity's `id` attribute); null → not editable in Hawksnest. */
     val configId: String?,
+    /** Deployed by hawksnest-automation to keep the house running; no Run button (see
+     *  [isSystemAutomation]). */
+    val system: Boolean = false,
 )
 
 /**
@@ -50,15 +54,18 @@ class AutomationsViewModel @Inject constructor(
             entities.values
                 .filter { domainOf(it.entityId) == "automation" }
                 .map { e ->
+                    val name = resolveName(e, overrides)
                     AutomationUi(
                         entityId = e.entityId,
-                        name = resolveName(e, overrides),
+                        name = name,
                         enabled = e.state == "on",
                         lastTriggered = lastTriggeredLabel(e),
                         configId = e.stringAttr("id"),
+                        system = isSystemAutomation(e.stringAttr("friendly_name") ?: name),
                     )
                 }
-                .sortedBy { it.name.lowercase() }
+                // Household automations first; the system ones the owner rarely touches below them.
+                .sortedWith(compareBy({ it.system }, { it.name.lowercase() }))
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val isDemo: StateFlow<Boolean> =

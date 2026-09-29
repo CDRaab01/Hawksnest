@@ -70,8 +70,9 @@ fun AppearancePanel(
             }
         }
         Text(
-            "System follows your phone's day/night setting. Dark is the design default — the " +
-                "palette was built for an OLED panel in a dark room.",
+            // It said "Dark is the design default" while the default is System.
+            "System follows your phone's day/night setting. The palette was designed dark first, " +
+                "for an OLED panel in a dark room.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),

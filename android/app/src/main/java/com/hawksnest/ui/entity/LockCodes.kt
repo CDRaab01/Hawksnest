@@ -34,6 +34,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hawksnest.ui.components.ConfirmDialog
 import java.time.LocalDate
 import java.time.YearMonth
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -188,6 +189,19 @@ fun LockCodes(viewModel: LockCodesViewModel = hiltViewModel()) {
         }
     }
 
+    // The guest a Revoke tap is asking about, until the owner confirms or cancels.
+    var revoking by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    val revokingGuest = revoking?.let { (slot, _) -> guests.firstOrNull { it.slot == slot } }
+    revoking?.let { (slot, automationId) ->
+        ConfirmDialog(
+            title = "Revoke ${revokingGuest?.name ?: "this guest"}'s code?",
+            text = "The code stops opening the door right away, and slot $slot is cleared on the lock.",
+            confirmLabel = "Revoke",
+            onConfirm = { viewModel.revokeGuest(slot, automationId) },
+            onDismiss = { revoking = null },
+        )
+    }
+
     PanelCard {
         OWNER_SLOTS.forEach { s ->
             OwnerSlotRow(s.slot, s.label, onSet = { viewModel.setCode(s.slot, it, s.label) }, onClear = { viewModel.clearCode(s.slot, s.label) })
@@ -207,7 +221,7 @@ fun LockCodes(viewModel: LockCodesViewModel = hiltViewModel()) {
                 }
                 PulseButton(
                     "Revoke",
-                    onClick = { viewModel.revokeGuest(g.slot, g.automationId) },
+                    onClick = { revoking = g.slot to g.automationId },
                     tonal = true,
                     compact = true,
                     leadingIcon = {
@@ -234,6 +248,7 @@ fun LockCodes(viewModel: LockCodesViewModel = hiltViewModel()) {
 
 @Composable
 private fun OwnerSlotRow(slot: Int, label: String, onSet: (String) -> Unit, onClear: () -> Unit) {
+    var confirmClear by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf("") }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = HawksnestTheme.spacing.sm),
@@ -254,7 +269,17 @@ private fun OwnerSlotRow(slot: Int, label: String, onSet: (String) -> Unit, onCl
             modifier = Modifier.width(110.dp),
         )
         PulseButton("Set", onClick = { onSet(code); code = "" }, tonal = true, compact = true)
-        PulseButton("Clear", onClick = onClear, tonal = true, compact = true)
+        PulseButton("Clear", onClick = { confirmClear = true }, tonal = true, compact = true)
+    }
+    if (confirmClear) {
+        ConfirmDialog(
+            title = "Clear the $label code?",
+            text = "Slot $slot is erased on the lock. Whoever uses that code can't open the door " +
+                "with it until a new one is set.",
+            confirmLabel = "Clear code",
+            onConfirm = onClear,
+            onDismiss = { confirmClear = false },
+        )
     }
 }
 

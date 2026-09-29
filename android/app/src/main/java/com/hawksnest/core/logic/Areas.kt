@@ -23,7 +23,7 @@ fun groupByArea(
     val groups = LinkedHashMap<String, MutableList<HassEntity>>()
     for (entity in entities) {
         if (entity.entityId in hidden) continue
-        val area = areas[entity.entityId] ?: "Unassigned"
+        val area = areas[entity.entityId] ?: UNASSIGNED_AREA
         groups.getOrPut(area) { mutableListOf() }.add(entity)
     }
     return groups.keys
@@ -38,3 +38,16 @@ fun groupByArea(
         })
         .map { AreaGroup(it, groups.getValue(it)) }
 }
+
+/**
+ * The entities a room screen shows for [area]: those HA assigns to it, or for [UNASSIGNED_AREA]
+ * those it assigns to no room at all. [groupByArea] files area-less entities under that label, but
+ * the room screen looked the label up as if it were an HA area, found nothing, and opened blank
+ * over 159 entities.
+ */
+fun entityIdsInArea(area: String, entityIds: Collection<String>, areas: AreaRegistry): Set<String> =
+    if (area == UNASSIGNED_AREA) {
+        entityIds.filterTo(mutableSetOf()) { areas[it] == null || areas[it] == UNASSIGNED_AREA }
+    } else {
+        entityIds.filterTo(mutableSetOf()) { areas[it] == area }
+    }

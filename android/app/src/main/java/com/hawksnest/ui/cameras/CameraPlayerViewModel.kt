@@ -224,6 +224,12 @@ class CameraPlayerViewModel @Inject constructor(
         return go2rtcStreams.maybeAvailable(cameraName)
     }
 
+    /** Whether go2rtc serves [streamName] at all, whatever the relay's recent health. */
+    suspend fun go2rtcLists(streamName: String): Boolean {
+        go2rtcStreams.prime(baseUrl())
+        return go2rtcStreams.listed(streamName)
+    }
+
     /**
      * The direct-to-camera RTSP URL for [cameraName], or null when the tier doesn't apply.
      *

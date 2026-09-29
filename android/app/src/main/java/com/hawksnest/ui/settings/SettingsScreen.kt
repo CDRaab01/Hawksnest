@@ -41,6 +41,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.BuildConfig
+import com.hawksnest.ui.components.ConfirmDialog
 import com.hawksnest.ui.components.ConnectionPill
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.PulseButton
@@ -167,9 +168,20 @@ fun SettingsScreen(
                     enabled = url.isNotBlank() && (token.isNotBlank() || hasToken),
                 )
                 if (hasToken) {
+                    var confirmDisconnect by remember { mutableStateOf(false) }
+                    if (confirmDisconnect) {
+                        ConfirmDialog(
+                            title = "Disconnect from Home Assistant?",
+                            text = "The saved token is erased from this phone and the app switches " +
+                                "to demo data. Widgets stop working until you paste a token again.",
+                            confirmLabel = "Disconnect",
+                            onConfirm = { viewModel.disconnect() },
+                            onDismiss = { confirmDisconnect = false },
+                        )
+                    }
                     PulseButton(
                         text = "Disconnect",
-                        onClick = { viewModel.disconnect() },
+                        onClick = { confirmDisconnect = true },
                         modifier = Modifier.weight(1f),
                         tonal = true,
                         channel = HawksnestTheme.pulse.streak,
@@ -179,8 +191,11 @@ fun SettingsScreen(
                 }
             }
             Text(
-                "Create a token in Home Assistant → Profile → Long-lived access tokens. URL is the " +
-                    "Hawksnest proxy on your tailnet (…:8080) or your HA directly (…:8123). No token = demo data.",
+                // The release app talks HTTPS only, to the tailnet name its certificate is issued
+                // for. The old text pointed at :8080 and :8123, neither of which it will connect to.
+                "Create a token in Home Assistant → Profile → Long-lived access tokens. The Base URL " +
+                    "is Hawksnest's HTTPS address on your tailnet, https://<machine>.<tailnet>.ts.net:8443. " +
+                    "No token = demo data.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),

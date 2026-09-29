@@ -52,7 +52,8 @@ fun TailscalePanel(
         Text(
             "Hawksnest connects to Home Assistant over your tailnet — it doesn't run the VPN " +
                 "itself. Install the Tailscale app, sign in, and set the Base URL above to your " +
-                "tailnet host (a MagicDNS …ts.net name or a 100.x address).",
+                "tailnet host's HTTPS name (…ts.net:8443). A bare 100.x address won't pass the " +
+                "certificate check.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = HawksnestTheme.spacing.xs),

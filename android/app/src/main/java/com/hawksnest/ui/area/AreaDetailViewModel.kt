@@ -14,6 +14,7 @@ import com.hawksnest.core.logic.ReadonlyItem
 import com.hawksnest.core.logic.buildDeviceSections
 import com.hawksnest.core.logic.displayName
 import com.hawksnest.core.logic.domainToCard
+import com.hawksnest.core.logic.entityIdsInArea
 import com.hawksnest.core.logic.isPrimaryEntity
 import com.hawksnest.ui.components.DeviceUi
 import com.hawksnest.ui.devices.controlLabel
@@ -92,7 +93,7 @@ class AreaDetailViewModel @Inject constructor(
             )
         }
 
-        val ids = areas.filterValues { it == area }.keys
+        val ids = entityIdsInArea(area, entities.keys, areas)
         val shown = entities.values.filter {
             it.entityId in ids &&
                 isPrimaryEntity(it.entityId, categories) &&
