@@ -177,6 +177,8 @@ class SettingsViewModel @Inject constructor(
     fun disconnect() {
         viewModelScope.launch {
             credentialStore.clear()
+            // The camera account the server handed this phone goes with the token that fetched it.
+            directStreamSource.forget()
             connectionManager.reconnect()
         }
     }

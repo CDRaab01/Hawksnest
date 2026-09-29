@@ -75,6 +75,10 @@ class DirectStreamSource @Inject constructor(
         cached
     }
 
+    /** Drop what the server provided (on disconnect), so the camera password leaves memory with the
+     *  token that fetched it. The next [get] asks again. */
+    suspend fun forget() = mutex.withLock { publish(null, key = null, ttlMs = 0) }
+
     private fun publish(streams: DirectStreams?, key: String?, ttlMs: Long) {
         cached = streams
         cachedFor = key
