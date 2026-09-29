@@ -107,9 +107,9 @@ watchdog + "Connecting…" overlay for battery-camera wake, and the HLS tier res
 `camera/stream` URL **only when that tier is active** (an eager resolve wakes the camera twice)
 with a 15 s bound in `haSource`. Tile age badges use `snapshotFreshnessMs` (`timestamp` attr →
 `last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras. **Android
-dates a tile from its picture instead** (`core/logic/CameraTiles.kt`): a Frigate snapshot is
-Frigate's current frame, so its age is when this app fetched it; a Ring snapshot's is the entity's
-update time; a grabbed live frame covers the snapshot only while it is the newer picture. Every
+dates a tile from its picture instead** (`core/logic/CameraTiles.kt`): a ring-mqtt `_snapshot`
+is a stored image, so its age is the entity's update time; every other camera's snapshot (Frigate,
+the Reolink integration) is grabbed when asked for, so its age is when this app fetched it; a grabbed live frame covers the snapshot only while it is the newer picture. Every
 wired tile used to read "2m ago" at once, which was HA rotating the camera token. Each tile is
 LIVE, STALE (older than 6 min, or its last refresh failed), ASLEEP, NO_SIGNAL or LOADING, and the
 Cameras header counts those same states ("11 live · 2 asleep · 1 no signal") instead of HA

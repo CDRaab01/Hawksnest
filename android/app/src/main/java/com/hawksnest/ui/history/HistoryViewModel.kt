@@ -14,16 +14,18 @@ import com.hawksnest.core.logic.isPrimaryEntity
 import com.hawksnest.core.logic.prettifyEntityId
 import com.hawksnest.util.DevicePrefsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlinx.coroutines.withContext
 
 /** History feed state for the activity timeline. */
 sealed interface HistoryFeed {
@@ -73,17 +75,19 @@ class HistoryViewModel @Inject constructor(
 
     private val window = MutableStateFlow<Window>(Window.Loading)
 
-    val feed: StateFlow<HistoryFeed> = combine(window, _domain) { w, d ->
+    val feed: StateFlow<HistoryFeed> = combine(window, _domain, devicePrefs.renames) { w, d, renames ->
         when (w) {
             Window.Loading -> HistoryFeed.Loading
             Window.Error -> HistoryFeed.Error
             is Window.Loaded -> {
                 val chosen = if (d == "all") w.events else w.events.filter { it.domain == d }
                 val capped = capLogbook(chosen)
-                HistoryFeed.Loaded(capped.events, capped.truncated, presentDomains(w.events))
+                // Named and worded AFTER the cap: only the 500 kept rows, not the whole window.
+                // Doing it to every event first made the screen load visibly slower.
+                HistoryFeed.Loaded(humanize(capped.events, renames), capped.truncated, presentDomains(w.events))
             }
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, HistoryFeed.Loading)
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, HistoryFeed.Loading)
 
     init {
         viewModelScope.launch {
@@ -105,9 +109,12 @@ class HistoryViewModel @Inject constructor(
             // `*_info`, `*_battery`, … spam) so the timeline shows meaningful state changes, not
             // noise. `*_last_activity` is untagged by ring-mqtt, so a category-only check isn't enough.
             val categories = connection.state.entityCategories.value
-            val events = connection.fetchLogbook(start, end)
-                .filter { it.entityId == null || isPrimaryEntity(it.entityId!!, categories) }
-            Window.Loaded(humanize(events))
+            val fetched = connection.fetchLogbook(start, end)
+            // Off the main thread: a day of this house's logbook is tens of thousands of rows.
+            val events = withContext(Dispatchers.Default) {
+                fetched.filter { it.entityId == null || isPrimaryEntity(it.entityId!!, categories) }
+            }
+            Window.Loaded(events)
         } catch (_: Exception) {
             // Note this cannot catch an OutOfMemoryError — that is an Error, not an Exception, and
             // is exactly how the unbounded version took the app down rather than showing this.
@@ -120,10 +127,9 @@ class HistoryViewModel @Inject constructor(
      * names), and word a bare state change for what the device is. HA's own message, when it sent
      * one (an automation's "triggered by …"), is kept as is.
      */
-    private suspend fun humanize(events: List<LogEvent>): List<LogEvent> {
+    private fun humanize(events: List<LogEvent>, renames: Map<String, String>): List<LogEvent> {
         val entities = connection.state.entities.value
         val devices = connection.state.devices.value
-        val renames = devicePrefs.renames.first()
         return events.map { ev ->
             val id = ev.entityId ?: return@map ev
             val entity = entities[id]

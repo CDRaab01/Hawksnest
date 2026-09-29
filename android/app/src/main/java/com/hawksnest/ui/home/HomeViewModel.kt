@@ -80,6 +80,12 @@ data class CameraUi(
      * sleeping camera's badge, in place of a snapshot age that would lie.
      */
     val motionChangedMs: Long? = null,
+    /**
+     * The tile's picture is ring-mqtt's stored `_snapshot` image, taken on ring-mqtt's own schedule,
+     * so its age is the entity's update time. Every other camera's picture (Frigate, the Reolink
+     * integration) is grabbed when it is asked for, so its age is when the app fetched it.
+     */
+    val storedSnapshot: Boolean = false,
 )
 
 data class HomeUi(
@@ -244,6 +250,7 @@ class HomeViewModel @Inject constructor(
                 // Ring tile (whose `idle` means nothing of the sort) is untouched.
                 asleep = isFrigateCamera(lc.liveEntity) && lc.isBattery && lc.snapshotEntity.state == "idle",
                 motionChangedMs = lc.motionId?.let { entities[it] }?.let { haTimeMs(it.lastChanged) },
+                storedSnapshot = lc.snapshotEntity.entityId.endsWith("_snapshot"),
             )
         }
         val doorbell = activeDoorbellPress(logical, entities, System.currentTimeMillis())

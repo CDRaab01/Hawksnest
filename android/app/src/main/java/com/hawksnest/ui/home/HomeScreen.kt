@@ -690,16 +690,17 @@ private data class TileView(
 )
 
 /**
- * Which picture a tile shows and how old it is. A Frigate snapshot is Frigate's current frame, so
- * its age is when it was fetched; a Ring snapshot is ring-mqtt's stored image, so its age is the
- * entity's own update time. A live frame grabbed while watching wins only while it is newer.
+ * Which picture a tile shows and how old it is. A ring-mqtt snapshot is a stored image, so its age
+ * is the entity's own update time; every other camera's snapshot (Frigate, the Reolink integration)
+ * is grabbed when fetched, so its age is the fetch. A live frame grabbed while watching wins only
+ * while it is newer.
  */
 private fun tileView(cam: CameraUi, fetch: TileFetch?, nowMs: Long): TileView {
     val loadedAt = fetch?.okAtMs
     val snapshotAt = when {
         loadedAt == null -> null
-        cam.isFrigate -> loadedAt
-        else -> cam.lastChangedMs
+        cam.storedSnapshot -> cam.lastChangedMs
+        else -> loadedAt
     }
     val grabbed = LiveFrameStore.get(cam.id)
     val showGrabbed = grabbed != null && (cam.asleep || loadedAt == null || snapshotAt == null || grabbed.capturedAtMs > snapshotAt)
