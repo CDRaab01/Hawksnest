@@ -678,7 +678,10 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   same device lookup and expire on the same clock. Returns null on any failure — the player falls
   back to the ring-mqtt selector rather than breaking the camera screen; an empty footage list is
   a real answer (event-only camera), not a failure.
-- `core/logic/`, `core/automations/` — entity → domain-model mapping, automation surfaces. The
+- `core/logic/`, `core/automations/` — entity → domain-model mapping, automation surfaces.
+  Includes the ring/ring-mqtt dedupe (`Dedupe.kt`, applied centrally at `HaSource`'s entity sink,
+  mirroring the web) and the Devices sectioning model (`DeviceSections.kt`: per-room three-tier
+  rhythm — FEATURED lock/climate/alarm cards, CONTROL rows with inline switches, READONLY rows). The
   Automations tab (Android) groups by room without renaming anything: `titleAutomation` reads a
   room, then a title and subtitle, out of each name ("Nursery LED effect - garage door opened" →
   Nursery / "LED effect" / "Garage door opened"); a room assigned to the automation in HA wins, and
@@ -686,9 +689,6 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   name, last ran, switch; Run (confirmed, since HA's trigger skips conditions) and Edit live in the
   sheet a row opens, which words the triggers (`describeTriggers`) and shows the automation's own
   description. The web tab is still the flat list.
-  Includes the ring/ring-mqtt dedupe (`Dedupe.kt`, applied centrally at `HaSource`'s entity sink,
-  mirroring the web) and the Devices sectioning model (`DeviceSections.kt`: per-room three-tier
-  rhythm — FEATURED lock/climate/alarm cards, CONTROL rows with inline switches, READONLY rows).
 - `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
 - **The entity-history chart carries axes** (`lib/chart.ts` ⇄ `core/logic/Chart.kt`, ported 1:1 and
   tested on both; drawn by `components/HistoryChart.tsx` ⇄ `ui/components/HistoryChart.kt`). The
