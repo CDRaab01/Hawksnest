@@ -688,7 +688,14 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   the `Hawksnest:` / `Hawksnest push:` ones sit last in "Behind the scenes" with no Run. Rows are
   name, last ran, switch; Run (confirmed, since HA's trigger skips conditions) and Edit live in the
   sheet a row opens, which words the triggers (`describeTriggers`) and shows the automation's own
-  description. The web tab is still the flat list.
+  description. The web tab is still the flat list. The editor (Android) is built to read as the
+  sentence it makes: `ruleSentence` (`RuleWords.kt`) renders the draft on top as it changes and
+  becomes the name when the name is left blank; trigger types are four tiles; devices are picked in
+  a sheet with search, type chips (`deviceKind`) and rooms, each row with its state right now, and
+  kinds it has no words for (backups, diagnostics) hidden until "Show everything"; what a device
+  does is chips in its own words (`triggerChoices` / `conditionChoices`: "Opens", "Is locked"),
+  writing the same raw states as before; times use the system time picker. The saved config and the
+  "edit in HA" fallback are unchanged.
 - `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
 - **The entity-history chart carries axes** (`lib/chart.ts` ⇄ `core/logic/Chart.kt`, ported 1:1 and
   tested on both; drawn by `components/HistoryChart.tsx` ⇄ `ui/components/HistoryChart.kt`). The
