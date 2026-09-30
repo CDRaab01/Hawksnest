@@ -113,6 +113,7 @@ class HomeViewModel @Inject constructor(
     private val connection: ConnectionManager,
     private val pushNav: com.hawksnest.push.PushNav,
     private val cameraSession: com.hawksnest.ui.cameras.CameraSession,
+    private val directStreamSource: com.hawksnest.core.net.DirectStreamSource,
 ) : ViewModel() {
 
     private val state = connection.state
@@ -156,6 +157,11 @@ class HomeViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUi())
 
     init {
+        // Fetch the server's direct-stream settings as soon as HA is reachable, so the first camera
+        // opened doesn't wait on them. Cached, so reconnects don't refetch.
+        viewModelScope.launch {
+            connection.state.status.collect { if (it == ConnectionStatus.CONNECTED) directStreamSource.get() }
+        }
         viewModelScope.launch { connection.start() }
     }
 

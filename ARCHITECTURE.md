@@ -808,10 +808,22 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   than a `VideoPlayer` mode: VideoPlayer's construction is built around HLS/VOD concerns (authSig
   + Bearer data-source wrapping, live-edge offsets, seek-within-media, duration reporting), none of
   which apply here.
-  **Off by default.** It needs a camera account and a per-camera IP, both entered in Settings
-  (`ui/settings/RtspPanel.kt`) and stored in `CredentialStore` with the password under the same
-  Keystore wrap as the HA token. Unconfigured, the ladder behaves exactly as before. Nothing in
-  the repo carries a real IP or account — it is public.
+  It needs a camera account and a per-camera IP. **The Hawksnest server provides both** to any
+  device holding a valid HA token, so a signed-in phone needs no setup (owner-approved
+  2026-09-29): at pod start the `render-direct-streams` initContainer
+  (`deploy/render-direct-streams.sh`) reads `FRIGATE_REOLINK_USER` / `FRIGATE_REOLINK_PASSWORD` /
+  `FRIGATE_REOLINK_IP_<CAMERA>` from the `frigate-credentials` Secret (the same keys Frigate's
+  camera paths use) into a memory-backed volume, skipping the Home Hub, whose battery cameras share
+  one address by channel. nginx serves it at `/hawksnest/direct-streams` only after HA accepts the
+  request's bearer token (`auth_request` to `/api/`; no header is refused without asking HA),
+  `no-store`, tailnet-only like everything else there. The nginx container never mounts the Secret.
+  `core/net/DirectStreamSource` fetches it with the app's own token and keeps it in memory only
+  (30 min; 60 s after a failure, keeping the last good copy). A device can still enter its own
+  settings in Settings (`ui/settings/RtspPanel.kt`, stored in `CredentialStore` under the same
+  Keystore wrap as the HA token); a complete local set wins (`chooseDirectStreams`). With neither,
+  the ladder behaves exactly as before. Nothing in the repo carries a real IP or account — it is
+  public. After changing the camera password or an IP in the Secret, restart the `hawksnest`
+  deployment: the file is rendered once per pod start.
   **Fails fast, three ways**, because the tier is optional and a dead frame is worse than a
   step-down: a 4 s RTSP connect timeout, a 7 s no-first-frame deadline (an unreachable camera can
   hang setup without ever erroring; it was 5 s until the September 2026 audit timed first frames at

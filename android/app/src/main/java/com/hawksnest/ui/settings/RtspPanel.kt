@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +34,8 @@ fun RtspPanel(
     savedUser: String?,
     hasPass: Boolean,
     savedCameraIps: Map<String, String>,
+    /** Cameras the Hawksnest server provides settings for; 0 when it provides none. */
+    serverCameraCount: Int,
     onSave: (user: String, pass: String, cameraIps: Map<String, String>) -> Unit,
     onClear: () -> Unit,
 ) {
@@ -45,12 +48,22 @@ fun RtspPanel(
 
     val validRows = rows.filter { (name, ip) -> name.isNotBlank() && isPlausibleIpv4(ip) }
     val configured = savedUser?.isNotBlank() == true && hasPass && savedCameraIps.isNotEmpty()
+    val fromServer = !configured && serverCameraCount > 0
+    // With the server providing everything, the form is an override most phones never need, so it
+    // stays folded away until asked for.
+    var showForm by remember(fromServer) { mutableStateOf(!fromServer) }
 
     PanelCard {
         Text(
             if (configured) {
-                "Active for ${savedCameraIps.size} camera(s). The player uses this first and falls " +
-                    "back to the usual stream if a camera doesn't answer."
+                "Active for ${savedCameraIps.size} camera(s), set on this phone" +
+                    (if (serverCameraCount > 0) " (instead of the server's)" else "") +
+                    ". The player uses this first and falls back to the usual stream if a camera " +
+                    "doesn't answer."
+            } else if (fromServer) {
+                "Active for $serverCameraCount camera(s), set up by your Hawksnest server. Nothing " +
+                    "to enter on this phone. The player uses this first and falls back to the usual " +
+                    "stream if a camera doesn't answer."
             } else {
                 "Optional. Plays the camera's own stream directly — the smoothest option — instead " +
                     "of a relayed one. Needs a camera account and each camera's IP."
@@ -59,110 +72,118 @@ fun RtspPanel(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        OutlinedTextField(
-            value = user,
-            onValueChange = { user = it },
-            label = { Text("Camera username") },
-            singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = HawksnestTheme.spacing.md),
-        )
-        OutlinedTextField(
-            value = pass,
-            onValueChange = { pass = it },
-            label = { Text(if (hasPass) "New camera password (one saved)" else "Camera password") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = HawksnestTheme.spacing.sm),
-        )
-
-        Text(
-            "Cameras",
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.padding(top = HawksnestTheme.spacing.md),
-        )
-        rows.forEachIndexed { i, (name, ip) ->
-            Row(
+        if (!showForm) {
+            TextButton(
+                onClick = { showForm = true },
+                modifier = Modifier.padding(top = HawksnestTheme.spacing.xs),
+            ) { Text("Set up by hand on this phone instead") }
+        }
+        if (showForm) {
+            OutlinedTextField(
+                value = user,
+                onValueChange = { user = it },
+                label = { Text("Camera username") },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = HawksnestTheme.spacing.md),
+            )
+            OutlinedTextField(
+                value = pass,
+                onValueChange = { pass = it },
+                label = { Text(if (hasPass) "New camera password (one saved)" else "Camera password") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = HawksnestTheme.spacing.sm),
+            )
+
+            Text(
+                "Cameras",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(top = HawksnestTheme.spacing.md),
+            )
+            rows.forEachIndexed { i, (name, ip) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = HawksnestTheme.spacing.sm),
+                    horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { v -> rows = rows.toMutableList().also { it[i] = v to ip } },
+                        label = { Text("Name") },
+                        placeholder = { Text("big_room") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = ip,
+                        onValueChange = { v -> rows = rows.toMutableList().also { it[i] = name to v } },
+                        label = { Text("IP") },
+                        placeholder = { Text("192.168.1.50") },
+                        singleLine = true,
+                        // Only flag a wrong-looking address once there's something to be wrong about.
+                        isError = ip.isNotBlank() && !isPlausibleIpv4(ip),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
                 horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { v -> rows = rows.toMutableList().also { it[i] = v to ip } },
-                    label = { Text("Name") },
-                    placeholder = { Text("big_room") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedTextField(
-                    value = ip,
-                    onValueChange = { v -> rows = rows.toMutableList().also { it[i] = name to v } },
-                    label = { Text("IP") },
-                    placeholder = { Text("192.168.1.50") },
-                    singleLine = true,
-                    // Only flag a wrong-looking address once there's something to be wrong about.
-                    isError = ip.isNotBlank() && !isPlausibleIpv4(ip),
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-        Row(
-            modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
-            horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm),
-        ) {
-            PulseButton(
-                text = "Add camera",
-                onClick = { rows = rows + ("" to "") },
-                tonal = true,
-                modifier = Modifier.weight(1f),
-            )
-            if (rows.size > 1) {
                 PulseButton(
-                    text = "Remove last",
-                    onClick = { rows = rows.dropLast(1) },
+                    text = "Add camera",
+                    onClick = { rows = rows + ("" to "") },
                     tonal = true,
                     modifier = Modifier.weight(1f),
                 )
+                if (rows.size > 1) {
+                    PulseButton(
+                        text = "Remove last",
+                        onClick = { rows = rows.dropLast(1) },
+                        tonal = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
-        }
 
-        Row(
-            modifier = Modifier.padding(top = HawksnestTheme.spacing.md),
-            horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm),
-        ) {
-            PulseButton(
-                text = "Save",
-                onClick = { onSave(user, pass, validRows.toMap()); pass = "" },
-                modifier = Modifier.weight(1f),
-                // A password is required once, but not on every edit — the stored one is kept.
-                enabled = user.isNotBlank() && (pass.isNotBlank() || hasPass) && validRows.isNotEmpty(),
-            )
-            if (configured) {
+            Row(
+                modifier = Modifier.padding(top = HawksnestTheme.spacing.md),
+                horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm),
+            ) {
                 PulseButton(
-                    text = "Turn off",
-                    onClick = { onClear(); pass = ""; rows = listOf("" to "") },
+                    text = "Save",
+                    onClick = { onSave(user, pass, validRows.toMap()); pass = "" },
                     modifier = Modifier.weight(1f),
-                    tonal = true,
-                    channel = HawksnestTheme.pulse.streak,
-                    onChannel = HawksnestTheme.pulse.onStreak,
-                    dimChannel = HawksnestTheme.pulse.streakDim,
+                    // A password is required once, but not on every edit — the stored one is kept.
+                    enabled = user.isNotBlank() && (pass.isNotBlank() || hasPass) && validRows.isNotEmpty(),
                 )
+                if (configured) {
+                    PulseButton(
+                        text = "Turn off",
+                        onClick = { onClear(); pass = ""; rows = listOf("" to "") },
+                        modifier = Modifier.weight(1f),
+                        tonal = true,
+                        channel = HawksnestTheme.pulse.streak,
+                        onChannel = HawksnestTheme.pulse.onStreak,
+                        dimChannel = HawksnestTheme.pulse.streakDim,
+                    )
+                }
             }
-        }
 
-        Text(
-            "Name must match the camera's name in Home Assistant (camera.big_room → big_room). " +
-                "Use a view-only camera account, not an admin one. Away from home this needs the " +
-                "camera's address routed onto your tailnet.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
-        )
+            Text(
+                "Name must match the camera's name in Home Assistant (camera.big_room → big_room). " +
+                    "Use a view-only camera account, not an admin one. Away from home this needs the " +
+                    "camera's address routed onto your tailnet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
+            )
+        }
     }
 }

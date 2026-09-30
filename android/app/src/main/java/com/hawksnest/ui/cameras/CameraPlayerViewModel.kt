@@ -3,6 +3,9 @@ package com.hawksnest.ui.cameras
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.hawksnest.core.logic.DirectStreams
+import com.hawksnest.core.logic.chooseDirectStreams
+import com.hawksnest.core.net.DirectStreamSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -96,6 +99,7 @@ class CameraPlayerViewModel @Inject constructor(
     private val credentialStore: CredentialStore,
     private val httpClient: OkHttpClient,
     private val cameraSession: CameraSession,
+    private val directStreamSource: DirectStreamSource,
 ) : ViewModel() {
 
     /** True while the activity is minimized into system PiP — the player hides its chrome off
@@ -233,15 +237,22 @@ class CameraPlayerViewModel @Inject constructor(
     /**
      * The direct-to-camera RTSP URL for [cameraName], or null when the tier doesn't apply.
      *
-     * Null unless the user has configured all three of an account, a password and an IP for this
-     * specific camera — an unconfigured app behaves exactly as it did before this tier existed.
-     * Reads local DataStore only, so it is effectively instant.
+     * The settings are this device's own (Settings → Camera direct stream) when it has a complete
+     * set, and otherwise whatever the Hawksnest server provides to signed-in devices
+     * ([DirectStreamSource]), so a phone needs no setup. The server's copy is normally already
+     * cached (Home prefetches it on connect); the wait for it is bounded so a slow server can only
+     * ever cost this tier, never hold up the ladder.
      */
     suspend fun rtspUrlFor(cameraName: String): String? {
-        val ip = credentialStore.rtspCameraIps.first()[cameraName] ?: return null
-        val user = credentialStore.rtspUser.first()?.takeIf { it.isNotBlank() } ?: return null
-        val pass = credentialStore.rtspPass.first()?.takeIf { it.isNotBlank() } ?: return null
-        return reolinkRtspUrl(ip, user, pass)
+        val manual = DirectStreams(
+            user = credentialStore.rtspUser.first().orEmpty(),
+            pass = credentialStore.rtspPass.first().orEmpty(),
+            cameras = credentialStore.rtspCameraIps.first(),
+        )
+        val server = if (manual.usable) null else withTimeoutOrNull(SERVER_SETTINGS_WAIT_MS) { directStreamSource.get() }
+        val chosen = chooseDirectStreams(manual, server) ?: return null
+        val ip = chosen.cameras[cameraName] ?: return null
+        return reolinkRtspUrl(ip, chosen.user, chosen.pass)
     }
 
     /**
@@ -594,3 +605,6 @@ class CameraPlayerViewModel @Inject constructor(
  * minutes-slow. Mirrors the web `RING_CLIP_TIMEOUT_MS`.
  */
 private const val RING_CLIP_TIMEOUT_MS = 20_000L
+
+/** How long opening a camera waits for the server's direct-stream settings when none are cached. */
+private const val SERVER_SETTINGS_WAIT_MS = 2_000L

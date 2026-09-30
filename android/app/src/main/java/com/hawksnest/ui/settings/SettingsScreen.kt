@@ -210,10 +210,12 @@ fun SettingsScreen(
         )
 
         SectionHeader("Camera direct stream")
+        val serverDirect by viewModel.serverDirectStreams.collectAsState()
         RtspPanel(
             savedUser = rtspUser,
             hasPass = hasRtspPass,
             savedCameraIps = rtspCameraIps,
+            serverCameraCount = serverDirect?.cameras?.size ?: 0,
             onSave = { u, p, ips -> viewModel.saveRtsp(u, p, ips) },
             onClear = { viewModel.clearRtsp() },
         )

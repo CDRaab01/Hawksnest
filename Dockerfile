@@ -10,5 +10,7 @@ RUN npm run build
 FROM nginx:alpine
 RUN rm /etc/nginx/conf.d/default.conf
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+# Run by the render-direct-streams initContainer (deploy/k8s/deployment.yaml), not by nginx.
+COPY deploy/render-direct-streams.sh /usr/local/bin/render-direct-streams.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80

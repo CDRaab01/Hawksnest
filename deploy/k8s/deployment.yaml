@@ -16,6 +16,31 @@ spec:
       labels:
         app: hawksnest
     spec:
+      # Renders the Android app's direct-stream settings (the camera account and each wired
+      # camera's LAN IP) from frigate-credentials into a memory-backed volume, which nginx serves
+      # token-gated at /hawksnest/direct-streams. Only this short-lived container mounts the Secret;
+      # the nginx container gets the rendered file alone. The script never fails the pod: a
+      # missing key just means no file and a 404. Same image as the app, so nothing new to pull.
+      # The file is rendered once per pod start: after a camera password or IP change in
+      # frigate-credentials, restart this deployment to pick it up.
+      initContainers:
+        - name: render-direct-streams
+          image: hawksnest:local
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/usr/local/bin/render-direct-streams.sh"]
+          volumeMounts:
+            - name: camera-secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: direct-streams
+              mountPath: /out
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
       containers:
         - name: hawksnest
           # Built + imported into K3s containerd by the deploy workflow.
@@ -36,6 +61,10 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 20
+          volumeMounts:
+            - name: direct-streams
+              mountPath: /etc/hawksnest
+              readOnly: true
           resources:
             requests:
               cpu: 10m
@@ -43,3 +72,15 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+      volumes:
+        # Optional so a missing Secret can never keep the app from starting: the renderer then
+        # finds no keys and the endpoint answers 404.
+        - name: camera-secrets
+          secret:
+            secretName: frigate-credentials
+            optional: true
+        # Memory-backed so the rendered password never touches the node's disk.
+        - name: direct-streams
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Ki
