@@ -553,6 +553,22 @@ scroll. Fullscreen lives in the same component — on Android it rotates to land
 system bars, which is why `MainActivity` now declares `configChanges` for orientation (without it
 the rotation recreates the activity and costs a 2–4 s WebRTC renegotiation).
 
+**On Android the picture has a stage, not just its own rectangle** (2026-09-29). The lightbox
+lays the player out top-down and tells it how much room it has (`CameraPlayer`'s `viewport`); the
+`ZoomableFrame` then gets every bit of height the control row and the timeline leave free, and each
+tier fits the picture in the middle of it (they all scale to fit). `VideoZoom.kt` takes the
+picture's fitted size alongside the stage (`fittedContent`, `content` parameters): an axis where
+the magnified picture is still smaller than the stage stays centred, and once larger it pans to the
+picture's edges; the zoom ceiling rises to twice the "cover" scale where that beats 4x. Double-tap
+fills the stage around the tapped point (`doubleTapZoom`) and again resets. The case that drove it:
+a 3.5:1 hub panorama used to be a thin strip between two black bands, with pinch trapped inside
+the strip; now it zooms to the full stage height and swipes sideways. Fullscreen and PiP are the
+same stage at screen size. Fullscreen state moved up to the lightbox, which fixes the fullscreen
+box that drew at a fraction of the screen (it sat inside the lightbox's vertical scroll, so "fill
+the height" had no height) and keeps fullscreen across a camera switch, which remounts the player.
+Passing the same size for stage and picture reproduces the original math exactly, which is what the
+web still uses: its player has no stage yet.
+
 **Every camera surface renders at the picture's true aspect ratio, not a hardcoded 16:9**
 (`lib/mediaAspect.ts`, `useMediaAspect`). The fleet is no longer all 16:9: the two outdoor
 Reolinks are dual-lens cameras whose two lenses stitch into one ~32:9 panorama (`1536×432`), and
