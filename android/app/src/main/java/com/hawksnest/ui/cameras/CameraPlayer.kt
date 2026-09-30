@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -26,6 +27,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -34,6 +36,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
 import com.hawksnest.core.logic.LiveTier
@@ -103,6 +109,17 @@ fun CameraPlayer(
     /** How this camera starts when something outside asked for it: a doorbell notification's
      *  "Talk" opens the mic, the reply fallback opens the quick-reply sheet. */
     startWith: CameraStart = CameraStart.LIVE,
+    /** Fullscreen (immersive landscape, picture only). Held by the lightbox so it survives a
+     *  camera switch, which remounts this player. */
+    fullscreen: Boolean = false,
+    onFullscreenChange: (Boolean) -> Unit = {},
+    /**
+     * The space this player may fill. The picture then gets a STAGE: all the height the controls
+     * and timeline leave free, with the picture fitted in the middle, so pinch-zoom and pan use the
+     * whole middle of the screen instead of the picture's own rectangle (a 3.5:1 panorama is a
+     * thin strip). Null sizes the picture to its own shape, as before.
+     */
+    viewport: DpSize? = null,
     modifier: Modifier = Modifier,
 ) {
     val cameraName = cameraNameOf(cam.id)
@@ -288,10 +305,8 @@ fun CameraPlayer(
     // Pinch-zoom over the picture. Keyed on cam.id so switching cameras starts unzoomed —
     // a magnified corner carried over to a different room is disorienting and reads as a bug.
     var zoom by remember(cam.id) { mutableStateOf(NO_ZOOM) }
-    // Fullscreen is NOT keyed on cam.id: switching cameras while fullscreen should stay
-    // fullscreen, which is what the camera switcher in the overlay is for.
-    var fullscreen by remember { mutableStateOf(false) }
-    FullscreenEffect(fullscreen)
+    // Fullscreen lives in the lightbox (see the `fullscreen` parameter): switching cameras while
+    // fullscreen should stay fullscreen, and this player is remounted per camera.
 
     // System picture-in-picture (home/gesture-away on a live camera). In PiP the window IS the
     // picture: every piece of chrome hides behind the same guards fullscreen uses, so entering
@@ -302,6 +317,10 @@ fun CameraPlayer(
     // would fix it isn't available there.
     val inPip by viewModel.inPip.collectAsState()
     LaunchedEffect(inPip) { if (inPip) zoom = NO_ZOOM }
+    // Entering or leaving fullscreen swaps the stage for one of a completely different shape
+    // (portrait middle ↔ the whole landscape screen), so a zoom framed for one would land somewhere
+    // arbitrary in the other. Start each from the whole picture.
+    LaunchedEffect(fullscreen) { zoom = NO_ZOOM }
     // The frame takes the PICTURE's shape, not a hardcoded 16:9 — the fleet is no longer all
     // 16:9 (the two Home Hub cameras are 1536x432 dual-lens panoramas, the doorbell is 4:3).
     // Measured from the media itself via the size the renderers already report for PiP, so there
@@ -560,9 +579,26 @@ fun CameraPlayer(
     // In fullscreen the picture IS the screen: the chrome, timeline, description and transport
     // are all hidden, so the system back gesture has to be the way out or the user is stuck with
     // only the small overlay button. Registered before the layout so it wins over navigation.
-    BackHandler(enabled = fullscreen) { fullscreen = false }
+    BackHandler(enabled = fullscreen) { onFullscreenChange(false) }
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // The stage: what's left of the viewport once the controls above and the timeline below have
+    // taken theirs, and never less than the picture's own height (then the lightbox scrolls, as
+    // it always has). Until both are measured, the picture's own height, so the first frame
+    // doesn't jump from a too-tall stage.
+    var topPx by remember { mutableIntStateOf(-1) }
+    var bottomPx by remember { mutableIntStateOf(-1) }
+    val density = LocalDensity.current
+    val stageHeight: Dp? = viewport?.let { vp ->
+        val fit = vp.width / frameAspect
+        if (topPx < 0 || bottomPx < 0) {
+            fit
+        } else {
+            val chrome = with(density) { (topPx + bottomPx).toDp() } + PLAYER_GAP * 2
+            maxOf(vp.height - chrome, fit)
+        }
+    }
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(PLAYER_GAP)) {
         // ONE FlowRow that wraps only when it has to.
         //
         // A plain Row cannot hold this many controls on a phone: Row gives every
@@ -575,6 +611,7 @@ fun CameraPlayer(
         // the set genuinely varies (Move only for PTZ, Low/High only with a sub
         // stream, Talk only for Ring, Siren only where one exists).
         if (!fullscreen && !inPip) FlowRow(
+            modifier = Modifier.onSizeChanged { topPx = it.height },
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -598,7 +635,7 @@ fun CameraPlayer(
                 )
             }
             MuteButton(muted = muted, onToggle = { muted = !muted })
-            FullscreenButton(active = fullscreen, onToggle = { fullscreen = !fullscreen })
+            FullscreenButton(active = fullscreen, onToggle = { onFullscreenChange(!fullscreen) })
             SnapshotButton(snapshotUrl = cam.snapshotUrl, cameraName = cameraName)
             // The one and only gate. Frigate is the only backend that can cut an arbitrary range:
             // Ring exposes whole pre-signed event clips that expire in ~15 min and cannot be
@@ -677,11 +714,12 @@ fun CameraPlayer(
             // In PiP the window itself already has the video's aspect (set via the PiP params),
             // so fill it; the renderers' SCALE_ASPECT_FIT keeps the picture correct even while
             // the window and source briefly disagree.
-            modifier = if (fullscreen || inPip) {
-                Modifier.fillMaxSize()
-            } else {
-                Modifier.fillMaxWidth().aspectRatio(frameAspect)
+            modifier = when {
+                fullscreen || inPip -> Modifier.fillMaxSize()
+                stageHeight != null -> Modifier.fillMaxWidth().height(stageHeight)
+                else -> Modifier.fillMaxWidth().aspectRatio(frameAspect)
             },
+            pictureAspect = frameAspect,
         ) { zoomed ->
         val frame = zoomed.fillMaxSize()
         when {
@@ -692,6 +730,10 @@ fun CameraPlayer(
                     paused = paused,
                     muted = muted,
                     seekToMs = seekToMs,
+                    // Recordings report their shape too: the stage fits and zooms by it, and a
+                    // camera that has not streamed live this session would otherwise be laid out
+                    // as 16:9 (a panorama's double-tap then filled only half the stage).
+                    onVideoSize = viewModel::reportVideoSize,
                     // Learn the loaded ring clip's real duration from the media; an ExoPlayer
                     // failure after the URL resolved is a (retryable) failure too.
                     onDurationMs = if (isRing) {
@@ -834,14 +876,19 @@ fun CameraPlayer(
                 FullscreenChrome(
                     muted = muted,
                     onToggleMute = { muted = !muted },
-                    onExitFullscreen = { fullscreen = false },
+                    onExitFullscreen = { onFullscreenChange(false) },
                     onReply = { showReplies = true }
                         .takeIf { canReachSpeaker(canGo2rtc) && isLive },
                 )
             }
         }
 
-        if (!fullscreen && !inPip) {
+        if (!fullscreen && !inPip) Column(
+            // Measured for the stage above. Same gap as the outer column, so the layout is
+            // unchanged; this Column only exists to be measured as one piece.
+            modifier = Modifier.onSizeChanged { bottomPx = it.height },
+            verticalArrangement = Arrangement.spacedBy(PLAYER_GAP),
+        ) {
             // Live only: moving the lens while watching recorded footage would re-aim
             // the camera with no visible feedback. Leaving composition is also what
             // guarantees an in-flight move is stopped (see PtzPad).
@@ -1055,3 +1102,6 @@ private fun SirenButton(
         )
     }
 }
+
+/** The gap between the player's control row, picture and timeline. */
+private val PLAYER_GAP = 12.dp

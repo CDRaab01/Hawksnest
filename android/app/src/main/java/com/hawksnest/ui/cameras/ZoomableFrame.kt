@@ -21,9 +21,10 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.hawksnest.core.logic.FrameSize
-import com.hawksnest.core.logic.NO_ZOOM
 import com.hawksnest.core.logic.ZoomState
 import com.hawksnest.core.logic.applyGesture
+import com.hawksnest.core.logic.doubleTapZoom
+import com.hawksnest.core.logic.fittedContent
 
 /**
  * Pinch-to-zoom + drag-to-pan over the camera picture, the way Ring and the Reolink app do it.
@@ -45,6 +46,13 @@ fun ZoomableFrame(
     zoom: ZoomState,
     onZoomChange: (ZoomState) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * The picture's shape (width / height). The frame is a STAGE that can be larger than the
+     * picture, which every tier fits into it; knowing the shape is how the pan limits and the
+     * double-tap fill know where the picture's edges are. Null treats the picture as filling the
+     * frame (the original behaviour).
+     */
+    pictureAspect: Float? = null,
     content: @Composable BoxScope.(Modifier) -> Unit,
 ) {
     // The gesture lambdas are installed once (`pointerInput(Unit)`) so a re-pinch doesn't restart
@@ -52,6 +60,8 @@ fun ZoomableFrame(
     // rather than the ones captured on first composition.
     val currentZoom by rememberUpdatedState(zoom)
     val currentOnChange by rememberUpdatedState(onZoomChange)
+    val currentAspect by rememberUpdatedState(pictureAspect)
+    fun picture(frame: FrameSize) = currentAspect?.let { fittedContent(frame, it) } ?: frame
 
     Box(
         modifier
@@ -71,14 +81,28 @@ fun ZoomableFrame(
                             // Compose reports it relative to the top-left.
                             focusX = centroid.x - frame.width / 2f,
                             focusY = centroid.y - frame.height / 2f,
+                            content = picture(frame),
                         ),
                     )
                 }
             }
             .pointerInput(Unit) {
-                // Double-tap to reset. The universal escape hatch for a zoom gesture: without it a
-                // user who has panned into a corner has to pinch their way back out by feel.
-                detectTapGestures(onDoubleTap = { currentOnChange(NO_ZOOM) })
+                // Double-tap: fill the stage around the tapped point (a panorama at full height,
+                // swiped sideways), and again to get the whole picture back. The reset half is the
+                // universal escape hatch: without it a user panned into a corner has to pinch their
+                // way back out by feel.
+                detectTapGestures(onDoubleTap = { tap ->
+                    val frame = FrameSize(size.width.toFloat(), size.height.toFloat())
+                    currentOnChange(
+                        doubleTapZoom(
+                            currentZoom,
+                            frame,
+                            picture(frame),
+                            tapX = tap.x - frame.width / 2f,
+                            tapY = tap.y - frame.height / 2f,
+                        ),
+                    )
+                })
             },
     ) {
         content(
