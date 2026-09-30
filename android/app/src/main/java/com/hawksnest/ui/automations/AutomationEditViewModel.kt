@@ -4,13 +4,18 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hawksnest.config.overrides
+import com.hawksnest.core.automations.DeviceKind
 import com.hawksnest.core.automations.Rule
 import com.hawksnest.core.automations.RuleTrigger
 import com.hawksnest.core.automations.configToRule
+import com.hawksnest.core.automations.currentStateLabel
+import com.hawksnest.core.automations.deviceKind
 import com.hawksnest.core.automations.newRule
 import com.hawksnest.core.automations.mergeRuleIntoConfig
+import com.hawksnest.core.automations.ruleSentence
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.ha.domainOf
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.primaryEntities
 import com.hawksnest.core.logic.resolveName
@@ -31,8 +36,17 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import javax.inject.Inject
 
-/** A device option for a picker — `entityId` value, friendly `label`. */
-data class DeviceOption(val entityId: String, val label: String)
+/**
+ * One device in the editor's pickers: its name, the room it's in (null: none), what kind of device
+ * it is (the picker's type chips) and how it reads right now ("Closed", "Locked", "21.5 °C").
+ */
+data class Pickable(
+    val entityId: String,
+    val name: String,
+    val room: String?,
+    val kind: DeviceKind,
+    val state: String,
+)
 
 /** The editor's load/edit state. */
 sealed interface EditState {
@@ -89,6 +103,29 @@ class AutomationEditViewModel @Inject constructor(
                 .sortedBy { resolveName(it, overrides).lowercase() }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** [entities] as the pickers show them: named, placed in a room, with their kind and state now. */
+    val pickables: StateFlow<List<Pickable>> =
+        combine(entities, connection.state.areas) { list, areas ->
+            list.map { e ->
+                val dc = e.stringAttr("device_class")
+                Pickable(
+                    entityId = e.entityId,
+                    name = resolveName(e, overrides),
+                    room = areas[e.entityId],
+                    kind = deviceKind(domainOf(e.entityId), dc),
+                    state = currentStateLabel(domainOf(e.entityId), dc, e.state, e.stringAttr("unit_of_measurement")),
+                )
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The app's name for an entity, for the sentence and the pickers' buttons. */
+    fun nameOf(entityId: String): String =
+        connection.state.entities.value[entityId]?.let { resolveName(it, overrides) } ?: entityId
+
+    /** HA's device class, so a door's choices read "Opens" / "Closes". */
+    fun deviceClassOf(entityId: String): String? =
+        connection.state.entities.value[entityId]?.stringAttr("device_class")
+
     init {
         viewModelScope.launch { haUrl = credentialStore.haUrl.firstOrNull() }
         if (!isNew) load()
@@ -126,13 +163,18 @@ class AutomationEditViewModel @Inject constructor(
     }
 
     fun save() {
-        val rule = (_state.value as? EditState.Editing)?.rule ?: return
+        val draft = (_state.value as? EditState.Editing)?.rule ?: return
         _saveError.value = null
-        validate(rule)?.let { _saveError.value = it; return }
+        validate(draft)?.let { _saveError.value = it; return }
+        // A blank name takes the sentence the editor shows ("When Back Door opens, turn on …"):
+        // it says exactly what the automation does, which is what a name is for.
+        val rule = draft.copy(
+            alias = draft.alias.trim().ifEmpty { ruleSentence(draft, ::nameOf, ::deviceClassOf).removeSuffix(".") },
+        )
         viewModelScope.launch {
             _busy.value = true
             val result = runCatching {
-                connection.saveAutomationConfig(mergeRuleIntoConfig(originalConfig, rule.copy(alias = rule.alias.trim())))
+                connection.saveAutomationConfig(mergeRuleIntoConfig(originalConfig, rule))
             }
             if (result.isSuccess) {
                 // The Config REST POST returns on 2xx, but the new automation.* entity only
@@ -170,11 +212,10 @@ class AutomationEditViewModel @Inject constructor(
 
     /** Null when the draft is savable, else the first problem to show the user. */
     private fun validate(rule: Rule): String? {
-        if (rule.alias.isBlank()) return "Give the automation a name."
         when (val t = rule.trigger) {
             is RuleTrigger.State ->
                 if (t.entityId.isEmpty() || t.to.isEmpty()) {
-                    return "Pick a trigger device and the state that should fire it."
+                    return "Pick the device, and what it should do to start this."
                 }
             is RuleTrigger.Time ->
                 if (t.at.isEmpty()) return "Pick the time the automation should fire."
