@@ -16,6 +16,8 @@ import {
 } from "../../lib/ringTimeline";
 import {
   chooseRecordedSource,
+  FRIGATE_LANE_TOLERANCE_MS,
+  coalesceSpans,
   footageSpans,
   type FootageSpan,
   type RingFootage,
@@ -639,9 +641,20 @@ export function CameraPlayer({
         : "none";
 
   // The continuous track as drawable spans (coalesced so a stitch seam doesn't read as a gap).
-  // Ring's spans come off its timeline fetch; Frigate's arrive pre-coalesced from the source.
+  // Ring's spans come off its timeline fetch; Frigate's arrive media-accurate and are widened HERE.
+  //
+  // The widening is deliberately the last thing that happens to them. `frigateFootage` is the
+  // media-accurate set — every real hole preserved — because `vodRangeFor` reads it to decide
+  // where the VOD page may stretch to, and bridging a hole there desynchronises the playhead from
+  // the picture for the rest of the page (see FRIGATE_MEDIA_TOLERANCE_MS). Drawing wants the
+  // opposite: a 2 s hole is not a gap worth rendering. Two tolerances, applied at their own point
+  // of use, instead of one tolerance that silently served both.
   const ringLane = useMemo(() => (footage ? footageSpans(footage.segments) : []), [footage]);
-  const footageLane = isRing ? ringLane : frigateFootage;
+  const frigateLane = useMemo(
+    () => coalesceSpans(frigateFootage, FRIGATE_LANE_TOLERANCE_MS),
+    [frigateFootage],
+  );
+  const footageLane = isRing ? ringLane : frigateLane;
 
   // --- Clip export -----------------------------------------------------------------------
   // Note what is NOT here: none of this state feeds `vodPage`, `vodSrc` or `recordingSrc`.
@@ -934,7 +947,10 @@ export function CameraPlayer({
         <ClipExportBar
           selection={clipSel}
           playheadMs={headTime}
-          footage={footageLane}
+          // NOT `footageLane`: coverage asks how much of the range was actually recorded, and the
+          // lane's 15 s bridging is the one thing that would hide the answer. Clip mode is
+          // Frigate-only (`clipMode`), so this is always the Frigate set.
+          footage={frigateFootage}
           state={clipState}
           error={clipError}
           onNudge={(edge, delta) =>
