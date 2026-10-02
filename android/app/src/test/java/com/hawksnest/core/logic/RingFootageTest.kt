@@ -297,9 +297,76 @@ class RingFootageTest {
     }
 
     @Test
-    fun `bridges a single dropped segment - a hole within tolerance`() {
+    fun `KEEPS a single dropped segment as a hole - the parse is media-accurate not drawable`() {
+        // One missing ~10s cache segment is not worth DRAWING as a gap, but it is absolutely worth
+        // keeping here: vodRangeFor reads these spans to decide how far a VOD page may stretch, and
+        // Frigate's VOD concatenates rather than pads, so a bridged hole becomes permanent drift
+        // between the playhead and the picture. The lane widens them later (see coalesceSpans).
         val spans = parseFrigateWsRecordings(JsonArray(listOf(seg(1000.0, 1010.0), seg(1022.0, 1032.0))))
-        assertEquals(1, spans.size)
+        assertEquals(2, spans.size)
+    }
+
+    @Test
+    fun `merges only float rounding at the seam not real holes`() {
+        // Frigate's segment times are floats; abutting segments differ by milliseconds.
+        assertEquals(
+            1,
+            parseFrigateWsRecordings(JsonArray(listOf(seg(1000.0, 1010.0), seg(1010.3, 1020.0)))).size,
+        )
+        // 1.5 s is a real hole - the shape nursery_high produced while its record process was stuck.
+        assertEquals(
+            2,
+            parseFrigateWsRecordings(JsonArray(listOf(seg(1000.0, 1010.0), seg(1011.5, 1021.0)))).size,
+        )
+    }
+
+    @Test
+    fun `regression - a page of 1-2s holes no longer collapses into one span`() {
+        // Under the old 15 s parse tolerance every hole was bridged, so the whole window read as
+        // ONE span, vodRangeFor narrowed nothing, and the linear seek drifted by the accumulated
+        // missing footage.
+        val segments = (0 until 30).map { seg(1000.0 + it * 12, 1000.0 + it * 12 + 10) }
+        val spans = parseFrigateWsRecordings(JsonArray(segments))
+        assertEquals(30, spans.size)
+        assertEquals(300_000L, spans.sumOf { it.endMs - it.startMs })
+        assertEquals(358_000L, spans.last().endMs - spans.first().startMs)
+    }
+
+    // ---- coalesceSpans (the lane's widening, applied at the point of drawing) ----
+
+    @Test
+    fun `coalesceSpans bridges a dropped segment at the lane tolerance`() {
+        val out = coalesceSpans(
+            listOf(FootageSpan(1000L, 11_000L, true), FootageSpan(23_000L, 33_000L, true)),
+            FRIGATE_LANE_TOLERANCE_MS,
+        )
+        assertEquals(listOf(FootageSpan(1000L, 33_000L, playable = true)), out)
+    }
+
+    @Test
+    fun `coalesceSpans leaves a hole longer than the tolerance alone`() {
+        val out = coalesceSpans(
+            listOf(FootageSpan(1000L, 11_000L, true), FootageSpan(40_000L, 50_000L, true)),
+            FRIGATE_LANE_TOLERANCE_MS,
+        )
+        assertEquals(2, out.size)
+    }
+
+    @Test
+    fun `coalesceSpans never merges across a playability change`() {
+        val out = coalesceSpans(
+            listOf(FootageSpan(1000L, 11_000L, true), FootageSpan(11_100L, 21_000L, false)),
+            15_000L,
+        )
+        assertEquals(2, out.size)
+    }
+
+    @Test
+    fun `coalesceSpans collapses the nursery_high shape while the media set keeps the holes`() {
+        val segments = (0 until 30).map { seg(1000.0 + it * 12, 1000.0 + it * 12 + 10) }
+        val media = parseFrigateWsRecordings(JsonArray(segments))
+        assertEquals(30, media.size)
+        assertEquals(1, coalesceSpans(media, FRIGATE_LANE_TOLERANCE_MS).size)
     }
 
     @Test

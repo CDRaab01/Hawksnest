@@ -6,6 +6,8 @@ import {
   footageSpans,
   isPlayable,
   offsetInSegmentSeconds,
+  FRIGATE_LANE_TOLERANCE_MS,
+  coalesceSpans,
   parseFrigateWsRecordings,
   parseRingFootage,
   type FootageSegment,
@@ -191,10 +193,35 @@ describe("parseFrigateWsRecordings (frigate/recordings/get websocket result)", (
     expect(spans[1].startMs).toBe(1100_000);
   });
 
-  it("bridges a single dropped segment (a hole within tolerance)", () => {
-    // One missing ~10s cache segment is real but not worth drawing as a gap.
+  it("KEEPS a single dropped segment as a hole — the parse is media-accurate, not drawable", () => {
+    // One missing ~10s cache segment is not worth DRAWING as a gap, but it is absolutely worth
+    // keeping here: `vodRangeFor` reads these spans to decide how far a VOD page may stretch, and
+    // Frigate's VOD concatenates rather than pads, so a bridged hole becomes permanent drift
+    // between the playhead and the picture. The lane widens them later (see coalesceSpans).
     const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(1022, 1032)]);
-    expect(spans).toHaveLength(1);
+    expect(spans).toHaveLength(2);
+  });
+
+  it("merges only float rounding at the seam, not real holes", () => {
+    // Frigate's segment times are floats; abutting segments differ by milliseconds.
+    expect(parseFrigateWsRecordings([seg(1000, 1010), seg(1010.3, 1020)])).toHaveLength(1);
+    // 1.5 s is a real hole — exactly the shape nursery_high produced while its record process was
+    // stuck, and the shape that cost 10 minutes of drift when it was bridged.
+    expect(parseFrigateWsRecordings([seg(1000, 1010), seg(1011.5, 1021)])).toHaveLength(2);
+  });
+
+  it("regression: a page of 1-2s holes no longer collapses into one span", () => {
+    // The nursery_high shape: ~10 s segments with ~2 s holes. Under the old 15 s parse tolerance
+    // every hole was bridged, so the whole window read as ONE span, vodRangeFor narrowed nothing,
+    // and the linear seek drifted by the accumulated missing footage.
+    const segments = Array.from({ length: 30 }, (_, i) => seg(1000 + i * 12, 1000 + i * 12 + 10));
+    const spans = parseFrigateWsRecordings(segments);
+    expect(spans).toHaveLength(30);
+    // Media actually present is 300 s, while the wall-clock span is 358 s — a 58 s difference that
+    // the old behaviour handed to the player as if it were solid footage.
+    const media = spans.reduce((a, s) => a + (s.endMs - s.startMs), 0);
+    expect(media).toBe(300_000);
+    expect(spans[spans.length - 1].endMs - spans[0].startMs).toBe(358_000);
   });
 
   it("sorts unordered input before coalescing", () => {
@@ -211,6 +238,49 @@ describe("parseFrigateWsRecordings (frigate/recordings/get websocket result)", (
     expect(spans).toEqual([{ startMs: 1000_000, endMs: 1010_000, playable: true }]);
   });
 });
+
+describe("coalesceSpans (the lane's widening, applied at the point of drawing)", () => {
+  const span = (startMs: number, endMs: number, playable = true): FootageSpan => ({
+    startMs,
+    endMs,
+    playable,
+  });
+
+  it("bridges a dropped segment at the lane tolerance", () => {
+    // The behaviour that used to live in the parser — still wanted, just no longer imposed on the
+    // VOD range math.
+    const out = coalesceSpans([span(1000, 11_000), span(23_000, 33_000)], FRIGATE_LANE_TOLERANCE_MS);
+    expect(out).toEqual([{ startMs: 1000, endMs: 33_000, playable: true }]);
+  });
+
+  it("leaves a hole longer than the tolerance alone", () => {
+    const out = coalesceSpans([span(1000, 11_000), span(40_000, 50_000)], FRIGATE_LANE_TOLERANCE_MS);
+    expect(out).toHaveLength(2);
+  });
+
+  it("never merges across a playability change", () => {
+    // Same rule as footageSpans: a greyed encrypted run stays visually distinct.
+    const out = coalesceSpans([span(1000, 11_000), span(11_100, 21_000, false)], 15_000);
+    expect(out).toHaveLength(2);
+  });
+
+  it("does not mutate its input", () => {
+    const input = [span(1000, 11_000), span(11_100, 21_000)];
+    coalesceSpans(input, 15_000);
+    expect(input[0].endMs).toBe(11_000);
+  });
+
+  it("collapses the nursery_high shape for drawing while the media set keeps the holes", () => {
+    const segments = Array.from({ length: 30 }, (_, i) => ({
+      start_time: 1000 + i * 12,
+      end_time: 1000 + i * 12 + 10,
+    }));
+    const media = parseFrigateWsRecordings(segments);
+    expect(media).toHaveLength(30);
+    expect(coalesceSpans(media, FRIGATE_LANE_TOLERANCE_MS)).toHaveLength(1);
+  });
+});
+
 
 
 

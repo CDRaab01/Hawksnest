@@ -70,6 +70,8 @@ import com.hawksnest.core.logic.chooseRecordedSource
 import com.hawksnest.core.logic.clipContaining
 import com.hawksnest.core.logic.clipSpanEndMs
 import com.hawksnest.core.logic.FootageSpan
+import com.hawksnest.core.logic.FRIGATE_LANE_TOLERANCE_MS
+import com.hawksnest.core.logic.coalesceSpans
 import com.hawksnest.core.logic.footageSpans
 import com.hawksnest.core.logic.offsetInClipMs
 import com.hawksnest.core.logic.TimeRange
@@ -196,19 +198,28 @@ fun CameraPlayer(
         timelineNonce += 1
     }
     // The continuous track as drawable spans (coalesced so a stitch seam doesn't read as a gap).
-    // Ring's spans come off its timeline fetch; Frigate's are fetched below, pre-coalesced.
+    // Ring's spans come off its timeline fetch; Frigate's are fetched below, media-accurate, and
+    // widened for drawing only at the end (see [frigateLane]).
     val ringLane = remember(footage) { footage?.let { footageSpans(it.segments) } ?: emptyList() }
     // The Frigate continuous lane — where recordings actually exist, so the strip shows "you can
     // scrub anywhere here" instead of rendering blank between event chips. Empty until it
     // resolves — the lane just appears, nothing blocks on it. Mirrors the web CameraPlayer.
     // Keyed on the window too: it opens at the 24h fallback and widens to the real retention when
     // frigateRetentionDays resolves — without the key the lane would stay 24h on a 3-day strip.
-    val frigateLane: List<FootageSpan> by produceState(emptyList(), cam.id, startMs, endMs) {
+    val frigateFootage: List<FootageSpan> by produceState(emptyList(), cam.id, startMs, endMs) {
         value = if (isRing) {
             emptyList()
         } else {
             runCatching { viewModel.cameraFootage(cameraName, startMs, endMs) }.getOrDefault(emptyList())
         }
+    }
+    // Widened for DRAWING only. [frigateFootage] stays media-accurate — every real hole preserved —
+    // because [vodRangeFor] reads it to decide how far a VOD page may stretch, and bridging a hole
+    // there desynchronises the playhead from the picture for the rest of the page (see
+    // FRIGATE_MEDIA_TOLERANCE_MS). Drawing wants the opposite: a 2 s hole is not a gap worth
+    // rendering. Two tolerances at their own point of use, not one serving both.
+    val frigateLane = remember(frigateFootage) {
+        coalesceSpans(frigateFootage, FRIGATE_LANE_TOLERANCE_MS)
     }
     val footageLane = if (isRing) ringLane else frigateLane
 
@@ -530,11 +541,11 @@ fun CameraPlayer(
     // Reolink behind a Home Hub) is mostly gap, and a scrub into it yields null — "No saved
     // recording for this moment" — instead of a dead player. An unresolved lane keeps the plain
     // page: unknown is not none. Mirrors the web CameraPlayer.
-    val vodPage = remember(isLive, isRing, isFrigate, headTime, startMs, endMs, frigateLane) {
+    val vodPage = remember(isLive, isRing, isFrigate, headTime, startMs, endMs, frigateFootage) {
         if (isLive || isRing) {
             null
         } else {
-            vodRangeFor(headTime, TimeRange(startMs, endMs), if (isFrigate) frigateLane else emptyList())
+            vodRangeFor(headTime, TimeRange(startMs, endMs), if (isFrigate) frigateFootage else emptyList())
         }
     }
     // Frigate VOD must also be SIGNED or every segment 401s and the video is silently black — see
@@ -938,7 +949,10 @@ fun CameraPlayer(
                 ClipExportBar(
                     selection = sel,
                     playheadMs = headTime,
-                    footage = footageLane,
+                    // NOT footageLane: coverage asks how much of the range was actually recorded, and
+                    // the lane's 15 s bridging is the one thing that would hide the answer. Clip
+                    // mode is Frigate-only, so this is always the Frigate set.
+                    footage = frigateFootage,
                     state = clipState,
                     error = clipError,
                     onNudge = { edge, delta ->

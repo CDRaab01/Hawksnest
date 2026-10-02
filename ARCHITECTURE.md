@@ -197,6 +197,20 @@ closed):
   same convention `clipExport.coverage` uses). 24/7 cameras are byte-identical: their lane is one
   span per uninterrupted run. This also closed a platform gap — Android's Frigate VOD had no
   `onError` at all, so a dead page stalled silently; it now has `vodFailed` + Retry like the web.
+- **The one tolerance that served two masters (fixed 2026-10-01).** `vodRangeFor`'s correctness
+  rests entirely on "the range is contiguous footage, so playlist time == wall-clock offset" — so
+  it is only as truthful as the spans it is handed. Those spans were coalesced at the parse
+  boundary with the **lane's** 15 s cosmetic tolerance, which meant any hole shorter than 15 s was
+  invisible to the range math. On `nursery_high` a stuck Frigate record process left ~2 s holes
+  between every ~10 s segment (87.7 % coverage); every hole was bridged, the lane reported ONE span
+  across the whole 2-hour page, `vodRangeFor` narrowed nothing, and the linear seek drifted by the
+  accumulated missing footage — a scrub to 7:13:14 PM played 7:23:28 PM. The clip export then
+  looked broken while being correct: it cuts at the time the user *marked*, which was no longer the
+  time on *screen*. The fix is to stop making one set of spans answer two different questions —
+  "where is there footage to draw" tolerates bridging, "what is in the media" does not. The parse
+  now keeps the media-accurate set; `CameraPlayer` widens a copy for the lane; and `ClipExportBar`
+  is fed the media-accurate set too, because `coverage` is asking the question the lane tolerance
+  erases (its own doc comment already warned about exactly this).
 Two things deliberately NOT done: the Android direct-RTSP tier must not be given the hub's IP
 (`ReolinkRtsp.kt` hardcodes channel `01`, so it would silently play channel 1 for all three), and
 no Tailscale `/32` is advertised for the hub (that route only ever served that tier). Retention:
@@ -315,9 +329,13 @@ unwrapped by the mirrored `parseFrigateWsEvents` (`lib/cameraEvents.ts` ⇄ `cor
 2026-07-30): the same shaded "recordings exist here" track Ring cameras have, now drawn for
 Frigate cameras from real recording segments. The payload is one entry per ~10 s segment
 (measured: ~6.5k entries / 1 MB / tens of ms for a 3-day window), so the mirrored
-`parseFrigateWsRecordings` (`lib/ringFootage.ts` ⇄ `core/logic/RingFootage.kt`) coalesces to
-drawable `FootageSpan`s at the parse boundary — 15 s tolerance, chosen to bridge a single
-dropped ~10 s cache segment while leaving real gaps honest. Spans are always `playable: true`
+`parseFrigateWsRecordings` (`lib/ringFootage.ts` ⇄ `core/logic/RingFootage.kt`) coalesces at the
+parse boundary. **Two tolerances, applied at their own point of use** (2026-10-01): the parse keeps
+`FRIGATE_MEDIA_TOLERANCE_MS` (500 ms — float rounding at a seam, nothing else), and the *lane*
+widens them for drawing with `coalesceSpans(..., FRIGATE_LANE_TOLERANCE_MS)` (15 s, enough to
+bridge a single dropped ~10 s cache segment). They were one 15 s tolerance at the parse boundary
+until a camera proved why that cannot be: see "the one tolerance that served two masters" below.
+Spans are always `playable: true`
 (no per-segment URLs to expire, no Ring-style E2E encryption). It reaches the player through the
 source seam (`Source.fetchCameraFootage`, [] when unsupported — demo/mock render laneless, as
 before) and is **visual only**: playback stays on the paged VOD; the lane shows *where* scrubbing

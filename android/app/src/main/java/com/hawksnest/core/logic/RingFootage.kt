@@ -173,13 +173,57 @@ fun footageSpans(segments: List<FootageSegment>, toleranceMs: Long = 1000L): Lis
 }
 
 /**
- * Tolerance when coalescing Frigate recording segments into drawable spans.
+ * Tolerance when coalescing Frigate spans for **drawing**.
  *
  * Frigate writes ~10 s cache segments with sub-second seams between them, but a camera reconnect
  * or a Frigate restart can drop a segment, leaving a one-segment hole that is real but not worth
  * drawing. 15 s bridges those; anything longer renders as an honest gap in the lane.
+ *
+ * Applied by the lane itself (see [coalesceSpans]) — NOT at the parse boundary. It used to be the
+ * parse default, which quietly made it the tolerance for the VOD range math too. See
+ * [FRIGATE_MEDIA_TOLERANCE_MS] for why that was wrong.
  */
-const val FRIGATE_SPAN_TOLERANCE_MS = 15_000L
+const val FRIGATE_LANE_TOLERANCE_MS = 15_000L
+
+/**
+ * Tolerance when coalescing Frigate segments into spans that describe the **media**.
+ *
+ * This is the one `vodRangeFor` reads, and it has to be near zero, because that function's whole
+ * correctness argument is "the range is contiguous footage, so playlist time == wall-clock offset
+ * from the range start". Frigate's VOD does not pad gaps — it concatenates the segments that
+ * exist — so every millisecond bridged here is a millisecond the playhead and the picture drift
+ * apart, cumulatively, for the rest of the page.
+ *
+ * Measured on `nursery_high` 2026-10-01: a stuck record process left ~1-2 s holes between every
+ * ~10 s segment. All of them fell under the 15 s lane tolerance, so the lane reported ONE span
+ * covering the whole 2-hour page, `vodRangeFor` narrowed nothing, and a scrub to 7:13:14 PM
+ * played 7:23:28 PM — 10 minutes of silent drift, and a clip exported from that playhead came
+ * back "wrong" because it was cut at the time the user marked rather than the time they saw.
+ *
+ * 500 ms, not 0: Frigate's segment times are floats and abutting segments routinely differ by a
+ * few milliseconds. This merges rounding, nothing else.
+ */
+const val FRIGATE_MEDIA_TOLERANCE_MS = 500L
+
+/**
+ * Merge neighbouring spans separated by no more than [toleranceMs].
+ *
+ * The lane's half of the split above: parsing keeps the media-accurate spans, and whoever is
+ * *drawing* widens them to taste. Same merge rule as [footageSpans] (only same-playability
+ * neighbours merge) so the two coalescers cannot disagree about what a run is.
+ */
+fun coalesceSpans(spans: List<FootageSpan>, toleranceMs: Long): List<FootageSpan> {
+    val out = mutableListOf<FootageSpan>()
+    for (span in spans.sortedBy { it.startMs }) {
+        val last = out.lastOrNull()
+        if (last != null && last.playable == span.playable && span.startMs - last.endMs <= toleranceMs) {
+            out[out.lastIndex] = last.copy(endMs = maxOf(last.endMs, span.endMs))
+            continue
+        }
+        out += span
+    }
+    return out
+}
 
 /**
  * Unwrap a `frigate/recordings/get` websocket result into drawable [FootageSpan]s — the Frigate
@@ -190,7 +234,9 @@ const val FRIGATE_SPAN_TOLERANCE_MS = 15_000L
  * REST route for this, and the result usually arrives as a JSON **string** the integration didn't
  * decode. The payload is one entry per ~10 s recording segment (measured: ~6.5k entries / 1 MB /
  * tens of ms for a 3-day window), so coalescing here — not in the composable — is what keeps the
- * timeline from drawing thousands of runs.
+ * timeline from drawing thousands of runs. The default tolerance is the MEDIA one: a healthy
+ * camera's segments abut, so they still collapse to a handful of spans, while a camera with real
+ * holes keeps them instead of handing `vodRangeFor` a lie. The lane widens them for drawing.
  *
  * Spans are always `playable = true`: unlike Ring, Frigate has no per-segment URL to expire and no
  * end-to-end encryption — if the segment is on disk, the VOD can serve it. Junk input yields [],
@@ -198,7 +244,7 @@ const val FRIGATE_SPAN_TOLERANCE_MS = 15_000L
  */
 fun parseFrigateWsRecordings(
     result: JsonElement?,
-    toleranceMs: Long = FRIGATE_SPAN_TOLERANCE_MS,
+    toleranceMs: Long = FRIGATE_MEDIA_TOLERANCE_MS,
 ): List<FootageSpan> {
     val element = when {
         result is JsonPrimitive && result.isString ->
