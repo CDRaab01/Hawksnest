@@ -1,5 +1,9 @@
 package com.hawksnest.ui.settings
 
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +41,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.BuildConfig
+import com.hawksnest.ui.components.ConfirmDialog
 import com.hawksnest.ui.components.ConnectionPill
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.PulseButton
@@ -49,6 +54,8 @@ import com.hawksnest.ui.theme.HawksnestTheme
  */
 @Composable
 fun SettingsScreen(
+    /** Back to wherever Settings was opened from (Home's gear, or a widget's "fix it" tap). */
+    onBack: (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val status by viewModel.status.collectAsState()
@@ -91,6 +98,20 @@ fun SettingsScreen(
             .padding(HawksnestTheme.spacing.lg),
         verticalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.md),
     ) {
+        // A title and a way back. Settings has no bottom bar, and a widget can open it as the only
+        // screen above Home, so without this the system back gesture was the only exit.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            }
+            Text(
+                "Settings",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
         SectionHeader("Connection")
         PanelCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -147,9 +168,20 @@ fun SettingsScreen(
                     enabled = url.isNotBlank() && (token.isNotBlank() || hasToken),
                 )
                 if (hasToken) {
+                    var confirmDisconnect by remember { mutableStateOf(false) }
+                    if (confirmDisconnect) {
+                        ConfirmDialog(
+                            title = "Disconnect from Home Assistant?",
+                            text = "The saved token is erased from this phone and the app switches " +
+                                "to demo data. Widgets stop working until you paste a token again.",
+                            confirmLabel = "Disconnect",
+                            onConfirm = { viewModel.disconnect() },
+                            onDismiss = { confirmDisconnect = false },
+                        )
+                    }
                     PulseButton(
                         text = "Disconnect",
-                        onClick = { viewModel.disconnect() },
+                        onClick = { confirmDisconnect = true },
                         modifier = Modifier.weight(1f),
                         tonal = true,
                         channel = HawksnestTheme.pulse.streak,
@@ -159,8 +191,11 @@ fun SettingsScreen(
                 }
             }
             Text(
-                "Create a token in Home Assistant → Profile → Long-lived access tokens. URL is the " +
-                    "Hawksnest proxy on your tailnet (…:8080) or your HA directly (…:8123). No token = demo data.",
+                // The release app talks HTTPS only, to the tailnet name its certificate is issued
+                // for. The old text pointed at :8080 and :8123, neither of which it will connect to.
+                "Create a token in Home Assistant → Profile → Long-lived access tokens. The Base URL " +
+                    "is Hawksnest's HTTPS address on your tailnet, https://<machine>.<tailnet>.ts.net:8443. " +
+                    "No token = demo data.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = HawksnestTheme.spacing.sm),
@@ -175,10 +210,12 @@ fun SettingsScreen(
         )
 
         SectionHeader("Camera direct stream")
+        val serverDirect by viewModel.serverDirectStreams.collectAsState()
         RtspPanel(
             savedUser = rtspUser,
             hasPass = hasRtspPass,
             savedCameraIps = rtspCameraIps,
+            serverCameraCount = serverDirect?.cameras?.size ?: 0,
             onSave = { u, p, ips -> viewModel.saveRtsp(u, p, ips) },
             onClear = { viewModel.clearRtsp() },
         )

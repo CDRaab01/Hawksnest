@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import { CameraOff } from "lucide-react";
 import { useEntityStore, useLogicalCameras } from "../store/entityStore";
 import { useCameraOverlay } from "../store/cameraOverlay";
@@ -19,6 +20,21 @@ export function CameraWall() {
   const cameras = useLogicalCameras();
   const entities = useEntityStore((s) => s.entities);
   const openCamera = useCameraOverlay((s) => s.open);
+
+  // Panorama cameras (dual-lens Reolinks) span the whole row so both lenses show
+  // as one wide banner — Reolink's own presentation — instead of the grid cropping
+  // them to a centre sliver. A tile reports its shape once its snapshot measures;
+  // returning `prev` unchanged keeps this from looping on every snapshot refresh.
+  const [wideIds, setWideIds] = useState<ReadonlySet<string>>(() => new Set());
+  const markWide = useCallback((id: string, isWide: boolean) => {
+    setWideIds((prev) => {
+      if (prev.has(id) === isWide) return prev;
+      const next = new Set(prev);
+      if (isWide) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
   if (cameras.length === 0) {
     return (
@@ -62,7 +78,10 @@ export function CameraWall() {
             type="button"
             onClick={() => openCamera(cam.id)}
             aria-label={`Open ${cam.name} live view`}
-            className="block text-left transition-transform duration-fast ease-ease active:scale-[0.98]"
+            className={[
+              "block text-left transition-transform duration-fast ease-ease active:scale-[0.98]",
+              wideIds.has(cam.id) ? "col-span-2 lg:col-span-3 xl:col-span-4" : "",
+            ].join(" ")}
           >
             <CameraTile
               entity={cam.snapshotEntity}
@@ -75,6 +94,7 @@ export function CameraWall() {
               motionChangedMs={
                 cam.motionId !== null ? parseHaTime(entities[cam.motionId]?.last_changed) : null
               }
+              onWide={(isWide) => markWide(cam.id, isWide)}
             />
           </button>
         ))}

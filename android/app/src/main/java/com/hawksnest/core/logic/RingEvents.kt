@@ -37,9 +37,32 @@ fun ringRecordingUrl(select: HassEntity?): String? =
 fun ringRecordingMissing(select: HassEntity?): Boolean =
     select?.stringAttr("recordingUrl")?.contains("Recording Not Found", ignoreCase = true) == true
 
-/** The event selector's current options (`Motion 1`, `Ding 1`, …), newest-first, or empty. */
+/**
+ * A full ISO-8601 instant embedded in an option string, or null.
+ *
+ * The zone designator is **required** so both platforms resolve the same string to the same
+ * millisecond. Deliberately strict: the web twin used to run `Date.parse` over the option with its
+ * leading word stripped, and `Date.parse("1")` — what `"Motion 1"` reduces to — is not `NaN` in
+ * V8, it is 2001-01-01. Every ring option was being timed, wrongly, by two decades.
+ */
+private val ISO_INSTANT =
+    Regex("""\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})""")
+
+/** The real time an option names, if it names one at all. `"Motion 1"` → null. */
+fun ringOptionTimeMs(option: String): Long? =
+    ISO_INSTANT.find(option)?.value?.let {
+        runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull()
+    }
+
+/**
+ * The event selector's current options (`Motion 1`, `Ding 1`, …), newest-first, or empty.
+ *
+ * Empty when the selector is not reporting: HA restores a retired ring-mqtt entity with its last
+ * `options` list intact, so a dead selector still *looks* like it has a handful of playable events
+ * long after the camera it belonged to was deleted.
+ */
 fun ringEventOptions(select: HassEntity?): List<String> =
-    (select?.attributes?.get("options") as? JsonArray)
+    (select?.takeIf { it.state !in DEAD_STATES }?.attributes?.get("options") as? JsonArray)
         ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
         ?.filter { it.isNotEmpty() }
         ?: emptyList()
@@ -54,21 +77,26 @@ private fun labelOf(option: String): String = when {
  * Build timeline `CameraEvent`s from the selector's current [options] (which stay the playable
  * `Motion N` handles) paired with REAL event times in [timesDesc] (newest-first, decoded from the
  * event ids via [ringEventIdToMs]). Option *i* — the *i*-th most recent — takes the *i*-th most
- * recent real time; when a time is missing (history gap) it falls back to the old even spacing so a
- * row never vanishes. Returned oldest-first to match the timeline's left→right order.
+ * recent real time. Returned oldest-first to match the timeline's left→right order.
+ *
+ * **An option with no recoverable time is dropped, not placed.** It used to fall back to
+ * `nowMs - i * 6 * 60_000`, which drew invented moments in exactly the same ink as real ones:
+ * `camera.front` inherited 30 frozen options from a retired Ring camera and rendered them as a
+ * comb of evenly spaced "recordings" that had never happened, each claiming `hasClip = true`.
+ * There is no `nowMs` parameter any more — with no "now" in scope, no time can be invented.
  */
 fun ringEventsFromOptions(
     options: List<String>,
     timesDesc: List<Long>,
     cameraName: String,
-    nowMs: Long,
 ): List<CameraEvent> =
-    options.mapIndexed { i, opt ->
+    options.mapIndexedNotNull { i, opt ->
+        val startMs = timesDesc.getOrNull(i) ?: ringOptionTimeMs(opt) ?: return@mapIndexedNotNull null
         CameraEvent(
             id = opt,
             camera = cameraName,
             label = labelOf(opt),
-            startMs = timesDesc.getOrNull(i) ?: (nowMs - i * 6 * 60_000L),
+            startMs = startMs,
             endMs = null,
             hasClip = true,
             hasSnapshot = false,
@@ -78,12 +106,11 @@ fun ringEventsFromOptions(
     }.sortedBy { it.startMs }
 
 /**
- * Fallback used when we have no real event times yet: the selector's options on plain even spacing.
- * (This is the pre-Snowflake behavior — kept so the timeline still renders offline / before the
- * history query resolves.) Returned oldest-first.
+ * The selector's options, timed only by whatever each option string carries itself. Used where no
+ * decoded history is available (the web has no `fetchAttributeHistory` seam). Returned oldest-first;
+ * options like `Motion 1` carry no time and so contribute nothing.
  */
 fun ringEventsFromSelect(
     select: HassEntity?,
     cameraName: String,
-    nowMs: Long,
-): List<CameraEvent> = ringEventsFromOptions(ringEventOptions(select), emptyList(), cameraName, nowMs)
+): List<CameraEvent> = ringEventsFromOptions(ringEventOptions(select), emptyList(), cameraName)

@@ -7,6 +7,7 @@ import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
 import com.hawksnest.core.ha.DeviceIndex
 import com.hawksnest.core.ha.HassEntity
+import com.hawksnest.core.ha.haTimeMs
 import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.AlarmView
 import com.hawksnest.core.logic.DoorbellPress
@@ -26,22 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.OffsetDateTime
 import javax.inject.Inject
-
-/**
- * Parse an entity's `last_changed` to epoch ms for the camera age badge. Over the
- * compressed websocket HA sends it as epoch seconds (a numeric string); the REST
- * shape is ISO-8601 — accept both, null when absent/unparseable.
- */
-private fun lastChangedMs(raw: String?): Long? {
-    if (raw.isNullOrEmpty()) return null
-    raw.toDoubleOrNull()?.let { return (it * 1000).toLong() }
-    return runCatching { Instant.parse(raw).toEpochMilli() }
-        .recoverCatching { OffsetDateTime.parse(raw).toInstant().toEpochMilli() }
-        .getOrNull()
-}
 
 data class CameraUi(
     /** Stable logical id (`camera.<base>`) — ring-mqtt's split entities collapse to one. */
@@ -58,6 +44,8 @@ data class CameraUi(
     val streamUrl: String? = null,
     /** ring-mqtt event selector (`select.<base>_event_select`), or null. */
     val eventSelectId: String? = null,
+    /** Whether that selector is reporting — see `LogicalCamera.ringSelectorLive`. */
+    val ringSelectorLive: Boolean = false,
     /** ring-mqtt recorded-event playback stream (`camera.<base>_event`), or null. */
     val eventStreamId: String? = null,
     /** Doorbell press sensor (`binary_sensor.<base>_ding`), or null. */
@@ -92,6 +80,12 @@ data class CameraUi(
      * sleeping camera's badge, in place of a snapshot age that would lie.
      */
     val motionChangedMs: Long? = null,
+    /**
+     * The tile's picture is ring-mqtt's stored `_snapshot` image, taken on ring-mqtt's own schedule,
+     * so its age is the entity's update time. Every other camera's picture (Frigate, the Reolink
+     * integration) is grabbed when it is asked for, so its age is when the app fetched it.
+     */
+    val storedSnapshot: Boolean = false,
 )
 
 data class HomeUi(
@@ -105,7 +99,6 @@ data class HomeUi(
     val secureAllClear: Boolean = true,
     val offlineLabel: String? = null,
     val cameras: List<CameraUi> = emptyList(),
-    val liveCameraCount: Int = 0,
     /** The most recent active doorbell ring, if any (drives the doorbell banner). */
     val doorbell: DoorbellPress? = null,
     val roomCount: Int = 0,
@@ -120,6 +113,7 @@ class HomeViewModel @Inject constructor(
     private val connection: ConnectionManager,
     private val pushNav: com.hawksnest.push.PushNav,
     private val cameraSession: com.hawksnest.ui.cameras.CameraSession,
+    private val directStreamSource: com.hawksnest.core.net.DirectStreamSource,
 ) : ViewModel() {
 
     private val state = connection.state
@@ -133,8 +127,17 @@ class HomeViewModel @Inject constructor(
 
     /** Open the camera lightbox — rendered at the nav-graph root off [CameraSession], not here,
      *  so system picture-in-picture can show it (a Dialog window can't be minimized). */
-    fun openLightbox(cameras: List<CameraUi>, initial: CameraUi, eventId: String? = null) =
-        cameraSession.open(cameras, initial, eventId)
+    fun openLightbox(
+        cameras: List<CameraUi>,
+        initial: CameraUi,
+        eventId: String? = null,
+        start: com.hawksnest.core.logic.CameraStart = com.hawksnest.core.logic.CameraStart.LIVE,
+    ) = cameraSession.open(cameras, initial, eventId, start)
+
+    /** A triggered-alarm alert's own words, pinned over Home until dismissed (see PushNav). */
+    val alertBanner: StateFlow<com.hawksnest.push.AlertBanner?> = pushNav.alertBanner
+
+    fun dismissAlert() = pushNav.dismissAlert()
 
     /** Keep the open lightbox's switcher list fresh as the camera list recomposes. */
     fun updateLightboxCameras(cameras: List<CameraUi>) = cameraSession.updateCameras(cameras)
@@ -154,6 +157,11 @@ class HomeViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUi())
 
     init {
+        // Fetch the server's direct-stream settings as soon as HA is reachable, so the first camera
+        // opened doesn't wait on them. Cached, so reconnects don't refetch.
+        viewModelScope.launch {
+            connection.state.status.collect { if (it == ConnectionStatus.CONNECTED) directStreamSource.get() }
+        }
         viewModelScope.launch { connection.start() }
     }
 
@@ -225,15 +233,16 @@ class HomeViewModel @Inject constructor(
                 // attr first IF the snapshot capture time is ever exposed on the entity (today it
                 // isn't — ring-mqtt sets no json_attributes_topic), then fall back to last_updated,
                 // which DOES bump on each ~30s snapshot republish for an open camera.
-                lastChangedMs = lastChangedMs(lc.snapshotEntity.stringAttr("timestamp"))
-                    ?: lastChangedMs(lc.snapshotEntity.lastUpdated)
-                    ?: lastChangedMs(lc.snapshotEntity.lastChanged),
+                lastChangedMs = haTimeMs(lc.snapshotEntity.stringAttr("timestamp"))
+                    ?: haTimeMs(lc.snapshotEntity.lastUpdated)
+                    ?: haTimeMs(lc.snapshotEntity.lastChanged),
                 // The _snapshot still IS ring-mqtt's freshest frame (republished ~every 30s for an
                 // open camera); cache-busting re-fetches it. Do NOT source from the live entity —
                 // camera_proxy on an idle go2rtc stream returns stale/black or errors.
                 snapshotUrl = snapshotUrl(lc.snapshotEntity, resolvedBase),
                 streamUrl = streamUrl(lc.liveEntity, resolvedBase),
                 eventSelectId = lc.eventSelectId,
+                ringSelectorLive = lc.ringSelectorLive,
                 eventStreamId = lc.eventStreamId,
                 dingId = lc.dingId,
                 motionId = lc.motionId,
@@ -246,7 +255,8 @@ class HomeViewModel @Inject constructor(
                 // `streaming` while its PIR holds it awake. Gated to Frigate battery cameras so a
                 // Ring tile (whose `idle` means nothing of the sort) is untouched.
                 asleep = isFrigateCamera(lc.liveEntity) && lc.isBattery && lc.snapshotEntity.state == "idle",
-                motionChangedMs = lc.motionId?.let { entities[it] }?.let { lastChangedMs(it.lastChanged) },
+                motionChangedMs = lc.motionId?.let { entities[it] }?.let { haTimeMs(it.lastChanged) },
+                storedSnapshot = lc.snapshotEntity.entityId.endsWith("_snapshot"),
             )
         }
         val doorbell = activeDoorbellPress(logical, entities, System.currentTimeMillis())
@@ -268,7 +278,6 @@ class HomeViewModel @Inject constructor(
             secureAllClear = if (disconnected) false else security.allClear,
             offlineLabel = if (disconnected) null else security.offlineLabel,
             cameras = cameras,
-            liveCameraCount = cameras.count { it.live },
             doorbell = doorbell,
             roomCount = rooms.size,
             roomsPreview = rooms.take(4).joinToString(" · ") { it.area },

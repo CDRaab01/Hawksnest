@@ -23,6 +23,9 @@ data class LogEvent(
     val entityId: String?,
     val domain: String?,
     val state: String?,
+    /** False when HA sent no message and [message] is a fallback ("changed to off") — the History
+     *  screen then words the change itself (see LogbookText.kt). */
+    val hasHaMessage: Boolean = true,
 )
 
 /**
@@ -88,5 +91,6 @@ fun normalizeLogbook(raw: List<JsonObject>): List<LogEvent> =
             entityId = entityId,
             domain = domain,
             state = e.str("state"),
+            hasHaMessage = e.str("message") != null,
         )
     }.filter { it.timeMs > 0 }.sortedByDescending { it.timeMs }

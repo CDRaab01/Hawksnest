@@ -136,3 +136,59 @@ describe("vodRangeFor", () => {
     expect(vodRangeFor(head, bounds, island)).toEqual(vodRangeFor(head + 60_000, bounds, island));
   });
 });
+
+describe("regression: wall-clock and playlist time must not drift (nursery_high, 2026-10-01)", () => {
+  // A stuck Frigate record process left ~2 s holes between every ~10 s segment on one camera.
+  // Every hole was under the lane's 15 s coalescing tolerance, which was ALSO the parse default,
+  // so the lane reported one unbroken span across the whole 2-hour page. `vodRangeFor` therefore
+  // narrowed nothing, and `vodPositionSecondsInPage` — which assumes the page is solid footage —
+  // seeked by wall-clock offset into a playlist that is only the surviving footage concatenated.
+  // A scrub to 7:13:14 PM played 7:23:28 PM, and a clip exported from that playhead was cut at
+  // the marked time rather than the time on screen, so it came back "the wrong time".
+  const PAGE_START = 1790805600_000; // 18:00:00 local, a 2h grid boundary
+  const bounds = { startMs: PAGE_START, endMs: PAGE_START + 4 * HOUR };
+  const TARGET = 1790809994_000; // 19:13:14 local — what the user marked
+
+  /** The real shape: 10 s of footage every 12 s of wall clock. */
+  const gappy = Array.from({ length: 600 }, (_, i) => ({
+    startMs: PAGE_START + i * 12_000,
+    endMs: PAGE_START + i * 12_000 + 10_000,
+    playable: true,
+  }));
+
+  it("narrows the page to the contiguous segment under the playhead", () => {
+    const range = vodRangeFor(TARGET, bounds, gappy);
+    expect(range).not.toBeNull();
+    // Not the whole 2h page — just the one ~10 s run the playhead is actually inside.
+    expect(range!.endMs - range!.startMs).toBeLessThanOrEqual(10_000);
+    expect(range!.startMs).toBeLessThanOrEqual(TARGET);
+    expect(range!.endMs).toBeGreaterThan(TARGET);
+  });
+
+  it("keeps the seek honest: offset into the range is offset into the media", () => {
+    const range = vodRangeFor(TARGET, bounds, gappy)!;
+    // The invariant vodRangeFor exists to guarantee: because the range is contiguous footage,
+    // wall-clock offset from its start IS the playlist position. Under the old behaviour the
+    // range was the full page and this offset was 4394 s into a playlist holding only ~3855 s of
+    // footage before that moment — the 10-minute drift.
+    const pos = vodPositionSecondsInPage(TARGET, range.startMs);
+    expect(pos).toBeLessThanOrEqual(10);
+    expect(pos).toBe(Math.floor((TARGET - range.startMs) / 1000));
+  });
+
+  it("would have drifted ~10 minutes with the page unnarrowed", () => {
+    // Pin the old failure so nobody restores the single-tolerance shortcut by accident.
+    const naive = vodPositionSecondsInPage(TARGET, PAGE_START);
+    const footageBefore =
+      gappy
+        .filter((s) => s.startMs < TARGET)
+        .reduce((a, s) => a + (Math.min(s.endMs, TARGET) - s.startMs), 0) / 1000;
+    expect(naive).toBe(4394);
+    expect(Math.round(naive - footageBefore)).toBeGreaterThan(600);
+  });
+
+  it("a scrub into one of the holes is an honest 'no recording', not a wrong frame", () => {
+    const inHole = PAGE_START + 11_000; // between segment 0 (ends +10s) and segment 1 (+12s)
+    expect(vodRangeFor(inHole, bounds, gappy)).toBeNull();
+  });
+});

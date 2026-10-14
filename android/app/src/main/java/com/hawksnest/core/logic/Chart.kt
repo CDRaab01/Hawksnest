@@ -172,12 +172,18 @@ private fun alignUp(t: Long, step: Long): Long {
 /**
  * Round clock/date labels across `[t0, t1]`, spaced on a human step (hours or days, never "every 47
  * minutes"). Returns an empty list when the span is empty.
+ *
+ * The step is the one whose tick count comes closest to [target], not the first one at or above
+ * `span / target`. Rounding up could halve the ticks: a 30-day chart asked for 7.5-day spacing,
+ * got 14, and because the grid is anchored at local midnight, which in any zone west of UTC falls
+ * before `t0`, the first tick then slid a whole step late. Two date labels across a month, and
+ * a test that only passed in UTC. Ties go to the finer step (TIME_STEPS is finest-first).
  */
 fun timeAxis(t0: Long, t1: Long, target: Int = 4): List<TimeTick> {
     val span = t1 - t0
     if (span <= 0) return emptyList()
-    val raw = span / max(1, target)
-    val step = TIME_STEPS.firstOrNull { it >= raw } ?: TIME_STEPS.last()
+    val want = max(1, target).toDouble()
+    val step = TIME_STEPS.minBy { abs(span.toDouble() / it - want) }
     val ticks = mutableListOf<TimeTick>()
     var t = alignUp(t0, step)
     while (t <= t1) {

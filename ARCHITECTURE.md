@@ -106,7 +106,14 @@ attribute, and a battery cam's entity churns attribute-less mid-negotiation), ho
 watchdog + "Connecting…" overlay for battery-camera wake, and the HLS tier resolves its
 `camera/stream` URL **only when that tier is active** (an eager resolve wakes the camera twice)
 with a 15 s bound in `haSource`. Tile age badges use `snapshotFreshnessMs` (`timestamp` attr →
-`last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras.
+`last_updated` → `last_changed`) — `last_changed` alone reads hours-stale on cameras. **Android
+dates a tile from its picture instead** (`core/logic/CameraTiles.kt`): a ring-mqtt `_snapshot`
+is a stored image, so its age is the entity's update time; every other camera's snapshot (Frigate,
+the Reolink integration) is grabbed when asked for, so its age is when this app fetched it; a grabbed live frame covers the snapshot only while it is the newer picture. Every
+wired tile used to read "2m ago" at once, which was HA rotating the camera token. Each tile is
+LIVE, STALE (older than 6 min, or its last refresh failed), ASLEEP, NO_SIGNAL or LOADING, and the
+Cameras header counts those same states ("11 live · 2 asleep · 1 no signal") instead of HA
+availability.
 
 **Snapshot refresh is per-backend, driven by two counters, not one**
 (`components/snapshotBucketContext.ts` → `useSnapshotBucket(isFrigate)`, Kotlin twin
@@ -125,7 +132,22 @@ frame. The seed only has to differ across sessions; increments stay monotonic wi
 It used to be `isRing = camera.eventSelectId !== null`, one flag standing in for three unrelated
 questions — where recorded events come from, whether playback is a per-clip resolution or a seekable
 VOD, and whether the go2rtc live tier applies — which only held while the sole NVR was Ring. Ring
-wins when a camera looks like both, because the Ring path owns the retry/signature-expiry mechanics.
+wins when a camera looks like both, because the Ring path owns the retry/signature-expiry mechanics
+— **but only while Ring can actually answer**. The vote is `hasRingSelector` *plus*
+`ringSelectorLive`, because **retiring a backend does not unregister its entities**: deleting the
+Ring "Front Driveway" (2026-09-12) left `select.front_event_select` and `switch.front_siren`
+registered-but-`unavailable`, and the Frigate camera that took the `front` base name inherited
+them — so a camera whose footage lives in Frigate rendered a Ring timeline (see the ring-events
+note below) and a Siren button whose `switch.turn_on` could not land. A dead selector now loses to
+a backend that *can* answer, and only to that: with nothing else recording, Ring still wins, so a
+ring-only camera whose selector blips `unavailable` during a ring-mqtt restart keeps its timeline
+instead of dropping to `"none"` for the life of the view (both platforms pin this decision at open).
+That liveness rule is the same one `dingIdFor` has always applied to the doorbell sensor, now
+generalised in `cameraModel.ts`/`CameraModel.kt` to the ring selector and the siren switch — the
+selector *id* is still bound when dead, because it is the handle clip resolution calls
+`select_option` on, but its liveness travels separately. `motionId` is deliberately left out:
+`DEAD_STATES` includes `"unknown"`, which is a legitimate pre-first-report state for a battery
+camera's PIR.
 Frigate membership comes from `lib/frigate.ts` (`isFrigateCamera`, Kotlin twin
 `core/logic/Frigate.kt`): the frigate-hass-integration stamps `client_id` + `camera_name` onto the
 `camera.*` entity it creates, and membership is read off those attributes — synchronous, no fetch.
@@ -186,6 +208,20 @@ closed):
   same convention `clipExport.coverage` uses). 24/7 cameras are byte-identical: their lane is one
   span per uninterrupted run. This also closed a platform gap — Android's Frigate VOD had no
   `onError` at all, so a dead page stalled silently; it now has `vodFailed` + Retry like the web.
+- **The one tolerance that served two masters (fixed 2026-10-01).** `vodRangeFor`'s correctness
+  rests entirely on "the range is contiguous footage, so playlist time == wall-clock offset" — so
+  it is only as truthful as the spans it is handed. Those spans were coalesced at the parse
+  boundary with the **lane's** 15 s cosmetic tolerance, which meant any hole shorter than 15 s was
+  invisible to the range math. On `nursery_high` a stuck Frigate record process left ~2 s holes
+  between every ~10 s segment (87.7 % coverage); every hole was bridged, the lane reported ONE span
+  across the whole 2-hour page, `vodRangeFor` narrowed nothing, and the linear seek drifted by the
+  accumulated missing footage — a scrub to 7:13:14 PM played 7:23:28 PM. The clip export then
+  looked broken while being correct: it cuts at the time the user *marked*, which was no longer the
+  time on *screen*. The fix is to stop making one set of spans answer two different questions —
+  "where is there footage to draw" tolerates bridging, "what is in the media" does not. The parse
+  now keeps the media-accurate set; `CameraPlayer` widens a copy for the lane; and `ClipExportBar`
+  is fed the media-accurate set too, because `coverage` is asking the question the lane tolerance
+  erases (its own doc comment already warned about exactly this).
 Two things deliberately NOT done: the Android direct-RTSP tier must not be given the hub's IP
 (`ReolinkRtsp.kt` hardcodes channel `01`, so it would silently play channel 1 for all three), and
 no Tailscale `/32` is advertised for the hub (that route only ever served that tier). Retention:
@@ -304,9 +340,13 @@ unwrapped by the mirrored `parseFrigateWsEvents` (`lib/cameraEvents.ts` ⇄ `cor
 2026-07-30): the same shaded "recordings exist here" track Ring cameras have, now drawn for
 Frigate cameras from real recording segments. The payload is one entry per ~10 s segment
 (measured: ~6.5k entries / 1 MB / tens of ms for a 3-day window), so the mirrored
-`parseFrigateWsRecordings` (`lib/ringFootage.ts` ⇄ `core/logic/RingFootage.kt`) coalesces to
-drawable `FootageSpan`s at the parse boundary — 15 s tolerance, chosen to bridge a single
-dropped ~10 s cache segment while leaving real gaps honest. Spans are always `playable: true`
+`parseFrigateWsRecordings` (`lib/ringFootage.ts` ⇄ `core/logic/RingFootage.kt`) coalesces at the
+parse boundary. **Two tolerances, applied at their own point of use** (2026-10-01): the parse keeps
+`FRIGATE_MEDIA_TOLERANCE_MS` (500 ms — float rounding at a seam, nothing else), and the *lane*
+widens them for drawing with `coalesceSpans(..., FRIGATE_LANE_TOLERANCE_MS)` (15 s, enough to
+bridge a single dropped ~10 s cache segment). They were one 15 s tolerance at the parse boundary
+until a camera proved why that cannot be: see "the one tolerance that served two masters" below.
+Spans are always `playable: true`
 (no per-segment URLs to expire, no Ring-style E2E encryption). It reaches the player through the
 source seam (`Source.fetchCameraFootage`, [] when unsupported — demo/mock render laneless, as
 before) and is **visual only**: playback stays on the paged VOD; the lane shows *where* scrubbing
@@ -441,6 +481,62 @@ is Ring's "Front Driveway"). Ring signs those URLs for ~15 minutes, so the playe
 ahead of the earliest expiry and once more on a playback error before calling a clip failed. When
 the service is unreachable the player falls back to the ring-mqtt selector path below, which is:
 
+**That fallback no longer invents times.** An option the selector cannot be timed from — and
+`Motion 1` is exactly that — used to be plotted at `now - i * 6 min`, drawn in the same ink, at the
+same height, with the same `hasClip`, as a real recording. `camera.front` made the cost visible: it
+had inherited 30 frozen options from the retired Ring camera above and rendered a comb of thirty
+evenly spaced "moments", none of which had happened. `ringEventsFromOptions` now **drops** an
+option with no recoverable time, and the `nowMs` parameter is gone from both platforms' signatures
+so no time *can* be invented; `ringEventOptions` likewise returns empty for a selector that is not
+reporting, since HA restores a retired mqtt entity with its last `options` list intact. Time
+recovery is one strict helper, `ringOptionTimeMs`, requiring a full ISO-8601 instant **with** a zone
+designator so both platforms resolve a string to the same millisecond. The web's previous heuristic
+(`Date.parse` over the option with its leading word stripped) was worse than the comb and silently
+so: `Date.parse("1")` is not `NaN` in V8, it is 2001-01-01, so every option was timed two decades
+out. The honest consequence of all this is that a Ring camera the `ring-timeline` service cannot
+match shows an **empty** timeline rather than a fabricated one.
+
+**Watching a camera marks its own timeline** (`core/logic/LiveViewRecording.kt`, Android only for
+now) — the behaviour Ring has, where opening a live view leaves an entry you can scrub back to.
+Drawn in the orange `streak` channel rather than `effort`-blue, because "somebody looked" and "the
+camera saw something" are different answers to *why is there video here*.
+
+The footage was never the hard part: nine of the eleven Frigate cameras record 24/7, so a live view
+is over video that exists anyway. What was missing was a marker, and the choice of marker matters.
+An HA helper's history was the obvious option and is wrong — **HA's recorder keeps history far
+longer than Frigate keeps video**, so those blocks would outlive their own footage and 404, which
+is the exact defect the paragraph above just removed. Instead the client opens a real Frigate
+**manual event** for the duration (`frigate.create_event` → `frigate.end_event`, already shipped by
+the integration with `SupportsResponse.OPTIONAL`, so **no HA configuration is involved**). That
+makes the block genuinely playable and ties its lifetime to the footage it points at.
+
+Three things it has to get right, all of them about the failure case rather than the happy path:
+
+- **Bounded segments.** `duration: 0` means "until ended", which is correct until the app dies
+  mid-view and that camera records forever. Events are minted at `LIVE_VIEW_SEGMENT_SEC` (300 s,
+  the service's own maximum) and chained while the view is open, so a crash leaks one segment. The
+  renewal is minted *before* the previous is ended, so the chain has no gap.
+- **Ending is a `DisposableEffect`, not a state flip.** The same reason the transports are stopped
+  from a lifecycle callback: a STOPPED activity keeps its composition, so nothing recomposes to
+  notice. The teardown runs `NonCancellable` — it executes on the way out of a cancelled scope, and
+  an unended event is a camera left recording.
+- **The two Home Hub battery cameras are parked in Frigate** (`enabled: false`) until their PIR
+  fires, so live-viewing one records nothing. The client publishes `ON` to
+  `frigate/<cam>/enabled/set` for the session — *and* sets
+  `input_boolean.hawksnest_live_view_<cam>`, because the `Hawksnest: Frigate on demand — <cam>`
+  automation parks the camera two minutes after the PIR clears and would otherwise stop the
+  recording halfway through. That is the likely case, not the edge case: the reason someone opens
+  the front camera is usually the same PIR hit that started the automation. `Hawksnest: release a
+  stuck live-view guard` parks the camera anyway after 30 minutes if the client never clears it.
+
+Two things deliberately **not** done. Ring cameras are out of scope — Ring records live views
+server-side and `ring-timeline` already carries a `kind` per event, so surfacing those is a
+different job, and blocked on that service's slug matching. And nothing filters the review stream:
+Frigate promotes a manual event to `severity: alert` regardless of `review.alerts.labels`
+(measured — `live_view` became an alert while the list was `[person, car]`), but the HA
+notification automation gates on an explicit label allow-list, so a live view cannot page anyone.
+The only cost is a cosmetic row in Frigate's own review UI.
+
 Ring clip **URLs come off the selector itself**: ring-mqtt 5.x has no `camera.<base>_event` entity —
 selecting an option makes it fetch Ring's signed cloud recording (an expiring S3 mp4) and republish
 the selector with a `recordingUrl` attribute, so `store/ringClip.ts` (mirrored in
@@ -486,6 +582,54 @@ scroll. Fullscreen lives in the same component — on Android it rotates to land
 system bars, which is why `MainActivity` now declares `configChanges` for orientation (without it
 the rotation recreates the activity and costs a 2–4 s WebRTC renegotiation).
 
+**On Android the picture has a stage, not just its own rectangle** (2026-09-29). The lightbox
+lays the player out top-down and tells it how much room it has (`CameraPlayer`'s `viewport`); the
+`ZoomableFrame` then gets every bit of height the control row and the timeline leave free, and each
+tier fits the picture in the middle of it (they all scale to fit). `VideoZoom.kt` takes the
+picture's fitted size alongside the stage (`fittedContent`, `content` parameters): an axis where
+the magnified picture is still smaller than the stage stays centred, and once larger it pans to the
+picture's edges; the zoom ceiling rises to twice the "cover" scale where that beats 4x. Double-tap
+fills the stage around the tapped point (`doubleTapZoom`) and again resets. The case that drove it:
+a 3.5:1 hub panorama used to be a thin strip between two black bands, with pinch trapped inside
+the strip; now it zooms to the full stage height and swipes sideways. Fullscreen and PiP are the
+same stage at screen size. Fullscreen state moved up to the lightbox, which fixes the fullscreen
+box that drew at a fraction of the screen (it sat inside the lightbox's vertical scroll, so "fill
+the height" had no height) and keeps fullscreen across a camera switch, which remounts the player.
+Passing the same size for stage and picture reproduces the original math exactly, which is what the
+web still uses: its player has no stage yet.
+
+**Every camera surface renders at the picture's true aspect ratio, not a hardcoded 16:9**
+(`lib/mediaAspect.ts`, `useMediaAspect`). The fleet is no longer all 16:9: the two outdoor
+Reolinks are dual-lens cameras whose two lenses stitch into one ~32:9 panorama (`1536×432`), and
+the doorbell is 4:3. The old blanket `aspect-video` box letterboxed a panorama into a thin strip in
+the player and — worse, with `object-cover` — cropped its two lenses off entirely on the wall. The
+hook measures the ratio from the media itself (`videoWidth/videoHeight` on `loadedmetadata`,
+`naturalWidth/naturalHeight` on an image's `load`), defaulting to 16:9 until then, so no per-camera
+resolution table is needed and the 4:3 doorbell is corrected by the same path. Each live/recorded
+transport, the image fallback tiers, and the scrubbed-past placeholder set their own element's
+`aspect-ratio`; the wall (`CameraWall` + `CameraTile`) additionally gives a panorama a full-width
+tile (`col-span` across the grid) and `object-contain`, so both lenses show as one banner —
+Reolink's own presentation — with the `ZoomableFrame` above providing the pinch-zoom into it. The
+wide/normal split is one threshold (`WIDE_ASPECT_THRESHOLD`, unit-tested with the pure
+`aspectFromDimensions`/`isWideAspect` helpers).
+
+**Android is in lockstep** (`core/logic/MediaAspect.kt`, same constants and same pure helpers, so a
+drift is a visible diff). `useMediaAspect` itself does not port — it is React state plumbing; the
+Compose measurement seam is `CameraSession.videoSize`, the size the WebRTC renderers already
+reported to shape the PiP window, now also shaping the player frame (`ZoomableFrame`'s
+`aspectRatio`, which used to be a hardcoded `16f / 9f`). **Every tier in the ladder has to report
+it**, or the box changes shape when the ladder steps down: the two WebRTC renderers already did,
+and the RTSP/HLS/VOD tiers now report `onVideoSizeChanged` (rotation-corrected the same way), MJPEG
+reports its decoded bitmap, and the snapshot tiers report the decoded drawable's intrinsic size —
+the analogue of the web's `naturalWidth`/`naturalHeight`. `CameraSnapshot` also flips its default
+from `ContentScale.Crop` to `Fit`: Crop kept only the centre ~50% of a 1536×432 panorama, which is
+what "it isn't showing the wide view" actually looked like, and the grid tile passes Crop back
+explicitly only for a camera that is *not* wide (its cell is deliberately 16:9). The one intentional
+asymmetry is the wall itself: web gets a `col-span` from CSS grid, while Android's wall is a
+`Column` of 2-up `Row`s with no `GridItemSpan` to reach for, so `wallRows` (Kotlin-only, by design,
+unit-tested including the "behaves exactly like `chunked(2)` when nothing is wide" guard) packs a
+panorama into its own full-width row.
+
 **The 24/7 continuous track is a second, separate source** (`/footage`, `lib/ringFootage.ts`,
 mirrored in `core/logic/RingFootage.kt`). `video_search` returns only discrete *events*, so before
 this a quiet 3–5 AM window read as "no recording" on the seven cameras that record all night. Ring
@@ -509,6 +653,39 @@ lives.
 Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Full guide:
 `android/README.md`.
 
+- **Nothing runs behind a dark screen (2026-09-19).** Two rules, both learned from a battery audit,
+  both invisible in tests and in the foreground:
+  - **The HA socket lives only while an activity is started.** `ConnectionManager` used to open it
+    in `Application.onCreate` and never close it — harmless until push arrived, because the ntfy
+    foreground service keeps the process alive indefinitely, so the phone held an unfiltered
+    `subscribe_entities` firehose in a pocket (radio + CPU woken per state change in the house, a
+    full entity-map copy + Ring dedupe + shortcut scan per delta). `ForegroundTracker` (a
+    started-activity count on `ActivityLifecycleCallbacks`) drives
+    `ConnectionManager.setForeground`: the live source stops `BACKGROUND_GRACE_MS` (30 s — an app
+    switch, rotation or in-flight control echo is not a reconnect) after the last activity stops
+    and reconnects on the next start. The stop goes through `HaState.setStatus(CONNECTING)`, so
+    locks/alarm mask exactly as on a real drop; `HaState.restartStaleClock()` restarts the 120 s
+    grace at resume so the return shows the dimmed "Reconnecting" second, not the Offline screen.
+    A process created with no activity (widget tap, boot, push service) never connects at all.
+    `ConnectionManager.settled()` makes the calls a *restarting screen* issues
+    (`webrtcOffer`/`streamUrl`/`signedRecordingUrlAt`/`callService`) wait ≤8 s for an in-progress
+    connect, because "not connected yet" otherwise reads to the live ladder as "tier failed" and
+    steps a healthy camera down — and a launcher shortcut fires from `onCreate`, before `onStart`
+    has asked for the socket back. **Anything that must work with the app closed may not ride this
+    socket** (push = ntfy's own stream; widgets = REST via `WidgetHaClient`). The ntfy stream's
+    client also turns OFF the inherited 20 s OkHttp ping (it applies to HTTP/2, i.e. to this
+    stream behind Tailscale Serve); its 75 s read timeout already detects a dead connection.
+  - **Every camera transport stops at `ON_STOP`, synchronously** (`ui/cameras/StopWhileBackgrounded`).
+    Players used to live as long as their composable, but a STOPPED activity keeps its
+    composition: power button / screen timeout with a camera open unmounted nothing, so video kept
+    streaming and libwebrtc's AudioTrack — which plays from negotiation even while muted — kept an
+    AudioMix wakelock, screen off, until the process died. **It must be a lifecycle callback, not a
+    state flip:** Compose pauses the frame clock at ON_STOP, so nothing recomposes (and no
+    `onDispose` runs) until the next ON_START — exactly the window that matters. WebRTC/go2rtc
+    close the session (idempotent) and renegotiate via a restart key; ExoPlayer (HLS/VOD, RTSP)
+    `stop()`s — keeping item + position — and `prepare()`s; MJPEG cancels its reader; `TalkButton`
+    closes a latched mic and does **not** reopen it. PiP is PAUSED, not stopped, so a minimized
+    live camera keeps playing; screen-off *in* PiP stops it.
 - `core/ha/` — HA WebSocket/REST client (the Kotlin analogue of the web store). **All user-facing
   control calls go through `ControlGate`** (via `ConnectionManager.control`): it is the crash-safety
   layer (a failed call becomes a message on the app-level snackbar, never an uncaught coroutine
@@ -533,7 +710,21 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
 - `core/logic/`, `core/automations/` — entity → domain-model mapping, automation surfaces.
   Includes the ring/ring-mqtt dedupe (`Dedupe.kt`, applied centrally at `HaSource`'s entity sink,
   mirroring the web) and the Devices sectioning model (`DeviceSections.kt`: per-room three-tier
-  rhythm — FEATURED lock/climate/alarm cards, CONTROL rows with inline switches, READONLY rows).
+  rhythm — FEATURED lock/climate/alarm cards, CONTROL rows with inline switches, READONLY rows). The
+  Automations tab (Android) groups by room without renaming anything: `titleAutomation` reads a
+  room, then a title and subtitle, out of each name ("Nursery LED effect - garage door opened" →
+  Nursery / "LED effect" / "Garage door opened"); a room assigned to the automation in HA wins, and
+  the `Hawksnest:` / `Hawksnest push:` ones sit last in "Behind the scenes" with no Run. Rows are
+  name, last ran, switch; Run (confirmed, since HA's trigger skips conditions) and Edit live in the
+  sheet a row opens, which words the triggers (`describeTriggers`) and shows the automation's own
+  description. The web tab is still the flat list. The editor (Android) is built to read as the
+  sentence it makes: `ruleSentence` (`RuleWords.kt`) renders the draft on top as it changes and
+  becomes the name when the name is left blank; trigger types are four tiles; devices are picked in
+  a sheet with search, type chips (`deviceKind`) and rooms, each row with its state right now, and
+  kinds it has no words for (backups, diagnostics) hidden until "Show everything"; what a device
+  does is chips in its own words (`triggerChoices` / `conditionChoices`: "Opens", "Is locked"),
+  writing the same raw states as before; times use the system time picker. The saved config and the
+  "edit in HA" fallback are unchanged.
 - `ui/<feature>/` — home/rooms/area/devices/cameras/entity/history/automations/settings.
 - **The entity-history chart carries axes** (`lib/chart.ts` ⇄ `core/logic/Chart.kt`, ported 1:1 and
   tested on both; drawn by `components/HistoryChart.tsx` ⇄ `ui/components/HistoryChart.kt`). The
@@ -554,9 +745,18 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   `Exception` the fetch guards. Two independent fixes, both needed: the feed is capped to the 500
   newest **after** the noise filter (so the kept events are useful ones), and the screen is a
   `LazyColumn` so cost stops scaling with the window. The cap is honest — the screen says when it
-  truncated rather than letting the day appear to end early.
+  truncated rather than letting the day appear to end early. The category filter runs **before**
+  the cap, in `HistoryViewModel`, so a quiet category can't read "No events" behind 500 noisy ones.
+  `logbook/get_events` sends a state change with no name or message (HA's own frontend fills both
+  in), so rows are named through the same `displayName` chain as Devices and worded per domain and
+  device class (`core/logic/LogbookText.kt`: "Motion cleared", "Unlocked", "Went offline").
 - **Camera live ladder** (`ui/cameras/CameraPlayer.kt`): recorded VOD (when scrubbed) →
-  **RTSP-direct** → **go2rtc-direct** → HA WebRTC → HLS → MJPEG → snapshot. The go2rtc-direct
+  **RTSP-direct** → **go2rtc-direct** → HA WebRTC → HLS → MJPEG → snapshot. `core/logic/liveTier`
+  decides the rung once and both the ladder and the status label read it, so only the real-time
+  tiers say "Live"; MJPEG says "Live · reduced", snapshots "Snapshots only", and the undecided wait
+  "Connecting". The Low/High toggle asks whether go2rtc *lists* a sub stream, not whether the
+  relay's breaker is closed (it hid the toggle after one relay failure), and choosing a quality
+  re-arms the relay. The go2rtc-direct
   tier (`Go2rtcPlayer.kt`) negotiates recvonly WebRTC straight against the dedicated go2rtc over
   its WS API (`/go2rtc/api/ws?src=<base>`, same signaling `TalkButton` speaks — both share
   `Go2rtc.kt`'s `go2rtcWsUrl`), skipping the ring-mqtt/ffmpeg hop for ~1–2 s first frame. Media
@@ -651,13 +851,27 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   than a `VideoPlayer` mode: VideoPlayer's construction is built around HLS/VOD concerns (authSig
   + Bearer data-source wrapping, live-edge offsets, seek-within-media, duration reporting), none of
   which apply here.
-  **Off by default.** It needs a camera account and a per-camera IP, both entered in Settings
-  (`ui/settings/RtspPanel.kt`) and stored in `CredentialStore` with the password under the same
-  Keystore wrap as the HA token. Unconfigured, the ladder behaves exactly as before. Nothing in
-  the repo carries a real IP or account — it is public.
+  It needs a camera account and a per-camera IP. **The Hawksnest server provides both** to any
+  device holding a valid HA token, so a signed-in phone needs no setup (owner-approved
+  2026-09-29): at pod start the `render-direct-streams` initContainer
+  (`deploy/render-direct-streams.sh`) reads `FRIGATE_REOLINK_USER` / `FRIGATE_REOLINK_PASSWORD` /
+  `FRIGATE_REOLINK_IP_<CAMERA>` from the `frigate-credentials` Secret (the same keys Frigate's
+  camera paths use) into a memory-backed volume, skipping the Home Hub, whose battery cameras share
+  one address by channel. nginx serves it at `/hawksnest/direct-streams` only after HA accepts the
+  request's bearer token (`auth_request` to `/api/`; no header is refused without asking HA),
+  `no-store`, tailnet-only like everything else there. The nginx container never mounts the Secret.
+  `core/net/DirectStreamSource` fetches it with the app's own token and keeps it in memory only
+  (30 min; 60 s after a failure, keeping the last good copy). A device can still enter its own
+  settings in Settings (`ui/settings/RtspPanel.kt`, stored in `CredentialStore` under the same
+  Keystore wrap as the HA token); a complete local set wins (`chooseDirectStreams`). With neither,
+  the ladder behaves exactly as before. Nothing in the repo carries a real IP or account — it is
+  public. After changing the camera password or an IP in the Secret, restart the `hawksnest`
+  deployment: the file is rendered once per pod start.
   **Fails fast, three ways**, because the tier is optional and a dead frame is worse than a
-  step-down: a 4 s RTSP connect timeout, a 5 s no-first-frame deadline (an unreachable camera can
-  hang setup without ever erroring), and a 7 s post-play stall timeout. That last one matters
+  step-down: a 4 s RTSP connect timeout, a 7 s no-first-frame deadline (an unreachable camera can
+  hang setup without ever erroring; it was 5 s until the September 2026 audit timed first frames at
+  up to 4.0 s in-app and 4.8 s camera-side, and missing it restarts the relay from scratch), and a
+  7 s post-play stall timeout. That last one matters
   because the main stream is FIXED-bitrate — a weak link degrades to a stall, not to lower quality,
   whereas go2rtc's WebRTC below it adapts. Only the first two report to `core/net/RtspHealth`; a
   stall is the network's fault, not the camera's.
@@ -679,7 +893,8 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   Fixed section order (the hierarchy IS the design, no per-user section config):
   Needs attention (offline / battery ≤20%, absent when healthy) → Pinned → Security (locks
   then alarm, full cards — a lock never becomes a tile) → Lights & switches (2-col
-  `ControlTile` grid, room as caption) → Climate & fans → Covers → Media → one Cameras
+  `ControlTile` grid, room as caption) → Sirens (rows, never tiles; see below) → Climate &
+  fans → Covers → Media → one Cameras
   summary row and one Sensors summary row, each opening a sheet built from the shared
   device-group components. The v2 chip filter is GONE — sections are the categories.
   Search still bypasses everything (flat `searchResults`, one tap to detail); long-press →
@@ -697,6 +912,14 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   whose only symptoms lived in diagnostic entities. Web's `entityHealth.needsAttention`
   carries the same unavailable-only floor; `online` keeps the broader no-live-reading meaning
   for entity-detail display.
+  **Sirens are their own card kind** (`CardType.SIREN`, `core/logic/Siren.kt`, 2026-09-28): a
+  `switch.*_siren` (ring-mqtt's camera sirens, the alarm panel's `switch.mfa_alarm_siren`) is a
+  switch only in HA's plumbing. As a SWITCH it sat in the tile grid as a one-tap toggle, truncated
+  to "Basement Stora…", and a stray tap sounded it. Every surface that draws one (Sirens rows,
+  search results, full cards) now uses `ui/components/SirenToggle`: two taps to sound, one to
+  silence, the same asymmetry as the doorbell panel. Reolink's `switch.*_siren_on_event` is a
+  config toggle and deliberately stays a SWITCH; the `siren` domain is untouched. **Android-only
+  for now** — the web's `cards.ts` still maps these to its switch card.
   **Domain contract** (`core/logic/Cards.kt NON_DEVICE_DOMAINS`, lockstep with `src/lib/ha.ts`):
   besides automations/scripts/scenes/people/zones/sun, the hub also excludes `button`/`event`/
   `image` (since 2026-08-07) — measured against the live house they were ~73 of 305 rows and all
@@ -779,12 +1002,27 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
 - **Push** (`push/`) — self-hosted **ntfy**, no FCM/Google. `NtfyPushService` is a `specialUse`
   foreground service holding one streaming connection to `<base>/<topic>/json`; each frame is
   parsed (`NtfyMessage`, pure/tested), classified (`PushRoute.kindOf`: doorbell/alarm/generic),
-  and raised via `PushNotifier` (per-kind channels). **Tap → deep-link:** a doorbell notification's
-  `click` URL carries `?camera=camera.<base>`; `PushRoute.cameraOf` extracts it, the tap intent
-  carries it (`EXTRA_CAMERA`), and `PushNav` (an app-scoped bus) hands it to the nav shell —
-  which brings Home forward (`onNewIntent` covers a warm tap) and opens that camera's lightbox.
-  A specific camera opens in an overlay, not a NavHost route, which is why this goes through
-  `PushNav` rather than a start destination. Off by default — opt in from Settings, which requests
+  and raised via `PushNotifier` (per-kind channels). **Every tap lands on the thing the alert is
+  about.** `PushRoute.tapTarget` reads the `click` URL: `/entity/<id>` (the web app's own path, so
+  the plain ntfy app and a browser land in the same place) opens that device's screen,
+  `?camera=…&event=…` opens that camera at that moment, and an alarm that went off opens Home with
+  the alert pinned as a banner, because Home is where Off is. `PushRoute.actionsFor` adds up to
+  three buttons: Watch / Talk / Reply on a doorbell, View clip / Live on a person, the device plus
+  its camera on a garage alert, and **Arm away** on a "disarmed" alert. That is the only button
+  that changes the house, and it needs the phone unlocked; nothing on a notification disarms or
+  unlocks (the launcher-shortcut rule below, for the same reason). Buttons that act in place (Reply,
+  its three quick replies, Arm away) go to the non-exported `PushActionReceiver`, which speaks REST
+  with the stored token like the widgets do, reads the result back, and rewrites the notification
+  with what actually happened. **One way in:** notification taps and buttons, widget taps and
+  launcher shortcuts all become a target on `PushNav` (an app-scoped bus) in one `MainActivity`
+  handler, from `onCreate` and `onNewIntent` alike, and the nav shell acts on it from whatever screen
+  is showing. It returns to Home by *popping* to it (`goHome`), not with the bottom bar's
+  save/restore navigate: from Settings that pattern restored the stack it had just saved and put
+  Settings straight back, so a doorbell tap there did nothing. A camera opens in an overlay, not a
+  NavHost route, which is why none of this can be a start destination. Debug builds carry a
+  `DebugPushReceiver` (`adb shell am broadcast -a com.hawksnest.debug.PUSH`, shell-only) that
+  posts a test alert through the real notifier without touching the household's topic. Off by
+  default — opt in from Settings, which requests
   `POST_NOTIFICATIONS` and offers the **battery-optimization exemption** (One UI dozes long-idle
   foreground services); `PushSettings` (DataStore) persists it; `BootReceiver` restarts the
   listener after a reboot only if enabled. The server side (ntfy Deployment + the HA doorbell/alarm
@@ -801,7 +1039,8 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   and the widget makes you tap twice. `core/logic/shortcutsFor` owns that rule and is tested on
   it. Taps route through `ConnectionManager.control` like any other user action (same pending
   state, same failure snackbar), and `MainActivity` consumes the extra so a configuration change
-  cannot re-fire it.
+  cannot re-fire it. A shortcut is often what started the process, so it waits (bounded) for the
+  house to load before resolving; resolving at once found nothing and the tap silently did nothing.
 - **Appearance** — `HawksnestTheme` has always taken `darkTheme` as a parameter and the light
   palette shipped with the V1 gates; what was missing was a control. `core/logic/ThemePref`
   (Dark/Light/System) persists in `DevicePrefsStore` and `MainActivity` resolves it via the pure
@@ -1057,9 +1296,16 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
     handles both: `widgetCandidates` takes the registry maps as parameters, and each filter
     degrades to a no-op on an empty map (`isPrimaryEntity` falls back to the suffix denylist,
     `dedupeRingMqtt` returns its input), so the fallback list is worse but never wrong.
-  - **Refresh** is on render, after every action, on tapping an error, and — while the app happens
-    to be running — pushed from the live socket by `widget/WidgetLiveBridge` (throttled to one
-    pass every 3 s). `updatePeriodMillis` is the platform's 30-minute floor and is cosmetic only.
+  - **Refresh** is on render, after every action, on tapping an error, and — while the app is on
+    screen (the socket stops 30 s after it isn't; see "Nothing runs behind a dark screen") —
+    pushed from the live socket by `widget/WidgetLiveBridge` (throttled to one
+    pass every 3 s). **The bridge publishes live readings only** (`HaState.liveEntitiesOrNull`:
+    CONNECTED and no stale window). Stopping the socket behind a dark screen is a drop, a drop
+    masks locks and the alarm to `unavailable`, and the process is still alive to see it: before
+    this gate every lock and alarm widget turned "Unavailable" 30 s after leaving the app, stamped
+    with the current time. The read order in `liveEntitiesOrNull` (entities first, stale clock
+    second) is what makes a masked map impossible to return. `updatePeriodMillis` is the
+    platform's 30-minute floor and is cosmetic only.
     There is deliberately **no background polling**: it would cost battery for a widget that is
     only reachable on the tailnet anyway.
     **The render-triggered refresh must be throttled** (`WidgetRepository.lastFetchAt`, 10 s,

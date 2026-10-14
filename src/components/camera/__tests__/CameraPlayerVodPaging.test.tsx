@@ -49,6 +49,7 @@ function frigateCamera(base: string, name: string): LogicalCamera {
     snapshotEntity: entity,
     eventStreamId: null,
     eventSelectId: null,
+    ringSelectorLive: false,
     dingId: null,
     motionId: null,
     sirenSwitchId: null,

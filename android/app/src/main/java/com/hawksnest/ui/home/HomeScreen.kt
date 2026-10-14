@@ -23,7 +23,9 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,8 +58,17 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hawksnest.core.ha.ConnectionStatus
+import com.hawksnest.core.logic.ALARM_TRANSITIONAL
 import com.hawksnest.core.logic.ARM_BUTTONS
+import com.hawksnest.core.logic.TilePicture
+import com.hawksnest.core.logic.armButtonEnabled
 import com.hawksnest.core.logic.alarmView
+import com.hawksnest.core.logic.aspectFromDimensions
+import com.hawksnest.core.logic.DEFAULT_ASPECT
+import com.hawksnest.core.logic.cameraCountLabel
+import com.hawksnest.core.logic.isWideAspect
+import com.hawksnest.core.logic.tilePicture
+import com.hawksnest.core.logic.wallRows
 import com.hawksnest.core.logic.graceExpired
 import com.hawksnest.core.logic.relativeTime
 import com.hawksnest.core.logic.snapshotBucket
@@ -144,10 +155,12 @@ fun HomeScreen(
         val target = pushCamera
         // Wait for the camera list before acting; once we can, open the match (if any)
         // and consume so it fires exactly once (unknown camera → just lands on Home).
-        if (target != null && ui.cameras.isNotEmpty()) {
+        if (target != null && !target.isFresh(System.currentTimeMillis())) {
+            viewModel.consumePushTarget()
+        } else if (target != null && ui.cameras.isNotEmpty()) {
             ui.cameras.firstOrNull { it.id == target.cameraId }?.let {
                 // eventId null for doorbell/alarm taps — those open live, as before.
-                viewModel.openLightbox(ui.cameras, it, target.eventId)
+                viewModel.openLightbox(ui.cameras, it, target.eventId, target.start)
             }
             viewModel.consumePushTarget()
         }
@@ -238,6 +251,10 @@ fun HomeScreen(
             ReconnectingBanner(asOfMs = lastUpdate.takeIf { it > 0 })
         }
 
+        // A tapped triggered-alarm alert, in its own words, above the hero where Off is.
+        val alert by viewModel.alertBanner.collectAsState()
+        alert?.let { a -> AlertBannerCard(a, onDismiss = viewModel::dismissAlert) }
+
         HomeContent(
             ui = ui,
             pending = pending,
@@ -272,6 +289,19 @@ private fun HomeContent(
     onDoorbellDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Each camera's measured picture shape, learned from its decoded snapshot — no per-camera
+    // resolution table (core/logic/MediaAspect.kt). `wideCameraIds` is the subset wide enough to
+    // deserve a full-width row; both only ever grow, which is what stops a snapshot refresh from
+    // looping recomposition.
+    var cameraAspects by remember { mutableStateOf(mapOf<String, Float>()) }
+    var wideCameraIds by remember { mutableStateOf(setOf<String>()) }
+    // What each tile's own snapshot fetches have seen, by camera id. Hoisted out of the tiles so
+    // the header counts exactly the states the tiles show; the two used to disagree ("14/14 live"
+    // over a black tile).
+    val fetches = remember { mutableStateMapOf<String, TileFetch>() }
+    // Recomputed on every refresh tick (the buckets change every 10 s), which is also what lets a
+    // picture age into STALE while nothing else on screen changes.
+    val nowMs = System.currentTimeMillis()
     val ring = ui.doorbell
     Column(
         modifier = modifier,
@@ -294,8 +324,7 @@ private fun HomeContent(
 
         SecurityHero(
             ui,
-            busy = ui.alarmEntityId?.let { it in pending } == true ||
-                ui.alarmRawState in setOf("arming", "disarming", "pending"),
+            inFlight = ui.alarmEntityId?.let { it in pending } == true,
             enabled = controlsEnabled,
             onArm = onArm,
             onDisarm = { onArm("alarm_disarm") },
@@ -307,26 +336,49 @@ private fun HomeContent(
                 channel = HawksnestTheme.pulse.effort,
                 trailing = {
                     Text(
-                        "${ui.liveCameraCount}/${ui.cameras.size} live",
+                        cameraCountLabel(ui.cameras.map { tileView(it, fetches[it.id], nowMs).state }),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 },
             )
-            ui.cameras.chunked(2).forEach { rowCams ->
+            // A dual-lens panorama gets a full-width row instead of a cropped half-width cell —
+            // the Compose answer to the web wall's `col-span` (see core/logic/MediaAspect.kt).
+            // Which cameras are wide is learned from the decoded snapshots, not a table.
+            wallRows(ui.cameras) { it.id in wideCameraIds }.forEach { rowCams ->
                 Row(horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.sm)) {
                     rowCams.forEach { cam ->
                         CameraTile(
                             cam = cam,
+                            view = tileView(cam, fetches[cam.id], nowMs),
                             // A Frigate camera that sleeps (battery, behind a Home Hub) rides the
                             // shared beat like Ring: its frame is not current the instant it is
                             // asked for, so the on-open tick would buy the same stale image twice.
                             snapshotModel = bustCache(cam.snapshotUrl, snapshotBucket(cam.isFrigate && !cam.isBattery, sharedBucket, onOpenBucket)),
+                            onSnapshotResult = { ok ->
+                                val before = fetches[cam.id] ?: TileFetch()
+                                fetches[cam.id] = if (ok) {
+                                    TileFetch(okAtMs = System.currentTimeMillis(), failed = false)
+                                } else {
+                                    before.copy(failed = true)
+                                }
+                            },
                             onClick = { onOpenLightbox(cam) },
+                            aspect = cameraAspects[cam.id] ?: DEFAULT_ASPECT,
+                            onAspect = { ratio ->
+                                // Only ever GROW the set, and only on a real change, so a snapshot
+                                // refresh cannot loop recomposition (the web wall's `markWide`).
+                                if (isWideAspect(ratio) && cam.id !in wideCameraIds) {
+                                    wideCameraIds = wideCameraIds + cam.id
+                                }
+                                if (cameraAspects[cam.id] != ratio) {
+                                    cameraAspects = cameraAspects + (cam.id to ratio)
+                                }
+                            },
                             modifier = Modifier.weight(1f),
                         )
                     }
-                    if (rowCams.size == 1) Spacer(Modifier.weight(1f))
+                    if (rowCams.size == 1 && rowCams[0].id !in wideCameraIds) Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -391,7 +443,8 @@ private fun LifeSafetyStrip(ui: HomeUi) {
 @Composable
 private fun SecurityHero(
     ui: HomeUi,
-    busy: Boolean,
+    /** This app's own arm/disarm call is still waiting on HA. */
+    inFlight: Boolean,
     onArm: (String) -> Unit,
     onDisarm: () -> Unit,
     enabled: Boolean = true,
@@ -399,8 +452,11 @@ private fun SecurityHero(
     val pulse = HawksnestTheme.pulse
     val haptics = rememberHaptics()
     // Which circle was tapped, so only its spinner shows while HA arms/disarms. Cleared on settle.
+    // The spinner covers HA's exit delay too; the buttons' enabled state does not (see
+    // armButtonEnabled — Off has to stay live through a countdown).
     var tapped by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(busy) { if (!busy) tapped = null }
+    val settling = inFlight || ui.alarmRawState in ALARM_TRANSITIONAL
+    LaunchedEffect(settling) { if (!settling) tapped = null }
     // While reconnecting the alarm entity is masked to `unavailable` (never a stale mode), so no
     // circle reads active; drop the channel tint too so the hero doesn't imply a posture.
     PanelCard(channel = if (enabled) ui.alarm?.let { pulse.color(it.channel) } else null, raised = true) {
@@ -415,8 +471,8 @@ private fun SecurityHero(
                         icon = ARM_ICON[b.service] ?: Icons.Filled.LockOpen,
                         active = enabled && ui.alarmRawState == b.state,
                         channel = pulse.color(alarmView(b.state).channel),
-                        busy = busy && tapped == b.service,
-                        enabled = enabled && !busy,
+                        busy = settling && tapped == b.service,
+                        enabled = enabled && armButtonEnabled(b, ui.alarmRawState, inFlight),
                         onClick = {
                             haptics.toggleOn()
                             tapped = b.service
@@ -509,9 +565,15 @@ private fun ArmCircle(
 @Composable
 private fun CameraTile(
     cam: CameraUi,
+    view: TileView,
     snapshotModel: String?,
+    onSnapshotResult: (Boolean) -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The picture's measured shape; [DEFAULT_ASPECT] until a frame decodes. */
+    aspect: Float = DEFAULT_ASPECT,
+    /** Reports that shape back up so the wall can give a panorama its own row. */
+    onAspect: ((Float) -> Unit)? = null,
 ) {
     val pulse = HawksnestTheme.pulse
     val name = cam.name
@@ -520,25 +582,39 @@ private fun CameraTile(
         Box(
             Modifier
                 .fillMaxWidth()
-                .aspectRatio(16f / 9f)
+                .aspectRatio(aspect)
                 .clickable(onClick = onClick),
         ) {
-            // Prefer the frame captured while the user last watched this camera live (LiveFrameStore)
-            // over ring-mqtt's stale interval snapshot — so a tile updates to "what I just saw live"
-            // the moment they return to the grid. Falls back to the refreshing snapshot until then.
-            val liveFrame = LiveFrameStore.get(cam.id)
+            // Crop is right for a normal camera: the cell is 16:9, the picture is 16:9, and
+            // filling it beats hairline bars. It is wrong for a 32:9 panorama, where it kept only
+            // the centre ~50% and cropped one lens off entirely.
+            val scale = if (isWideAspect(aspect)) ContentScale.Fit else ContentScale.Crop
+            // The snapshot always keeps fetching underneath, even while a live frame covers it, so
+            // it can take over once it is the newer picture. A parked battery camera gets no fetch
+            // at all: Frigate answers with its grey error image (at HTTP 200) while the pipeline
+            // is off, which would decode as a "frame"; its last live frame is the truthful picture.
+            CameraSnapshot(
+                model = if (cam.asleep) null else snapshotModel,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = scale,
+                onAspect = onAspect,
+                onResult = onSnapshotResult,
+            )
+            // The frame grabbed while the owner last watched this camera live (LiveFrameStore),
+            // shown only while it is newer than the snapshot. It used to win for the life of the
+            // process, so a camera watched this morning showed this morning's picture all day.
+            val liveFrame = view.liveFrame
             if (liveFrame != null) {
+                LaunchedEffect(liveFrame.bitmap.width, liveFrame.bitmap.height) {
+                    aspectFromDimensions(liveFrame.bitmap.width, liveFrame.bitmap.height)
+                        ?.let { onAspect?.invoke(it) }
+                }
                 Image(
                     bitmap = liveFrame.bitmap,
                     contentDescription = "Camera snapshot",
-                    contentScale = ContentScale.Crop,
+                    contentScale = scale,
                     modifier = Modifier.fillMaxSize(),
                 )
-            } else {
-                // A parked battery camera gets no fetch at all: Frigate answers with its grey
-                // error image (at HTTP 200) while the pipeline is off, which would decode as a
-                // "frame". The last live frame above, if any, is the truthful picture.
-                CameraSnapshot(model = if (cam.asleep) null else snapshotModel, modifier = Modifier.fillMaxSize())
             }
             // A camera HA reports unavailable (a closed/offline Ring camera that can't serve a
             // frame) gets a clear "No signal" over the dimmed last frame. This is HA's reliable
@@ -568,16 +644,20 @@ private fun CameraTile(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(HawksnestTheme.spacing.xs),
             ) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(if (live && !cam.asleep) pulse.recovery else Color.White.copy(alpha = 0.4f)))
-                // Ring-style age badge. When we're showing a frame captured from the live view, stamp
-                // ITS grab time (so a just-watched battery cam reads "now", not the 7h-old snapshot);
-                // otherwise the snapshot's age. Falls back to LIVE/— when we have no time at all.
-                // A sleeping camera's snapshot age would lie (HA re-publishes the entity without a
-                // new frame), so it reports when its motion sensor last moved instead.
+                // Green only for a picture that is actually current (see core/logic/CameraTiles.kt).
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (view.state == TilePicture.LIVE) pulse.recovery else Color.White.copy(alpha = 0.4f)))
+                // The age of the PICTURE: when a Frigate snapshot was fetched, a Ring snapshot's own
+                // update time, or when a live frame was grabbed. Never HA's token rotation, which
+                // made every wired tile read "2m ago" at once. A sleeping camera's last picture is
+                // old by design, so it reports when its motion sensor last moved instead.
+                val age = view.pictureAtMs?.let { relativeTime(it) }
                 Text(
-                    when {
-                        cam.asleep -> cam.motionChangedMs?.let { "Motion ${relativeTime(it)}" } ?: "Asleep"
-                        else -> (liveFrame?.capturedAtMs ?: cam.lastChangedMs)?.let { relativeTime(it) } ?: if (live) "LIVE" else "—"
+                    when (view.state) {
+                        TilePicture.ASLEEP -> cam.motionChangedMs?.let { "Motion ${relativeTime(it)}" } ?: "Asleep"
+                        TilePicture.NO_SIGNAL -> "—"
+                        TilePicture.LOADING -> "Loading"
+                        TilePicture.LIVE -> age ?: "Live"
+                        TilePicture.STALE -> if (view.refreshFailed) "Not updating" + (age?.let { " · $it" } ?: "") else age ?: "Stale"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White.copy(alpha = 0.9f),
@@ -592,6 +672,89 @@ private fun CameraTile(
             ) {
                 Text(name, style = MaterialTheme.typography.bodyMedium, color = Color.White)
             }
+        }
+    }
+}
+
+/** What a tile's own snapshot fetches have seen: when a frame last decoded, and whether the latest
+ *  refresh failed. */
+private data class TileFetch(val okAtMs: Long? = null, val failed: Boolean = false)
+
+/** Everything a tile shows about its picture, computed once and shared with the header count. */
+private data class TileView(
+    val state: TilePicture,
+    val pictureAtMs: Long?,
+    val refreshFailed: Boolean,
+    /** The grabbed live frame, when it is the newer picture and should cover the snapshot. */
+    val liveFrame: com.hawksnest.ui.cameras.LiveFrame?,
+)
+
+/**
+ * Which picture a tile shows and how old it is. A ring-mqtt snapshot is a stored image, so its age
+ * is the entity's own update time; every other camera's snapshot (Frigate, the Reolink integration)
+ * is grabbed when fetched, so its age is the fetch. A live frame grabbed while watching wins only
+ * while it is newer.
+ */
+private fun tileView(cam: CameraUi, fetch: TileFetch?, nowMs: Long): TileView {
+    val loadedAt = fetch?.okAtMs
+    val snapshotAt = when {
+        loadedAt == null -> null
+        cam.storedSnapshot -> cam.lastChangedMs
+        else -> loadedAt
+    }
+    val grabbed = LiveFrameStore.get(cam.id)
+    val showGrabbed = grabbed != null && (cam.asleep || loadedAt == null || snapshotAt == null || grabbed.capturedAtMs > snapshotAt)
+    val refreshFailed = !showGrabbed && fetch?.failed == true
+    val pictureAt = if (showGrabbed) grabbed!!.capturedAtMs else snapshotAt
+    return TileView(
+        state = tilePicture(
+            haAvailable = cam.live,
+            asleep = cam.asleep,
+            hasPicture = showGrabbed || loadedAt != null,
+            lastFetchFailed = refreshFailed,
+            pictureAtMs = pictureAt,
+            nowMs = nowMs,
+        ),
+        pictureAtMs = pictureAt,
+        refreshFailed = refreshFailed,
+        liveFrame = grabbed.takeIf { showGrabbed },
+    )
+}
+
+/**
+ * The alert a triggered-alarm notification carried, pinned over Home until dismissed. It says what
+ * the notification said (HA's words, so it names the sensor when HA did) and nothing more: the
+ * hero right below it is where the owner acts. Critical colour, because a triggered alarm is the
+ * one state that means "deal with this now".
+ */
+@Composable
+private fun AlertBannerCard(alert: com.hawksnest.push.AlertBanner, onDismiss: () -> Unit) {
+    val critical = MaterialTheme.colorScheme.error
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(critical.copy(alpha = 0.12f))
+            .border(1.dp, critical.copy(alpha = 0.5f), MaterialTheme.shapes.medium)
+            .padding(horizontal = HawksnestTheme.spacing.md, vertical = HawksnestTheme.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(alert.title, style = MaterialTheme.typography.titleMedium, color = critical)
+            if (alert.body.isNotBlank()) {
+                Text(
+                    alert.body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+        IconButton(onClick = onDismiss) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Dismiss alert",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

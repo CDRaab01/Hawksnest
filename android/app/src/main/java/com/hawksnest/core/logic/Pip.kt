@@ -20,8 +20,12 @@ fun shouldEnterPip(sessionOpen: Boolean, isLive: Boolean): Boolean = sessionOpen
 /**
  * PiP window aspect ratio as a width:height pair, from the source video's dimensions.
  * The platform rejects ratios outside 1:2.39..2.39:1 (IllegalArgumentException), so extreme
- * sources clamp to the nearest allowed edge; unknown/degenerate input falls back to 16:9 —
- * every camera in the house is 16:9, so the fallback is exact until the first frame reports.
+ * sources clamp to the nearest allowed edge; unknown/degenerate input falls back to 16:9.
+ *
+ * That fallback is a **guess, not a fact**: the fleet is no longer all 16:9 (the two Home Hub
+ * cameras are 1536x432 dual-lens panoramas, which clamp to 2.39:1 here, and the doorbell is 4:3).
+ * It only has to hold until the first frame reports — see `MediaAspect.kt`, which shapes the
+ * in-app player frame off the same measurement.
  */
 fun pipAspect(width: Int?, height: Int?): Pair<Int, Int> {
     if (width == null || height == null || width <= 0 || height <= 0) return 16 to 9

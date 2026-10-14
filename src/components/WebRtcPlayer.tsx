@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { webrtcOffer, webrtcCandidate } from "../store/connection";
 import { applyPlayoutBuffer, BATTERY_PLAYOUT_BUFFER_MS } from "../lib/playoutBuffer";
+import { useMediaAspect } from "../lib/mediaAspect";
 
 /**
  * Low-latency live view over WebRTC, negotiated through HA's `camera/webrtc/offer`
@@ -29,6 +30,8 @@ export function WebRtcPlayer({
   onFail: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Size to the stream's true shape (a dual-lens Reolink is ~32:9) — see mediaAspect.
+  const { style: aspectStyle, onVideoMeta } = useMediaAspect();
   // Keep onFail current without re-running the negotiation effect on each render.
   const onFailRef = useRef(onFail);
   onFailRef.current = onFail;
@@ -141,8 +144,10 @@ export function WebRtcPlayer({
         playsInline
         poster={poster}
         onPlaying={() => setConnecting(false)}
+        onLoadedMetadata={onVideoMeta}
         aria-label="Live camera view"
-        className="aspect-video w-full rounded-lg bg-black object-contain"
+        className="w-full rounded-lg bg-black object-contain"
+        style={aspectStyle}
       />
       {connecting && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-black/40">

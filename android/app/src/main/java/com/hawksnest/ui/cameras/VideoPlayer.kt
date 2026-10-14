@@ -15,6 +15,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -48,6 +49,9 @@ fun VideoPlayer(
     onDurationMs: ((Long) -> Unit)? = null,
     /** Fired on a fatal playback error (dead playlist, expired token) so the host can step down. */
     onError: (() -> Unit)? = null,
+    /** The media's real (width, height), so the frame around this tier takes the picture's shape
+     *  rather than a hardcoded 16:9 — see `core/logic/MediaAspect.kt`. */
+    onVideoSize: ((Int, Int) -> Unit)? = null,
     /** Audio gate — defaults muted; the chrome's MuteButton is the way to sound.
      *  Recorded Frigate VOD carries a real audio track (`-c:a aac`). */
     muted: Boolean = true,
@@ -63,6 +67,7 @@ fun VideoPlayer(
     val context = LocalContext.current
     val currentOnDurationMs by rememberUpdatedState(onDurationMs)
     val currentOnError by rememberUpdatedState(onError)
+    val currentOnVideoSize by rememberUpdatedState(onVideoSize)
     val uri: Uri = if (url == DEMO_CLIP_URI) {
         RawResourceDataSource.buildRawResourceUri(R.raw.camera_loop)
     } else {
@@ -123,6 +128,14 @@ fun VideoPlayer(
             override fun onPlayerError(error: PlaybackException) {
                 currentOnError?.invoke()
             }
+            // Rotation-corrected the same way the WebRTC renderers do it, so a rotated source
+            // reports the shape the picture is actually drawn in.
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                val swap = videoSize.unappliedRotationDegrees % 180 != 0
+                val w = if (swap) videoSize.height else videoSize.width
+                val h = if (swap) videoSize.width else videoSize.height
+                if (w > 0 && h > 0) currentOnVideoSize?.invoke(w, h)
+            }
         }
         player.addListener(listener)
         onDispose {
@@ -169,6 +182,19 @@ fun VideoPlayer(
     LaunchedEffect(paused) {
         player.playWhenReady = !paused
     }
+
+    // Screen off / app backgrounded: stop() drops the loader and the decoder (and ExoPlayer's
+    // audio wakelock with them) but keeps the media item and position, so coming back is a
+    // prepare() — a recording resumes where it was, a live feed rejoins at the live edge. Without
+    // this an HLS live view kept downloading segments behind a dark screen. See
+    // StopWhileBackgrounded for why it is a lifecycle callback and not a recomposition.
+    StopWhileBackgrounded(
+        onStop = { player.stop() },
+        onRestart = {
+            player.prepare()
+            if (liveStream) player.seekToDefaultPosition()
+        },
+    )
 
     AndroidView(
         modifier = modifier,

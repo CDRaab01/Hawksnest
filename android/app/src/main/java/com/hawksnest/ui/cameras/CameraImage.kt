@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import com.hawksnest.core.logic.aspectFromDimensions
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import kotlinx.coroutines.delay
@@ -28,10 +29,29 @@ private val PLACEHOLDER = Brush.verticalGradient(listOf(Color(0xFF2A2F37), Color
  *
  * To avoid the tile flashing black on every refresh, we keep the last successfully-decoded frame
  * painted underneath and only let the new frame replace it once it has loaded. A failed refresh
- * leaves the last good frame in place rather than blanking to black.
+ * leaves the last good frame in place rather than blanking to black, and reports through
+ * [onResult] so the caller can say the picture is no longer current instead of passing it off as
+ * live.
  */
 @Composable
-fun CameraSnapshot(model: String?, modifier: Modifier = Modifier) {
+fun CameraSnapshot(
+    model: String?,
+    modifier: Modifier = Modifier,
+    /**
+     * **Fit by default.** The caller's box is normally the picture's own shape (see
+     * `core/logic/MediaAspect.kt`), where Fit is a no-op — and where the box briefly disagrees it
+     * letterboxes instead of cropping. Crop kept only the centre ~50% of a 1536x432 panorama,
+     * which is what "it isn't showing the wide view" looked like. Pass Crop explicitly only where
+     * the box is deliberately a different shape from the picture.
+     */
+    contentScale: ContentScale = ContentScale.Fit,
+    /** The decoded frame's intrinsic ratio, once known — the still-image analogue of a
+     *  renderer's frame-size callback. */
+    onAspect: ((Float) -> Unit)? = null,
+    /** Each fetch's outcome: true when a frame decoded, false when it failed. The frame stays on
+     *  screen either way, so this is how a caller learns the picture has stopped updating. */
+    onResult: ((Boolean) -> Unit)? = null,
+) {
     if (model == null) {
         Box(modifier.background(PLACEHOLDER))
         return
@@ -46,7 +66,7 @@ fun CameraSnapshot(model: String?, modifier: Modifier = Modifier) {
                 model = prev,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
+                contentScale = contentScale,
             )
         }
         // Foreground: the incoming frame. It paints nothing until it succeeds, so the base frame
@@ -56,11 +76,21 @@ fun CameraSnapshot(model: String?, modifier: Modifier = Modifier) {
             model = model,
             contentDescription = "Camera snapshot",
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
+            contentScale = contentScale,
             onState = { state ->
                 when (state) {
-                    is AsyncImagePainter.State.Success -> { lastLoaded = model; failed = false }
-                    is AsyncImagePainter.State.Error -> if (lastLoaded == null) failed = true
+                    is AsyncImagePainter.State.Success -> {
+                        lastLoaded = model
+                        failed = false
+                        onResult?.invoke(true)
+                        // naturalWidth/naturalHeight's analogue: the decoded drawable's own size.
+                        val d = state.result.drawable
+                        aspectFromDimensions(d.intrinsicWidth, d.intrinsicHeight)?.let { onAspect?.invoke(it) }
+                    }
+                    is AsyncImagePainter.State.Error -> {
+                        if (lastLoaded == null) failed = true
+                        onResult?.invoke(false)
+                    }
                     else -> Unit
                 }
             },
@@ -89,7 +119,13 @@ fun bustCache(url: String?, bucket: Long): String? {
  * feed from being recomposed (and hitching) every time the snapshot refresh ticks.
  */
 @Composable
-fun RefreshingSnapshot(url: String?, modifier: Modifier = Modifier, intervalMs: Long = 10_000L) {
+fun RefreshingSnapshot(
+    url: String?,
+    modifier: Modifier = Modifier,
+    intervalMs: Long = 10_000L,
+    contentScale: ContentScale = ContentScale.Fit,
+    onAspect: ((Float) -> Unit)? = null,
+) {
     // Monotonic counter (not wall-clock-derived) so a backward system-clock jump can't repeat a
     // bucket and serve a stale frame. Each tick is a distinct cache-buster → a real refetch.
     val bucket by produceState(0L, url) {
@@ -98,5 +134,10 @@ fun RefreshingSnapshot(url: String?, modifier: Modifier = Modifier, intervalMs: 
             value += 1
         }
     }
-    CameraSnapshot(model = bustCache(url, bucket), modifier = modifier)
+    CameraSnapshot(
+        model = bustCache(url, bucket),
+        modifier = modifier,
+        contentScale = contentScale,
+        onAspect = onAspect,
+    )
 }

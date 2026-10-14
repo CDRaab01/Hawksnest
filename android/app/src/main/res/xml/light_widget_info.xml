@@ -28,4 +28,5 @@
     android:previewImage="@drawable/ic_widget_light"
     android:description="@string/widget_light_description"
     android:configure="com.hawksnest.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable"
     android:widgetCategory="home_screen" />

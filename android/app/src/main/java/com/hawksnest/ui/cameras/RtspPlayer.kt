@@ -45,9 +45,13 @@ fun RtspPlayer(
     /** Audio gate — defaults muted; the chrome's MuteButton is the way to sound. */
     muted: Boolean = true,
     modifier: Modifier = Modifier,
+    /** The media's real (width, height), so the frame around this tier takes the picture's shape
+     *  rather than a hardcoded 16:9 — see `core/logic/MediaAspect.kt`. */
+    onVideoSize: ((Int, Int) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val currentOnFail by rememberUpdatedState(onFail)
+    val currentOnVideoSize by rememberUpdatedState(onVideoSize)
     var ready by remember(url) { mutableStateOf(false) }
     var failed by remember(url) { mutableStateOf(false) }
     // Rises while playback is stalled; reset whenever it is not.
@@ -89,6 +93,15 @@ fun RtspPlayer(
                 fail()
             }
 
+            // Rotation-corrected the same way the WebRTC renderers do it, so a rotated source
+            // reports the shape the picture is actually drawn in.
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                val swap = videoSize.unappliedRotationDegrees % 180 != 0
+                val w = if (swap) videoSize.height else videoSize.width
+                val h = if (swap) videoSize.width else videoSize.height
+                if (w > 0 && h > 0) currentOnVideoSize?.invoke(w, h)
+            }
+
             fun fail() {
                 if (failed) return
                 failed = true
@@ -110,9 +123,23 @@ fun RtspPlayer(
 
     // Nothing rendered within the deadline: an unreachable camera can leave RTSP setup hanging
     // without ever raising an error, and a silent black frame is worse than a fast step-down.
+    // Screen off / app backgrounded: drop the RTSP session (a fixed ~5 Mbps main stream that was
+    // otherwise pulled behind a dark screen) and re-prepare on return. See StopWhileBackgrounded.
+    // `everStopped` keeps the ready-deadline below from reading "stopped before the first frame"
+    // as "camera unreachable" and condemning the camera in RtspHealth; after a restart the stall
+    // timer covers a camera that really has gone away.
+    var everStopped by remember(url) { mutableStateOf(false) }
+    StopWhileBackgrounded(
+        onStop = {
+            everStopped = true
+            player.stop()
+        },
+        onRestart = { player.prepare() },
+    )
+
     LaunchedEffect(url) {
         delay(READY_DEADLINE_MS)
-        if (!ready && !failed) {
+        if (!ready && !failed && !everStopped) {
             failed = true
             RtspHealth.report(camera, false)
             currentOnFail()
@@ -142,14 +169,23 @@ fun RtspPlayer(
                 this.player = player
             }
         },
+        // `factory` runs once per view, but `player` is rebuilt whenever the url changes. Without
+        // this the view stayed bound to the released player: its last frame frozen on screen,
+        // the new stream connected and invisible. Same guard VideoPlayer has.
+        update = { view -> if (view.player !== player) view.player = player },
     )
 }
 
 /** RTSP SETUP/DESCRIBE deadline. Short: an unreachable camera should cost about a second. */
 private const val CONNECT_TIMEOUT_MS = 4_000L
 
-/** No first frame by this point, error or not, and the tier gives up. */
-private const val READY_DEADLINE_MS = 5_000L
+/**
+ * No first frame by this point, error or not, and the tier gives up. Seven seconds, not five: the
+ * slowest measured in-app first frame was 4.0 s and the camera side alone reached 4.8 s in probes
+ * (the new viewer waits for the next keyframe, one every 2 s). Missing the deadline is expensive,
+ * since the relay then starts from scratch, so it has to clear the slow tail, not the median.
+ */
+private const val READY_DEADLINE_MS = 7_000L
 
 /** Continuous stall after playback started — the link cannot carry a fixed-bitrate main stream. */
 private const val STALL_TIMEOUT_MS = 7_000L

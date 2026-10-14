@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Blinds
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Power
@@ -72,6 +73,7 @@ import com.hawksnest.ui.components.DeviceUi
 import com.hawksnest.ui.components.PanelCard
 import com.hawksnest.ui.components.SectionHeader
 import com.hawksnest.ui.components.rememberHaptics
+import com.hawksnest.ui.components.SirenToggle
 import com.hawksnest.ui.components.rememberOptimisticOnOff
 import com.hawksnest.ui.theme.HawksnestTheme
 
@@ -282,6 +284,30 @@ fun DevicesScreen(
                                 }
                             }
                             if (pair.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+
+            // ── Sirens — their own rows, never grid tiles; each confirms before sounding ──
+            if (deck.sirens.isNotEmpty()) {
+                val sounding = deck.sirens.count { it.rawState == "on" }
+                item(key = "sirens-header") {
+                    DeckHeader("Sirens", if (sounding > 0) "$sounding sounding" else "")
+                }
+                item(key = "sirens") {
+                    PanelCard {
+                        deck.sirens.forEachIndexed { i, device ->
+                            if (i > 0) {
+                                HorizontalDivider(color = HawksnestTheme.pulse.hairline, thickness = 1.dp)
+                            }
+                            DeviceRow(
+                                device = device,
+                                pending = device.entityId in pending,
+                                onCall = { service, extra -> viewModel.call(device.entityId, service, extra) },
+                                onOpen = { onOpenEntity(device.entityId) },
+                                onLongPress = { sheetFor = device },
+                            )
                         }
                     }
                 }
@@ -622,6 +648,7 @@ private fun SensorsSheet(
 private fun rowIcon(card: CardType): ImageVector = when (card) {
     CardType.LIGHT -> Icons.Filled.Lightbulb
     CardType.SWITCH -> Icons.Filled.Power
+    CardType.SIREN -> Icons.Filled.Campaign
     CardType.FAN -> Icons.Filled.Air
     CardType.COVER -> Icons.Filled.Blinds
     CardType.MEDIA_PLAYER -> Icons.AutoMirrored.Filled.VolumeUp
@@ -648,6 +675,7 @@ private fun DeviceRow(
     val pulse = HawksnestTheme.pulse
     val haptics = rememberHaptics()
     val toggleable = device.card in TOGGLE_CARDS
+    val siren = device.card == CardType.SIREN
     val (shown, setTarget) = rememberOptimisticOnOff(device.rawState == "on", pending)
     val lit = toggleable && shown
 
@@ -690,7 +718,16 @@ private fun DeviceRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (toggleable) {
+        if (siren) {
+            // Search results and the Sirens section both land here, so no list can offer a
+            // one-tap siren (a search for "siren" is where one got sounded by accident).
+            SirenToggle(
+                on = device.rawState == "on",
+                pending = pending,
+                enabled = device.rawState != "unavailable",
+                onSet = { onCall(if (it) "turn_on" else "turn_off", emptyMap()) },
+            )
+        } else if (toggleable) {
             Switch(
                 checked = shown,
                 onCheckedChange = {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { go2rtcWsUrl, reportGo2rtcMedia } from "../lib/go2rtc";
 import { applyPlayoutBuffer, BATTERY_PLAYOUT_BUFFER_MS } from "../lib/playoutBuffer";
+import { useMediaAspect } from "../lib/mediaAspect";
 
 /**
  * How long an ICE `disconnected` may last before it counts as a failure.
@@ -64,6 +65,8 @@ export function Go2rtcPlayer({
   onFail: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Size to the stream's true shape (a dual-lens Reolink is ~32:9) — see mediaAspect.
+  const { style: aspectStyle, onVideoMeta } = useMediaAspect();
   const onFailRef = useRef(onFail);
   onFailRef.current = onFail;
   const [connecting, setConnecting] = useState(true);
@@ -204,8 +207,10 @@ export function Go2rtcPlayer({
         playsInline
         poster={poster}
         onPlaying={() => setConnecting(false)}
+        onLoadedMetadata={onVideoMeta}
         aria-label="Live camera view"
-        className="aspect-video w-full rounded-lg bg-black object-contain"
+        className="w-full rounded-lg bg-black object-contain"
+        style={aspectStyle}
       />
       {connecting && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-black/40">
