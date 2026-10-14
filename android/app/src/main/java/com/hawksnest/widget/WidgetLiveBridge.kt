@@ -33,7 +33,8 @@ import javax.inject.Singleton
  * turned every lock and alarm widget to "Unavailable" thirty seconds later.
  *
  * It is a bonus, not the mechanism — when the app is closed there is no socket, and widgets fall
- * back to reading on render and after each action. Nothing here is load-bearing for correctness.
+ * back to reading on render, after each action, and in the one periodic pass
+ * ([WidgetRefreshScheduler]). Nothing here is load-bearing for correctness.
  */
 @Singleton
 class WidgetLiveBridge @Inject constructor(

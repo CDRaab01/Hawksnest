@@ -15,7 +15,7 @@
     android:maxResizeWidth="500dp"
     android:maxResizeHeight="400dp"
     android:resizeMode="horizontal|vertical"
-    android:updatePeriodMillis="1800000"
+    android:updatePeriodMillis="0"
     android:initialLayout="@layout/glance_default_loading_layout"
     android:previewImage="@drawable/ic_glyph_thermometer"
     android:description="@string/widget_temperature_description"

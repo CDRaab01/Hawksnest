@@ -4,10 +4,10 @@
   numbers verbatim because it has the same two shapes — a header alone when the door is only
   watched, a header over one full-width button when it can actually be driven.
 
-  updatePeriodMillis is the platform's 30-minute floor and is explicitly NOT how this stays fresh:
-  every render calls refreshAsync, and the live bridge pushes socket state while the app runs.
-  Left declared because a widget with no periodic update at all never recovers if both of those
-  paths are dead.
+  updatePeriodMillis is 0 ON PURPOSE — see light_widget_info.xml. It used to be left declared
+  because a widget with no periodic update at all never recovers if render-time reads and the
+  live bridge are both dead; that safety net is now the single WorkManager job in
+  widget/WidgetRefreshScheduler, which covers every widget in one wake.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="110dp"
@@ -19,7 +19,7 @@
     android:maxResizeWidth="500dp"
     android:maxResizeHeight="400dp"
     android:resizeMode="horizontal|vertical"
-    android:updatePeriodMillis="1800000"
+    android:updatePeriodMillis="0"
     android:initialLayout="@layout/glance_default_loading_layout"
     android:previewImage="@drawable/ic_widget_garage"
     android:description="@string/widget_garage_description"

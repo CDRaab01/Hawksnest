@@ -9,9 +9,12 @@
   rows stop clearing the touch floor; the pad simply drops its header first (see
   `scenePadShowsHeader` in core/logic/ScenePadModel.kt) and keeps the plate whole.
 
-  updatePeriodMillis is the platform floor of 30 minutes and is not this widget's freshness
-  mechanism; every render and every action triggers a read, and WidgetLiveBridge pushes changes
-  while the app is running. See ARCHITECTURE.md.
+  updatePeriodMillis is 0 ON PURPOSE. The platform tick is one alarm per provider and one Glance
+  session per widget whether or not anything changed, and it measured as the #2 wakelock on the
+  phone. The periodic read it used to provide is now one WorkManager job for all widgets
+  (widget/WidgetRefreshScheduler), which redraws only what changed. Every render and every action
+  still triggers a read, and WidgetLiveBridge pushes changes while the app is on screen.
+  See ARCHITECTURE.md.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="150dp"
@@ -23,7 +26,7 @@
     android:maxResizeWidth="500dp"
     android:maxResizeHeight="400dp"
     android:resizeMode="horizontal|vertical"
-    android:updatePeriodMillis="1800000"
+    android:updatePeriodMillis="0"
     android:initialLayout="@layout/glance_default_loading_layout"
     android:previewImage="@drawable/ic_widget_scene_pad"
     android:description="@string/widget_scene_pad_description"

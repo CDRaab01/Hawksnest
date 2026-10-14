@@ -4,25 +4,29 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
+import okhttp3.Call
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
@@ -32,7 +36,9 @@ import javax.inject.Inject
  * This is what makes push work with the app closed — no FCM, purely the tailnet.
  *
  * It runs as a `specialUse` foreground service (the honest type for "hold a
- * connection to a self-hosted server"); reconnects with capped backoff; and
+ * connection to a self-hosted server"); reconnects with a capped backoff that only
+ * resets once a stream has proven healthy ([NtfyBackoff]); makes no attempt at all
+ * while there is no network, and retries at once when one appears; and
  * self-stops if push was turned off. START_STICKY so Android restarts it after a
  * kill, and [BootReceiver] restarts it after a reboot.
  *
@@ -50,6 +56,15 @@ class NtfyPushService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var streamJob: Job? = null
 
+    // Starts false and is set by the callback, which the platform fires immediately on
+    // registration when a network already exists — so "unknown" and "offline" are the same state
+    // and neither makes a request.
+    private val networkUp = MutableStateFlow(false)
+    private val networkGeneration = MutableStateFlow(0)
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    @Volatile private var activeCall: Call? = null
+
     // A bounded read timeout (> ntfy's ~45s keepalive) so a silently-dropped
     // network surfaces as an error and triggers a reconnect instead of hanging.
     //
@@ -66,6 +81,7 @@ class NtfyPushService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundCompat()
+        watchNetwork()
         if (streamJob?.isActive != true) {
             streamJob = scope.launch { runStream() }
         }
@@ -89,31 +105,92 @@ class NtfyPushService : Service() {
         val base = pushSettings.baseUrl.first().trimEnd('/')
         val topic = pushSettings.topic.first()
         val url = "$base/$topic/json"
-        var backoffMs = MIN_BACKOFF_MS
+        val stream = NtfyStream(streamClient)
+        val backoff = NtfyBackoff()
 
         while (scope.isActive) {
-            try {
-                connectAndListen(url)
-                // Returned normally = server closed the stream; reconnect promptly.
-                backoffMs = MIN_BACKOFF_MS
-            } catch (e: Exception) {
+            // No network, no attempt — and no polling for one either. This suspends until
+            // `onAvailable` flips the flag, which costs nothing; the old loop woke the radio
+            // every 60s all night in a dead zone to learn what the platform will tell us for free.
+            networkUp.first { it }
+            val generation = networkGeneration.value
+
+            val session = try {
+                stream.listen(
+                    url = url,
+                    onCall = { activeCall = it },
+                    keepGoing = { scope.isActive },
+                ) { line -> NtfyMessage.parse(line, json)?.let { notifier.show(it) } }
+            } catch (e: NtfyStreamException) {
                 if (!scope.isActive) return
-                Log.w(TAG, "ntfy stream dropped, retrying in ${backoffMs}ms", e)
+                Log.w(TAG, "ntfy stream dropped after ${e.session.linesRead} lines", e)
+                e.session
+            } catch (e: Exception) {
+                // Anything that isn't I/O (a notification that failed to post, say). It must not
+                // kill the listener, and it proves nothing about the stream — so it backs off.
+                if (e is CancellationException) throw e
+                Log.w(TAG, "ntfy listener failed outside the stream", e)
+                NtfySession(linesRead = 0, durationMs = 0)
+            } finally {
+                activeCall = null
             }
-            delay(backoffMs)
-            backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
+            if (!scope.isActive) return
+
+            // A normal return is NOT treated as success here — that was the bug. Whether the wait
+            // resets is decided by what the session did, never by how it ended (see NtfyBackoff).
+            val waitMs = backoff.next(session)
+            Log.i(TAG, "ntfy reconnect in ${waitMs}ms")
+            // Wait out the backoff, unless the network changes first. Comparing against the
+            // generation captured BEFORE the attempt means a network that arrived while the
+            // attempt was still failing is noticed too, rather than slept through.
+            val networkChanged = withTimeoutOrNull(waitMs) {
+                networkGeneration.first { it != generation }
+            }
+            if (networkChanged != null) backoff.reset()
         }
     }
 
-    private suspend fun connectAndListen(url: String) {
-        val request = Request.Builder().url(url).get().build()
-        streamClient.newCall(request).execute().use { response ->
-            val source = response.body?.source() ?: return
-            while (scope.isActive) {
-                scope.coroutineContext.ensureActive()
-                val line = source.readUtf8Line() ?: return // null = stream closed
-                NtfyMessage.parse(line, json)?.let { notifier.show(it) }
+    /**
+     * Follow the default network for as long as the service lives.
+     *
+     * Two signals come out of it: [networkUp] gates attempts, and [networkGeneration] ticks on
+     * every `onAvailable` — including a Wi-Fi-to-cellular handover, where the network never went
+     * away but every socket on the old one is dead. Both wake the retry wait.
+     *
+     * If registration itself fails (the platform caps callbacks per app), the listener must still
+     * work, so it falls back to assuming a network and relying on the backoff alone.
+     */
+    private fun watchNetwork() {
+        if (networkCallback != null) return
+        val manager = getSystemService(ConnectivityManager::class.java)
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                networkUp.value = true
+                networkGeneration.update { it + 1 }
             }
+
+            // For a default-network callback this fires only when there is no default network
+            // left at all, not on a handover — so it really does mean "offline".
+            override fun onLost(network: Network) {
+                networkUp.value = false
+            }
+        }
+        try {
+            manager.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "Could not watch the network; falling back to plain backoff", e)
+            networkUp.value = true
+        }
+    }
+
+    private fun unwatchNetwork() {
+        val callback = networkCallback ?: return
+        networkCallback = null
+        try {
+            getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(callback)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "Network callback was already gone", e)
         }
     }
 
@@ -123,7 +200,11 @@ class NtfyPushService : Service() {
     }
 
     override fun onDestroy() {
+        unwatchNetwork()
         scope.cancel()
+        // Cancelling the scope does not interrupt a blocking socket read; without this the stream
+        // would sit open until its 75s read timeout after the service was told to stop.
+        activeCall?.cancel()
         super.onDestroy()
     }
 
@@ -132,8 +213,6 @@ class NtfyPushService : Service() {
     companion object {
         private const val TAG = "NtfyPushService"
         private const val SERVICE_ID = 4201
-        private const val MIN_BACKOFF_MS = 2_000L
-        private const val MAX_BACKOFF_MS = 60_000L
 
         /**
          * Bring the listener up, if Android will currently allow it.

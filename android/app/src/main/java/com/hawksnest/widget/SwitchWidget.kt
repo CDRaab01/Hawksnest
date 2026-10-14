@@ -9,7 +9,6 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.LocalSize
 import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
@@ -84,7 +83,7 @@ class SwitchWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val deps = WidgetEntryPoint.get(context)
-        // Every render kicks a read — the platform's own update period is capped at 30 minutes.
+        // Every render kicks a read — the background refresh only comes every 30 minutes.
         deps.repository().refreshAsync(WidgetKind.SWITCH, id)
         val json = deps.json()
         provideContent {
@@ -208,6 +207,6 @@ private val PADDLE_GAP = 4.dp
 /** The narrow bucket — the provider's own minimum width. */
 private val NARROW_WIDTH = 110.dp
 
-class SwitchWidgetReceiver : GlanceAppWidgetReceiver() {
+class SwitchWidgetReceiver : HawksnestWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = SwitchWidget()
 }

@@ -11,6 +11,7 @@ import com.hawksnest.push.NtfyPushService
 import com.hawksnest.push.PushNotifier
 import com.hawksnest.push.PushSettings
 import com.hawksnest.widget.WidgetLiveBridge
+import com.hawksnest.widget.WidgetRefreshScheduler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +60,11 @@ class HawksnestApp : Application(), ImageLoaderFactory {
         // once connected and adapt if the house changes.
         shortcutPublisher.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            // Assert the widgets' one periodic refresh job. Here as well as in the receivers
+            // because widgets placed before that job existed never see another `onEnabled`. It
+            // is a KEEP, so running on every process start does not push the next run back —
+            // see WidgetRefreshScheduler. Off the main thread: it touches WorkManager's database.
+            runCatching { WidgetRefreshScheduler.sync(this@HawksnestApp) }
             if (pushSettings.enabled.first()) {
                 NtfyPushService.start(this@HawksnestApp)
             }
