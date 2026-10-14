@@ -12,7 +12,7 @@ enum class DeviceTier { FEATURED, CONTROL, READONLY }
 
 fun tierOf(card: CardType): DeviceTier = when (card) {
     CardType.LOCK, CardType.CLIMATE, CardType.ALARM -> DeviceTier.FEATURED
-    CardType.LIGHT, CardType.SWITCH, CardType.FAN,
+    CardType.LIGHT, CardType.SWITCH, CardType.FAN, CardType.SIREN,
     CardType.COVER, CardType.MEDIA_PLAYER -> DeviceTier.CONTROL
     else -> DeviceTier.READONLY
 }

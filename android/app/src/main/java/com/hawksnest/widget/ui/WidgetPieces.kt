@@ -81,29 +81,44 @@ fun openApp(): Action = actionStartActivity<MainActivity>()
 fun openEntity(entityId: String): Action = actionStartActivity(
     Intent(LocalContext.current, MainActivity::class.java)
         .putExtra(MainActivity.EXTRA_OPEN_ENTITY, entityId)
-        // CLEAR_TOP matters here. MainActivity is `standard` launch mode, so when the app is
-        // already running, a NEW_TASK intent just brings the existing task forward and the extra
-        // is never delivered — the tap would appear to do nothing. CLEAR_TOP re-delivers it
-        // through onCreate, so the widget behaves the same whether the app was open or not.
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        .addFlags(DEEP_LINK_FLAGS)
 )
+
+/**
+ * The flags every widget link into the app carries. MainActivity is `standard` launch mode, so a
+ * bare NEW_TASK intent to a running app just brings its task forward and the extra is never
+ * delivered: the tap appears to do nothing. CLEAR_TOP clears anything above the activity (the
+ * widget picker, say) and SINGLE_TOP then hands the intent to the running instance's onNewIntent
+ * instead of recreating it, the same path a notification tap takes. Cold or warm, it lands.
+ */
+private const val DEEP_LINK_FLAGS =
+    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+
+/**
+ * Where a widget's name takes you: that device's screen, or the app when the widget has no device
+ * yet. Every widget offers this, so tapping the name of the lock opens the lock, not whatever
+ * screen the app was last left on.
+ */
+@Composable
+fun openDevice(entityId: String?): Action = entityId?.let { openEntity(it) } ?: openApp()
 
 /** Opens the app on Settings — where the credential problems a widget can hit are actually fixed. */
 @Composable
 private fun openSettings(): Action = actionStartActivity(
     Intent(LocalContext.current, MainActivity::class.java)
         .putExtra(MainActivity.EXTRA_START_ROUTE, Screen.Settings.route)
+        // Without these the extra never reached a running app: the tap only brought it forward.
+        .addFlags(DEEP_LINK_FLAGS)
 )
 
 /**
- * Re-opens this widget's own configuration screen. The launcher only shows it once, when the
- * widget is placed, so a widget whose entity has since been deleted from Home Assistant would
- * otherwise be stuck — this makes "Tap to pick another" true.
+ * Re-opens this widget's own configuration screen, so a widget whose entity has since been deleted
+ * from Home Assistant is not stuck: this makes "Tap to pick another" true.
  *
- * Public because the scene pad puts it on its *header*, not just on an error. That widget carries
- * ten settings — four presets, five LED colours and the key's target — and Android offers no way
- * back into a placed widget's configuration, so without this the only way to change one of them is
- * to delete the widget and start again.
+ * Android 12+ also offers it from the launcher's long-press menu (every widget declares
+ * `widgetFeatures="reconfigurable"`). Public because on older launchers, which have no such menu,
+ * the scene pad keeps it on its header: that widget carries ten settings, and without this the only
+ * way to change one would be to delete the widget and start again.
  */
 @Composable
 fun openWidgetConfig(): Action = openConfig()
@@ -188,9 +203,8 @@ fun WidgetHeader(
     /** Where the compact tier puts the name, if anywhere — see `compactNamePlacement`. */
     namePlacement: CompactName = CompactName.INLINE,
     /**
-     * Where a tap on the title goes. Defaults to the app, which is right for the control widgets —
-     * their interesting action is the button below. The read-only temperature widget overrides it
-     * to open that sensor's history chart, the only follow-up question its reading raises.
+     * Where a tap on the title goes. Every widget passes [openDevice], so the name opens the device
+     * it names; the app itself is only the fallback for a widget with no device yet.
      */
     onClick: Action = openApp(),
 ) {

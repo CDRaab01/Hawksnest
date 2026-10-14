@@ -61,6 +61,22 @@ class ControlDeckTest {
     }
 
     @Test
+    fun `sirens get their own section and never join the lights grid`() {
+        val d = deck(
+            house + listOf(
+                D("Basement Storage Room Siren", "Storage Room", CardType.SIREN),
+                D("MFA Alarm Siren", "Security", CardType.SIREN),
+            ),
+        )
+        assertEquals(listOf("Basement Storage Room Siren", "MFA Alarm Siren"), d.sirens.map { it.name })
+        assertTrue(d.lights.none { it.card == CardType.SIREN })
+        // Nor do they fall through to the read-only sensor summaries.
+        assertTrue(d.sensorSections.flatMap { it.readonlyItems }.none { item ->
+            item is ReadonlyItem.Single && item.device.card == CardType.SIREN
+        })
+    }
+
+    @Test
     fun `camera-bearing device groups split off - the rest keep per-room sensor sections`() {
         val d = deck(house)
         assertEquals(listOf("Nursery Camera"), d.cameraGroups.map { it.name })

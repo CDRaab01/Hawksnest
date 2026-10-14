@@ -2,36 +2,69 @@ package com.hawksnest.ui.history
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.hawksnest.config.overrides
 import com.hawksnest.core.ha.ConnectionManager
+import com.hawksnest.core.ha.stringAttr
 import com.hawksnest.core.logic.LOGBOOK_MAX_EVENTS
 import com.hawksnest.core.logic.LogEvent
 import com.hawksnest.core.logic.capLogbook
+import com.hawksnest.core.logic.describeStateChange
+import com.hawksnest.core.logic.displayName
 import com.hawksnest.core.logic.isPrimaryEntity
+import com.hawksnest.core.logic.prettifyEntityId
+import com.hawksnest.util.DevicePrefsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlinx.coroutines.withContext
 
 /** History feed state for the activity timeline. */
 sealed interface HistoryFeed {
     data object Loading : HistoryFeed
     data object Error : HistoryFeed
-    /** [truncated] when the window held more than [LOGBOOK_MAX_EVENTS] — the screen says so. */
-    data class Loaded(val events: List<LogEvent>, val truncated: Boolean = false) : HistoryFeed
+
+    /**
+     * [events] are the chosen category's newest, capped; [truncated] when that category held more
+     * than [LOGBOOK_MAX_EVENTS]. [domains] are every category in the window, so the chips stay put
+     * while one is selected.
+     */
+    data class Loaded(
+        val events: List<LogEvent>,
+        val truncated: Boolean = false,
+        val domains: List<String> = emptyList(),
+    ) : HistoryFeed
 }
+
+/** What was fetched for the current range, before the category filter and the cap. */
+private sealed interface Window {
+    data object Loading : Window
+    data object Error : Window
+    data class Loaded(val events: List<LogEvent>) : Window
+}
+
+// Float the most useful event domains to the front of the chip row.
+private val DOMAIN_ORDER = listOf("camera", "binary_sensor", "lock", "alarm_control_panel", "light")
 
 /**
  * History hub — a filterable activity timeline over HA's logbook. Refetches on range change and
  * when the source goes live/ready (mirrors the web `HistoryScreen` effect on `[range, status]`).
- * The category filter is applied in the screen so changing it doesn't refetch.
+ *
+ * The category filter runs HERE, before the cap. It used to run in the screen over the 500 already
+ * kept, so a quiet category (locks) could read "No events" while HA held plenty of them.
  */
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
     private val connection: ConnectionManager,
+    private val devicePrefs: DevicePrefsStore,
 ) : ViewModel() {
 
     private val _hours = MutableStateFlow(24)
@@ -40,8 +73,21 @@ class HistoryViewModel @Inject constructor(
     private val _domain = MutableStateFlow("all")
     val domain: StateFlow<String> = _domain.asStateFlow()
 
-    private val _feed = MutableStateFlow<HistoryFeed>(HistoryFeed.Loading)
-    val feed: StateFlow<HistoryFeed> = _feed.asStateFlow()
+    private val window = MutableStateFlow<Window>(Window.Loading)
+
+    val feed: StateFlow<HistoryFeed> = combine(window, _domain, devicePrefs.renames) { w, d, renames ->
+        when (w) {
+            Window.Loading -> HistoryFeed.Loading
+            Window.Error -> HistoryFeed.Error
+            is Window.Loaded -> {
+                val chosen = if (d == "all") w.events else w.events.filter { it.domain == d }
+                val capped = capLogbook(chosen)
+                // Named and worded AFTER the cap: only the 500 kept rows, not the whole window.
+                // Doing it to every event first made the screen load visibly slower.
+                HistoryFeed.Loaded(humanize(capped.events, renames), capped.truncated, presentDomains(w.events))
+            }
+        }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, HistoryFeed.Loading)
 
     init {
         viewModelScope.launch {
@@ -55,24 +101,60 @@ class HistoryViewModel @Inject constructor(
     fun setDomain(d: String) { _domain.value = d }
 
     private suspend fun load(hours: Int) {
-        _feed.value = HistoryFeed.Loading
-        _feed.value = try {
+        window.value = Window.Loading
+        window.value = try {
             val end = System.currentTimeMillis()
             val start = end - hours * 3_600_000L
             // Drop config/diagnostic + ring-mqtt housekeeping entities (the `sensor.*_last_activity`,
             // `*_info`, `*_battery`, … spam) so the timeline shows meaningful state changes, not
             // noise. `*_last_activity` is untagged by ring-mqtt, so a category-only check isn't enough.
             val categories = connection.state.entityCategories.value
-            val events = connection.fetchLogbook(start, end)
-                .filter { it.entityId == null || isPrimaryEntity(it.entityId!!, categories) }
-            // Capped AFTER the noise filter, so the 500 kept are 500 useful ones rather than
-            // 500 battery/last-activity updates that would have been thrown away anyway.
-            val feed = capLogbook(events)
-            HistoryFeed.Loaded(feed.events, feed.truncated)
+            val fetched = connection.fetchLogbook(start, end)
+            // Off the main thread: a day of this house's logbook is tens of thousands of rows.
+            val events = withContext(Dispatchers.Default) {
+                fetched.filter { it.entityId == null || isPrimaryEntity(it.entityId!!, categories) }
+            }
+            Window.Loaded(events)
         } catch (_: Exception) {
             // Note this cannot catch an OutOfMemoryError — that is an Error, not an Exception, and
             // is exactly how the unbounded version took the app down rather than showing this.
-            HistoryFeed.Error
+            Window.Error
         }
     }
+
+    /**
+     * Name each row the way the rest of the app names the device (renames, overrides, device
+     * names), and word a bare state change for what the device is. HA's own message, when it sent
+     * one (an automation's "triggered by …"), is kept as is.
+     */
+    private fun humanize(events: List<LogEvent>, renames: Map<String, String>): List<LogEvent> {
+        val entities = connection.state.entities.value
+        val devices = connection.state.devices.value
+        return events.map { ev ->
+            val id = ev.entityId ?: return@map ev
+            val entity = entities[id]
+            val deviceName = devices.deviceByEntity[id]?.let { devices.devices[it]?.name }
+            val name = entity?.let { displayName(it, overrides, renames[id], deviceName) }
+                ?: ev.name.takeIf { it != id }
+                ?: prettifyEntityId(id)
+            val message = if (ev.hasHaMessage) {
+                ev.message
+            } else {
+                describeStateChange(
+                    ev.domain,
+                    entity?.stringAttr("device_class"),
+                    ev.state,
+                    entity?.stringAttr("unit_of_measurement"),
+                ) ?: ev.state?.let { "Changed to $it" } ?: ev.message
+            }
+            ev.copy(name = name, message = message)
+        }
+    }
+}
+
+private fun presentDomains(events: List<LogEvent>): List<String> {
+    val seen = events.mapNotNull { it.domain }.toSet()
+    return seen.sortedWith(
+        compareBy({ DOMAIN_ORDER.indexOf(it).let { i -> if (i == -1) 99 else i } }, { it }),
+    )
 }

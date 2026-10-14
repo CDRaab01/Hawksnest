@@ -1,5 +1,6 @@
 package com.hawksnest.ui.cameras
 
+import com.hawksnest.core.logic.CameraStart
 import com.hawksnest.core.logic.shouldEnterPip
 import com.hawksnest.ui.home.CameraUi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,8 @@ class CameraSession @Inject constructor() {
         /** Frigate event to open on, from a tapped camera alert. Null = open live. */
         val eventId: String?,
         val nonce: Int,
+        /** How the requested camera starts: live, with Talk opening, or with replies up. */
+        val start: CameraStart = CameraStart.LIVE,
     )
 
     private val _open = MutableStateFlow<Open?>(null)
@@ -50,10 +53,15 @@ class CameraSession @Inject constructor() {
     private val _inPip = MutableStateFlow(false)
     val inPip: StateFlow<Boolean> = _inPip.asStateFlow()
 
-    fun open(cameras: List<CameraUi>, initial: CameraUi, eventId: String? = null) {
+    fun open(
+        cameras: List<CameraUi>,
+        initial: CameraUi,
+        eventId: String? = null,
+        start: CameraStart = CameraStart.LIVE,
+    ) {
         _isLive.value = true
         _videoSize.value = null
-        _open.value = Open(cameras, initial, eventId, nonce = (_open.value?.nonce ?: 0) + 1)
+        _open.value = Open(cameras, initial, eventId, nonce = (_open.value?.nonce ?: 0) + 1, start = start)
     }
 
     /** Refresh the in-player switcher's camera list while Home recomposes underneath. */

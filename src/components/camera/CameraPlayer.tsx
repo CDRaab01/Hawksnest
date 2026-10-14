@@ -16,9 +16,9 @@ import {
 } from "../../lib/ringTimeline";
 import {
   chooseRecordedSource,
-  footageLaneRefreshKey,
+  FRIGATE_LANE_TOLERANCE_MS,
+  coalesceSpans,
   footageSpans,
-  sameFootageSpans,
   type FootageSpan,
   type RingFootage,
 } from "../../lib/ringFootage";
@@ -44,6 +44,7 @@ import type { CameraEvent } from "../../lib/cameraEvents";
 import { clipContaining, offsetInClipSeconds, clipSpanEndMs } from "../../lib/clipSeek";
 import { ringEventsFromSelect } from "../../lib/ringEvents";
 import { snapshotUrl } from "../../lib/cameraUrl";
+import { useMediaAspect } from "../../lib/mediaAspect";
 import { loadCredentials } from "../../store/credentials";
 import { go2rtcMaybeAvailable, go2rtcStreamsKnown, primeGo2rtcStreams } from "../../lib/go2rtc";
 import { LivePlayer } from "../LivePlayer";
@@ -139,8 +140,9 @@ export function CameraPlayer({
       recordedBackendOf({
         hasRingSelector: camera.eventSelectId !== null,
         hasFrigateCamera: isFrigateCamera(camera.liveEntity),
+        ringSelectorLive: camera.ringSelectorLive,
       }),
-    [camera.eventSelectId, camera.liveEntity],
+    [camera.eventSelectId, camera.ringSelectorLive, camera.liveEntity],
   );
   // Ring keeps its own name because the paths below are Ring-specific mechanics
   // (selector resolution, ring-timeline signatures), not "has recordings".
@@ -270,34 +272,17 @@ export function CameraPlayer({
   // bundled with its timeline fetch below; this is the Frigate counterpart (already coalesced
   // by the source). [] until it resolves — the lane just appears, nothing blocks on it.
   const [frigateFootage, setFrigateFootage] = useState<FootageSpan[]>([]);
-  // Cleared on a camera change ONLY — not on every refetch. A lane that blanked while a refresh
-  // was in flight would flash every island off the strip and, worse, flip `vodRangeFor` to the
-  // plain page under a mounted player.
   useEffect(() => {
     setFrigateFootage([]);
-  }, [cameraName]);
-  // A battery camera records DURING the session (each PIR wake is new footage), so its lane is
-  // refetched every time HA flips its Frigate camera entity's state (`idle` ⇄ `streaming` around a
-  // wake — the same entity and state the tile's "Asleep" reads). For every other camera the key
-  // is constant and the lane is fetched once per open, as before. `footageLaneRefreshKey` is the
-  // pure, tested rule; the entity is read live off the store so the effect sees each transition.
-  const sleeps = isFrigate && isBatteryCamera(camera);
-  const laneEntity = useEntity(sleeps ? camera.snapshotEntity.entity_id : "");
-  const laneRefreshKey = footageLaneRefreshKey(sleeps, laneEntity?.state);
-  useEffect(() => {
     if (isRing || !isFrigate) return;
     let active = true;
     fetchCameraFootage(cameraName, window.start, window.end)
-      // Same footage → same array. The VOD page memo takes the lane as a dependency, so an
-      // equal-but-new array would rebuild it (and could remount the player) for nothing.
-      .then((spans) => active && setFrigateFootage((prev) => (sameFootageSpans(prev, spans) ? prev : spans)))
-      // A failed refresh keeps what is on screen; a failed first fetch leaves the [] the camera
-      // change reset to. Either way nothing is invented.
-      .catch(() => undefined);
+      .then((spans) => active && setFrigateFootage(spans))
+      .catch(() => active && setFrigateFootage([]));
     return () => {
       active = false;
     };
-  }, [isRing, isFrigate, cameraName, window.start, window.end, laneRefreshKey]);
+  }, [isRing, isFrigate, cameraName, window.start, window.end]);
 
   // Ring's OWN timeline, via the ring-timeline service — real event times, real spans, and
   // directly playable URLs. Preferred over the selector for ring cameras because the selector
@@ -365,8 +350,8 @@ export function CameraPlayer({
   const events = useMemo(() => {
     if (!isRing) return fetched.filter((e) => e.hasClip);
     if (timeline) return timeline.events;
-    return ringEventsFromSelect(ringSelect, cameraName, window.end);
-  }, [isRing, timeline, ringSelect, cameraName, window.end, fetched]);
+    return ringEventsFromSelect(ringSelect, cameraName);
+  }, [isRing, timeline, ringSelect, cameraName, fetched]);
 
   const isLive = playhead === "live";
   const headTime = isLive ? window.end : playhead;
@@ -656,9 +641,20 @@ export function CameraPlayer({
         : "none";
 
   // The continuous track as drawable spans (coalesced so a stitch seam doesn't read as a gap).
-  // Ring's spans come off its timeline fetch; Frigate's arrive pre-coalesced from the source.
+  // Ring's spans come off its timeline fetch; Frigate's arrive media-accurate and are widened HERE.
+  //
+  // The widening is deliberately the last thing that happens to them. `frigateFootage` is the
+  // media-accurate set — every real hole preserved — because `vodRangeFor` reads it to decide
+  // where the VOD page may stretch to, and bridging a hole there desynchronises the playhead from
+  // the picture for the rest of the page (see FRIGATE_MEDIA_TOLERANCE_MS). Drawing wants the
+  // opposite: a 2 s hole is not a gap worth rendering. Two tolerances, applied at their own point
+  // of use, instead of one tolerance that silently served both.
   const ringLane = useMemo(() => (footage ? footageSpans(footage.segments) : []), [footage]);
-  const footageLane = isRing ? ringLane : frigateFootage;
+  const frigateLane = useMemo(
+    () => coalesceSpans(frigateFootage, FRIGATE_LANE_TOLERANCE_MS),
+    [frigateFootage],
+  );
+  const footageLane = isRing ? ringLane : frigateLane;
 
   // --- Clip export -----------------------------------------------------------------------
   // Note what is NOT here: none of this state feeds `vodPage`, `vodSrc` or `recordingSrc`.
@@ -951,7 +947,10 @@ export function CameraPlayer({
         <ClipExportBar
           selection={clipSel}
           playheadMs={headTime}
-          footage={footageLane}
+          // NOT `footageLane`: coverage asks how much of the range was actually recorded, and the
+          // lane's 15 s bridging is the one thing that would hide the answer. Clip mode is
+          // Frigate-only (`clipMode`), so this is always the Frigate set.
+          footage={frigateFootage}
           state={clipState}
           error={clipError}
           onNudge={(edge, delta) =>
@@ -999,12 +998,19 @@ function ScrubbedPlaceholder({
   state: "resolving" | "failed" | "encrypted" | "none";
   onRetry?: () => void;
 }) {
+  // Match the placeholder to the camera's true shape so a panorama's snapshot
+  // isn't cropped to its centre behind the message — see mediaAspect.
+  const { style: aspectStyle, onImageLoad } = useMediaAspect();
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-panel">
+    <div
+      className="relative w-full overflow-hidden rounded-lg bg-panel"
+      style={aspectStyle}
+    >
       {snapshot && (
         <img
           src={snapshot}
           alt=""
+          onLoad={onImageLoad}
           className="absolute inset-0 h-full w-full object-cover"
         />
       )}

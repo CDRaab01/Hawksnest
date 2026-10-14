@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.ALARM_TRANSITIONAL
 import com.hawksnest.core.logic.ARM_BUTTONS
 import com.hawksnest.core.logic.alarmView
+import com.hawksnest.core.logic.armButtonEnabled
 import com.hawksnest.ui.theme.HawksnestTheme
 import com.hawksnest.ui.theme.PulseMotion
 import com.hawksnest.ui.theme.color
@@ -76,7 +77,7 @@ fun ArmSegments(
                 activeColor = activeColor,
                 activeDim = activeDim,
                 busy = (pending || transitional) && tapped == b.service,
-                enabled = !pending,
+                enabled = armButtonEnabled(b, rawState, inFlight = pending),
                 onClick = {
                     haptics.toggleOn()
                     tapped = b.service

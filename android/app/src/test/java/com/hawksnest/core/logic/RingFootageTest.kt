@@ -285,10 +285,7 @@ class RingFootageTest {
     fun `unwraps the JSON-string result and coalesces contiguous segments into one span`() {
         val raw = """[{"start_time":1000,"end_time":1010},{"start_time":1010.2,"end_time":1020},{"start_time":1020.1,"end_time":1030}]"""
         val spans = parseFrigateWsRecordings(JsonPrimitive(raw))
-        assertEquals(
-            listOf(FootageSpan(1000_000L, 1030_000L, playable = true, runs = listOf(FootageRun(1000_000L, 1030_000L)))),
-            spans,
-        )
+        assertEquals(listOf(FootageSpan(1000_000L, 1030_000L, playable = true)), spans)
     }
 
     @Test
@@ -300,9 +297,76 @@ class RingFootageTest {
     }
 
     @Test
-    fun `bridges a single dropped segment - a hole within tolerance`() {
+    fun `KEEPS a single dropped segment as a hole - the parse is media-accurate not drawable`() {
+        // One missing ~10s cache segment is not worth DRAWING as a gap, but it is absolutely worth
+        // keeping here: vodRangeFor reads these spans to decide how far a VOD page may stretch, and
+        // Frigate's VOD concatenates rather than pads, so a bridged hole becomes permanent drift
+        // between the playhead and the picture. The lane widens them later (see coalesceSpans).
         val spans = parseFrigateWsRecordings(JsonArray(listOf(seg(1000.0, 1010.0), seg(1022.0, 1032.0))))
-        assertEquals(1, spans.size)
+        assertEquals(2, spans.size)
+    }
+
+    @Test
+    fun `merges only float rounding at the seam not real holes`() {
+        // Frigate's segment times are floats; abutting segments differ by milliseconds.
+        assertEquals(
+            1,
+            parseFrigateWsRecordings(JsonArray(listOf(seg(1000.0, 1010.0), seg(1010.3, 1020.0)))).size,
+        )
+        // 1.5 s is a real hole - the shape nursery_high produced while its record process was stuck.
+        assertEquals(
+            2,
+            parseFrigateWsRecordings(JsonArray(listOf(seg(1000.0, 1010.0), seg(1011.5, 1021.0)))).size,
+        )
+    }
+
+    @Test
+    fun `regression - a page of 1-2s holes no longer collapses into one span`() {
+        // Under the old 15 s parse tolerance every hole was bridged, so the whole window read as
+        // ONE span, vodRangeFor narrowed nothing, and the linear seek drifted by the accumulated
+        // missing footage.
+        val segments = (0 until 30).map { seg(1000.0 + it * 12, 1000.0 + it * 12 + 10) }
+        val spans = parseFrigateWsRecordings(JsonArray(segments))
+        assertEquals(30, spans.size)
+        assertEquals(300_000L, spans.sumOf { it.endMs - it.startMs })
+        assertEquals(358_000L, spans.last().endMs - spans.first().startMs)
+    }
+
+    // ---- coalesceSpans (the lane's widening, applied at the point of drawing) ----
+
+    @Test
+    fun `coalesceSpans bridges a dropped segment at the lane tolerance`() {
+        val out = coalesceSpans(
+            listOf(FootageSpan(1000L, 11_000L, true), FootageSpan(23_000L, 33_000L, true)),
+            FRIGATE_LANE_TOLERANCE_MS,
+        )
+        assertEquals(listOf(FootageSpan(1000L, 33_000L, playable = true)), out)
+    }
+
+    @Test
+    fun `coalesceSpans leaves a hole longer than the tolerance alone`() {
+        val out = coalesceSpans(
+            listOf(FootageSpan(1000L, 11_000L, true), FootageSpan(40_000L, 50_000L, true)),
+            FRIGATE_LANE_TOLERANCE_MS,
+        )
+        assertEquals(2, out.size)
+    }
+
+    @Test
+    fun `coalesceSpans never merges across a playability change`() {
+        val out = coalesceSpans(
+            listOf(FootageSpan(1000L, 11_000L, true), FootageSpan(11_100L, 21_000L, false)),
+            15_000L,
+        )
+        assertEquals(2, out.size)
+    }
+
+    @Test
+    fun `coalesceSpans collapses the nursery_high shape while the media set keeps the holes`() {
+        val segments = (0 until 30).map { seg(1000.0 + it * 12, 1000.0 + it * 12 + 10) }
+        val media = parseFrigateWsRecordings(JsonArray(segments))
+        assertEquals(30, media.size)
+        assertEquals(1, coalesceSpans(media, FRIGATE_LANE_TOLERANCE_MS).size)
     }
 
     @Test
@@ -310,10 +374,7 @@ class RingFootageTest {
         val spans = parseFrigateWsRecordings(
             JsonArray(listOf(seg(1020.0, 1030.0), seg(1000.0, 1010.0), seg(1010.0, 1020.0))),
         )
-        assertEquals(
-            listOf(FootageSpan(1000_000L, 1030_000L, playable = true, runs = listOf(FootageRun(1000_000L, 1030_000L)))),
-            spans,
-        )
+        assertEquals(listOf(FootageSpan(1000_000L, 1030_000L, playable = true)), spans)
     }
 
     @Test
@@ -324,52 +385,7 @@ class RingFootageTest {
         val spans = parseFrigateWsRecordings(
             JsonArray(listOf(seg(1000.0, 1010.0), seg(2000.0, 2000.0), buildJsonObject { put("start_time", 3000) })),
         )
-        assertEquals(
-            listOf(FootageSpan(1000_000L, 1010_000L, playable = true, runs = listOf(FootageRun(1000_000L, 1010_000L)))),
-            spans,
-        )
-    }
-
-    @Test
-    fun `a bridged hole is drawn as one span but exposed as two runs`() {
-        // 8 s hole: inside the 15 s drawing tolerance (one span on the strip), far outside the 1 s
-        // run tolerance. Frigate's VOD would play these back-to-back, so a seek measured from the
-        // span start would land 8 s late anywhere after the hole — the runs let vodRangeFor avoid it.
-        val spans = parseFrigateWsRecordings(JsonArray(listOf(seg(1000.0, 1010.0), seg(1018.0, 1028.0))))
-        assertEquals(1, spans.size)
-        assertEquals(1000_000L, spans[0].startMs)
-        assertEquals(1028_000L, spans[0].endMs)
-        assertEquals(listOf(FootageRun(1000_000L, 1010_000L), FootageRun(1018_000L, 1028_000L)), spans[0].runs)
-    }
-
-    @Test
-    fun `abutting segments form one run`() {
-        // Sub-second seams and a slight overlap are how Frigate's own segments actually meet.
-        val spans = parseFrigateWsRecordings(
-            JsonArray(listOf(seg(1000.0, 1010.0), seg(1010.2, 1020.0), seg(1019.9, 1030.0))),
-        )
-        assertEquals(1, spans.size)
-        assertEquals(listOf(FootageRun(1000_000L, 1030_000L)), spans[0].runs)
-    }
-
-    @Test
-    fun `footageRunAt is half-open and null inside a bridged hole`() {
-        val span = parseFrigateWsRecordings(JsonArray(listOf(seg(1000.0, 1010.0), seg(1018.0, 1028.0)))).single()
-        assertEquals(FootageRun(1000_000L, 1010_000L), footageRunAt(span.runs, 1000_000L))
-        assertNull(footageRunAt(span.runs, 1010_000L))
-        assertNull(footageRunAt(span.runs, 1017_999L))
-        assertEquals(FootageRun(1018_000L, 1028_000L), footageRunAt(span.runs, 1018_000L))
-    }
-
-    @Test
-    fun `footageLaneRefreshKey is the camera state for a battery camera and constant otherwise`() {
-        // Each wake flips the Frigate entity idle → streaming → idle; each flip is one refetch.
-        assertEquals("idle", footageLaneRefreshKey(isBattery = true, cameraState = "idle"))
-        assertEquals("streaming", footageLaneRefreshKey(isBattery = true, cameraState = "streaming"))
-        assertNull(footageLaneRefreshKey(isBattery = true, cameraState = null))
-        // A 24/7 camera's state changes say nothing about new footage — it is all new footage.
-        assertNull(footageLaneRefreshKey(isBattery = false, cameraState = "idle"))
-        assertNull(footageLaneRefreshKey(isBattery = false, cameraState = "streaming"))
+        assertEquals(listOf(FootageSpan(1000_000L, 1010_000L, playable = true)), spans)
     }
 
     @Test

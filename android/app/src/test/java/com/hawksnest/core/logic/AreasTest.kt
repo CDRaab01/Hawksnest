@@ -39,4 +39,12 @@ class AreasTest {
         val groups = groupByArea(entities, areas, hidden = setOf("light.kitchen"))
         assertEquals(listOf("Front Door", "Security", "Unassigned"), groups.map { it.area })
     }
+
+    @Test
+    fun `the Unassigned room holds the entities with no area, and a real room its own`() {
+        val ids = entities.map { it.entityId }
+        assertEquals(setOf("sensor.attic_temp"), entityIdsInArea(UNASSIGNED_AREA, ids, areas))
+        assertEquals(setOf("light.kitchen"), entityIdsInArea("Kitchen", ids, areas))
+        assertEquals(emptySet(), entityIdsInArea("Garage", ids, areas))
+    }
 }

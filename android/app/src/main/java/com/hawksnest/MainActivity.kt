@@ -12,11 +12,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.core.app.NotificationManagerCompat
 import androidx.fragment.app.FragmentActivity
 import com.hawksnest.push.PushNav
 import com.hawksnest.push.PushNotifier
 import com.hawksnest.ui.navigation.AppNavGraph
-import com.hawksnest.ui.navigation.Screen
+import com.hawksnest.core.logic.CameraStart
 import com.hawksnest.core.logic.ThemePref
 import com.hawksnest.core.logic.pipAspect
 import com.hawksnest.core.logic.resolveDarkTheme
@@ -71,20 +72,12 @@ class MainActivity : FragmentActivity() {
             combine(cameraSession.open, cameraSession.isLive, cameraSession.videoSize) { _, _, _ -> }
                 .collect { setPictureInPictureParams(pipParams()) }
         }
-        // A doorbell notification carries a camera id to open. Route it through PushNav
-        // (the nav shell brings Home forward and opens that camera's lightbox) rather
-        // than a start destination — a specific camera opens in an overlay, not a route.
-        handlePushIntent(intent)
-        // A launcher shortcut ("Lock up", "Arm away", "Arm home") arrives as an extra. Performed
-        // here rather than in a BroadcastReceiver so it goes through ControlGate like every other
-        // user-initiated call — same pending state, same failure snackbar.
-        handleShortcutIntent(intent)
-        // A widget whose problem the owner can only fix in Settings (no token, token rejected)
-        // opens straight there rather than dropping them on Home to find it.
-        val start = intent?.getStringExtra(EXTRA_START_ROUTE) ?: Screen.Home.route
-        // A temperature widget tap opens that sensor's history chart. Carried as a bare entity id
-        // rather than a route because it is navigated TO rather than started AT — see AppNavGraph.
-        val openEntity = intent?.getStringExtra(EXTRA_OPEN_ENTITY)
+        // Every "open the app somewhere" intent — notification taps and buttons, widget taps,
+        // launcher shortcuts — goes through one handler, here and in onNewIntent alike. Skipped when
+        // the activity is being recreated (rotation, theme change): the intent it restores is the
+        // one already handled, and re-running it would open the same camera or fire the same
+        // shortcut a second time.
+        if (savedInstanceState == null) handleDeepLinkIntent(intent)
         setContent {
             // Dark-first OLED instrument panel. The default still follows the system day/night
             // setting; Settings → Appearance overrides it (see ThemePref, and its note on why
@@ -96,8 +89,6 @@ class MainActivity : FragmentActivity() {
                     color = MaterialTheme.colorScheme.background,
                 ) {
                     AppNavGraph(
-                        startDestination = start,
-                        openEntityId = openEntity,
                         pushNav = pushNav,
                         cameraSession = cameraSession,
                     )
@@ -148,35 +139,60 @@ class MainActivity : FragmentActivity() {
     }
 
     // Warm deep-link: a tap while the app is already running (SINGLE_TOP) delivers here
-    // instead of recreating the activity. Feed it through the same PushNav path.
+    // instead of recreating the activity. It goes through exactly the same handler as a cold start,
+    // which is the point: a widget or notification tap must land the same whether the app was
+    // open or not.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handlePushIntent(intent)
+        handleDeepLinkIntent(intent)
     }
 
-    private fun handlePushIntent(intent: Intent?) {
-        intent?.getStringExtra(PushNotifier.EXTRA_CAMERA)?.let { cameraId ->
+    /**
+     * Turn whatever an intent asks for into a PushNav target (or a shortcut run). The nav shell
+     * acts on the target from any screen. Each extra is removed once read, so the intent Android
+     * keeps on the activity cannot replay it.
+     */
+    private fun handleDeepLinkIntent(intent: Intent?) {
+        intent ?: return
+        // A notification button that opened the app. Unlike a tap on the notification itself, a
+        // button doesn't clear it, so it would sit in the shade after it was dealt with.
+        intent.getIntExtra(PushNotifier.EXTRA_NOTIFICATION_ID, 0).takeIf { it != 0 }?.let { id ->
+            NotificationManagerCompat.from(this).cancel(id)
+        }
+        intent.getStringExtra(PushNotifier.EXTRA_ALERT_TITLE)?.let { title ->
+            // Set before any camera, so an alert that also names one still lands on Home with its
+            // banner, and the camera opens over it.
+            pushNav.showAlert(title, intent.getStringExtra(PushNotifier.EXTRA_ALERT_BODY).orEmpty())
+        }
+        intent.getStringExtra(EXTRA_OPEN_ENTITY)?.let { pushNav.openEntity(it) }
+        intent.getStringExtra(EXTRA_START_ROUTE)?.let { pushNav.openRoute(it) }
+        intent.getStringExtra(PushNotifier.EXTRA_CAMERA)?.let { cameraId ->
             // The event is optional — doorbell/alarm taps carry none and just open
             // the camera live, as before.
-            pushNav.openCamera(cameraId, intent.getStringExtra(PushNotifier.EXTRA_EVENT))
+            val start = intent.getStringExtra(PushNotifier.EXTRA_CAMERA_START)
+                ?.let { name -> CameraStart.entries.firstOrNull { it.name == name } }
+                ?: CameraStart.LIVE
+            pushNav.openCamera(cameraId, intent.getStringExtra(PushNotifier.EXTRA_EVENT), start)
         }
-    }
-
-    private fun handleShortcutIntent(intent: android.content.Intent?) {
-        val id = intent?.getStringExtra(ShortcutPublisher.EXTRA_SHORTCUT) ?: return
-        // Consume it, so a configuration change that re-delivers the intent cannot re-fire the
-        // action — locking twice is harmless, but arming twice is a state change the owner
-        // did not ask for.
-        intent.removeExtra(ShortcutPublisher.EXTRA_SHORTCUT)
-        lifecycleScope.launch { shortcutPublisher.perform(id) }
+        // A launcher shortcut ("Lock up", "Arm away", "Arm home"). Performed here rather than in a
+        // BroadcastReceiver so it goes through ControlGate like every other user-initiated call —
+        // same pending state, same failure snackbar.
+        intent.getStringExtra(ShortcutPublisher.EXTRA_SHORTCUT)?.let { id ->
+            lifecycleScope.launch { shortcutPublisher.perform(id) }
+        }
+        listOf(
+            PushNotifier.EXTRA_ALERT_TITLE, PushNotifier.EXTRA_ALERT_BODY, EXTRA_OPEN_ENTITY,
+            EXTRA_START_ROUTE, PushNotifier.EXTRA_CAMERA, PushNotifier.EXTRA_EVENT,
+            PushNotifier.EXTRA_CAMERA_START, PushNotifier.EXTRA_NOTIFICATION_ID, ShortcutPublisher.EXTRA_SHORTCUT,
+        ).forEach(intent::removeExtra)
     }
 
     companion object {
-        /** Nav route to open on launch, set by the home-screen widgets' error states. */
+        /** Nav route to open (Settings), set by the home-screen widgets' error states. */
         const val EXTRA_START_ROUTE = "com.hawksnest.START_ROUTE"
 
-        /** Entity id whose detail + history chart to open, set by the temperature widget's tap. */
+        /** Entity id whose screen to open, set by widget taps and device notifications. */
         const val EXTRA_OPEN_ENTITY = "com.hawksnest.OPEN_ENTITY"
     }
 }

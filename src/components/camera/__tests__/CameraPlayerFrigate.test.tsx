@@ -37,6 +37,7 @@ const BEDROOM: LogicalCamera = (() => {
     snapshotEntity: entity,
     eventStreamId: null,
     eventSelectId: null, // ← not a Ring camera
+    ringSelectorLive: false,
     dingId: null,
     motionId: null,
     sirenSwitchId: null,

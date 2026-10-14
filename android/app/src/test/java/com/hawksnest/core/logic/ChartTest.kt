@@ -138,6 +138,30 @@ class ChartTest {
         assertTrue(ticks.all { !it.label.contains(":") })
     }
 
+    /** Run [block] with the JVM default zone set to [id], restoring it after. */
+    private fun <T> inZone(id: String, block: () -> T): T {
+        val saved = java.util.TimeZone.getDefault()
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(id))
+        try {
+            return block()
+        } finally {
+            java.util.TimeZone.setDefault(saved)
+        }
+    }
+
+    @Test
+    fun `a 30-day axis keeps its ticks west of UTC`() {
+        // The grid is anchored at local midnight. West of UTC that falls before t0, and rounding
+        // the step up to 14 days then left two labels across a month; this test only ever ran in
+        // CI's UTC, where the anchor happens to equal t0.
+        for (zone in listOf("UTC", "America/New_York", "America/Los_Angeles", "Asia/Tokyo")) {
+            val ticks = inZone(zone) { timeAxis(t0, t0 + 30 * day) }
+            assertTrue(ticks.size >= 4, "$zone: ${ticks.size} ticks")
+            val gaps = ticks.map { it.t }.zipWithNext { a, b -> b - a }.toSet()
+            assertEquals(setOf(7 * day), gaps, zone)
+        }
+    }
+
     @Test
     fun `timeAxis uses clock labels over a 6-hour range`() {
         val ticks = timeAxis(t0, t0 + 6 * hour)

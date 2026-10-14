@@ -41,18 +41,27 @@ object HaMessages {
             build()
         }
 
-    /** `call_service` with an optional entity target and extra service data (brightness, temp, …). */
+    /**
+     * `call_service` with an optional entity target and extra service data (brightness, temp, …).
+     *
+     * [returnResponse] asks HA to include the service's own return value in the result frame. Only
+     * services declaring `SupportsResponse` accept it — sending it to one that does not is an
+     * error, so it stays opt-in per call rather than always-on. `frigate.create_event` is the
+     * reason it exists here: the event id it mints is the only handle for ending that event later.
+     */
     fun callService(
         id: Int,
         domain: String,
         service: String,
         entityId: String?,
         serviceData: Map<String, Any?> = emptyMap(),
+        returnResponse: Boolean = false,
     ): JsonObject = buildJsonObject {
         put("id", id)
         put("type", "call_service")
         put("domain", domain)
         put("service", service)
+        if (returnResponse) put("return_response", true)
         if (serviceData.isNotEmpty()) {
             putJsonObject("service_data") {
                 serviceData.forEach { (k, v) -> put(k, anyToJsonElement(v)) }

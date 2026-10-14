@@ -45,31 +45,12 @@ export interface RingFootage {
   truncated: boolean;
 }
 
-/**
- * One stretch of genuinely contiguous recording inside a {@link FootageSpan} — segments that abut
- * within {@link FRIGATE_RUN_TOLERANCE_MS}. Defined here rather than reusing `vodWindow.ts`'s
- * `TimeRange` because that module imports this one.
- */
-export interface FootageRun {
-  startMs: number;
-  endMs: number;
-}
-
 /** A drawable run of the continuous lane — neighbouring segments coalesced (see {@link footageSpans}). */
 export interface FootageSpan {
   startMs: number;
   endMs: number;
   /** False for encrypted/URL-less spans: footage exists but this player cannot show it. */
   playable: boolean;
-  /**
-   * The contiguous sub-runs this span was DRAWN over, when the source knows them. A Frigate span
-   * bridges holes of up to 15 s so the lane stays legible, but Frigate's VOD does not bridge
-   * anything — it concatenates the segments that exist — so a seek computed from the span start
-   * lands late by every hole before it. `vodRangeFor` mounts the run under the playhead instead,
-   * where playlist time really is wall-clock offset. Absent (Ring; a span parsed before this
-   * existed) means "treat the span itself as the run" — today's behaviour.
-   */
-  runs?: FootageRun[];
 }
 
 const EMPTY: RingFootage = {
@@ -166,61 +147,6 @@ export function footageSpanAt(spans: FootageSpan[], t: number): FootageSpan | nu
   return best;
 }
 
-/**
- * The contiguous run covering `t`, or null when `t` falls in a hole the span bridged for drawing.
- * Same half-open interval and latest-start-wins rule as {@link footageSpanAt}, so a seam between
- * two abutting runs belongs to exactly one of them.
- */
-export function footageRunAt(runs: FootageRun[], t: number): FootageRun | null {
-  let best: FootageRun | null = null;
-  for (const run of runs) {
-    if (t < run.startMs || t >= run.endMs) continue;
-    if (!best || run.startMs >= best.startMs) best = run;
-  }
-  return best;
-}
-
-/**
- * Whether two lanes describe the same footage — spans and runs compared by VALUE.
- *
- * The lane is refetched while a battery camera is open (each wake adds footage), and React keys
- * the VOD source effect on what the lane says is under the playhead. A refetch that comes back
- * unchanged must therefore leave the SAME array in state, or an equal-but-new lane would rebuild
- * the page memo and remount the player mid-playback. See ARCHITECTURE.md's identity rule.
- */
-export function sameFootageSpans(a: FootageSpan[], b: FootageSpan[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    const x = a[i];
-    const y = b[i];
-    if (x.startMs !== y.startMs || x.endMs !== y.endMs || x.playable !== y.playable) return false;
-    const xr = x.runs ?? [];
-    const yr = y.runs ?? [];
-    if (xr.length !== yr.length) return false;
-    for (let j = 0; j < xr.length; j += 1) {
-      if (xr[j].startMs !== yr[j].startMs || xr[j].endMs !== yr[j].endMs) return false;
-    }
-  }
-  return true;
-}
-
-/**
- * The key that re-runs the Frigate footage-lane fetch while a camera stays open.
- *
- * The lane is otherwise fetched once per camera-open, which is right for a 24/7 camera (nothing
- * new to learn) and wrong for a battery camera behind a Home Hub: everything it records DURING
- * the session — each PIR wake — would never appear until the player was closed and reopened. HA
- * flips the Frigate camera entity's state around every wake (`idle` → `streaming`/`recording` →
- * `idle`), the same signal the tile's "Asleep" reads, so the state string IS the refresh key:
- * one transition, one refetch. For everything else the key is constant, so nothing refetches.
- * Attribute-only churn (battery %, snapshot republish) never changes it. 1:1 with
- * `core/logic/RingFootage.kt`.
- */
-export function footageLaneRefreshKey(isBattery: boolean, cameraState: string | null | undefined): string | null {
-  return isBattery ? (cameraState ?? null) : null;
-}
-
 /** Offset of `t` within `seg`, clamped into the span, in seconds (the player seeks in seconds). */
 export function offsetInSegmentSeconds(seg: FootageSegment, t: number): number {
   const span = seg.endMs - seg.startMs;
@@ -260,25 +186,57 @@ export function footageSpans(segments: FootageSegment[], toleranceMs = 1000): Fo
  * continuous stream. Event clips remain the source on the cameras with no 24/7 track at all.
  */
 /**
- * Tolerance when coalescing Frigate recording segments into drawable spans.
+ * Tolerance when coalescing Frigate spans for **drawing**.
  *
  * Frigate writes ~10 s cache segments with sub-second seams between them, but a camera reconnect
  * or a Frigate restart can drop a segment, leaving a one-segment hole that is real but not worth
  * drawing. 15 s bridges those; anything longer renders as an honest gap in the lane.
+ *
+ * Applied by the lane itself (see {@link coalesceSpans}) — NOT at the parse boundary. It used to
+ * be the parse default, which quietly made it the tolerance for the VOD range math too. See
+ * {@link FRIGATE_MEDIA_TOLERANCE_MS} for why that was wrong.
  */
-const FRIGATE_SPAN_TOLERANCE_MS = 15_000;
+export const FRIGATE_LANE_TOLERANCE_MS = 15_000;
 
 /**
- * Tolerance when grouping Frigate segments into the contiguous RUNS inside a span.
+ * Tolerance when coalescing Frigate segments into spans that describe the **media**.
  *
- * Frigate's real segment abutment is sub-second (a ~10 s segment ends where the next begins, give
- * or take the muxer). Anything wider is a hole the VOD will not fill: it concatenates the segments
- * that exist, so a seek measured from before the hole shows a frame that many seconds late. A
- * battery camera behind a Home Hub produces exactly this — its watchdog restarts ffmpeg around a
- * wake, leaving islands of 60 s segments littered with 0.04–2 s scraps tens of seconds apart —
- * and with only the 15 s drawing tolerance a scrub near the island's end overshot and clamped.
+ * This is the one `vodRangeFor` reads, and it has to be near zero, because that function's whole
+ * correctness argument is "the range is contiguous footage, so playlist time == wall-clock offset
+ * from the range start". Frigate's VOD does not pad gaps — it concatenates the segments that
+ * exist — so every millisecond bridged here is a millisecond the playhead and the picture drift
+ * apart, cumulatively, for the rest of the page.
+ *
+ * Measured on `nursery_high` 2026-10-01: a stuck record process left ~1-2 s holes between every
+ * ~10 s segment. All of them fell under the 15 s lane tolerance, so the lane reported ONE span
+ * covering the whole 2-hour page, `vodRangeFor` narrowed nothing, and a scrub to 7:13:14 PM
+ * played 7:23:28 PM — 10 minutes of silent drift, and a clip exported from that playhead came
+ * back "wrong" because it was cut at the time the user marked rather than the time they saw.
+ *
+ * 500 ms, not 0: Frigate's segment times are floats and abutting segments routinely differ by a
+ * few milliseconds. This merges rounding, nothing else.
  */
-export const FRIGATE_RUN_TOLERANCE_MS = 1_000;
+export const FRIGATE_MEDIA_TOLERANCE_MS = 500;
+
+/**
+ * Merge neighbouring spans separated by no more than `toleranceMs`.
+ *
+ * The lane's half of the split above: parsing keeps the media-accurate spans, and whoever is
+ * *drawing* widens them to taste. Same merge rule as {@link footageSpans} (only same-playability
+ * neighbours merge) so the two coalescers cannot disagree about what a run is.
+ */
+export function coalesceSpans(spans: FootageSpan[], toleranceMs: number): FootageSpan[] {
+  const out: FootageSpan[] = [];
+  for (const span of [...spans].sort((a, b) => a.startMs - b.startMs)) {
+    const last = out[out.length - 1];
+    if (last && last.playable === span.playable && span.startMs - last.endMs <= toleranceMs) {
+      last.endMs = Math.max(last.endMs, span.endMs);
+      continue;
+    }
+    out.push({ ...span });
+  }
+  return out;
+}
 
 /**
  * Unwrap a `frigate/recordings/get` websocket result into drawable [FootageSpan]s — the Frigate
@@ -288,13 +246,9 @@ export const FRIGATE_RUN_TOLERANCE_MS = 1_000;
  * REST route for this, and the result usually arrives as a JSON **string** the integration didn't
  * decode. The payload is one entry per ~10 s recording segment (measured: ~6.5k entries / 1 MB /
  * tens of ms for a 3-day window), so coalescing here — not in the component — is what keeps the
- * timeline from mapping thousands of DOM nodes.
- *
- * Two tolerances, two jobs. Segments within `toleranceMs` (15 s) merge into one DRAWN span, so a
- * single dropped cache segment does not render as a gap. Within a span, segments within
- * `runToleranceMs` (1 s) extend the current contiguous RUN and anything wider starts a new one —
- * so `vodRangeFor` can mount exactly the footage under the playhead and seek by wall-clock delta
- * without the bridged holes pushing the picture late. On a 24/7 camera one run == the span.
+ * timeline from mapping thousands of DOM nodes. The default tolerance is the MEDIA one: a healthy
+ * camera's segments abut, so they still collapse to a handful of spans, while a camera with real
+ * holes keeps them instead of handing `vodRangeFor` a lie. The lane widens them for drawing.
  *
  * Spans are always `playable: true`: unlike Ring, Frigate has no per-segment URL to expire and no
  * end-to-end encryption — if the segment is on disk, the VOD can serve it. Junk input yields [],
@@ -302,8 +256,7 @@ export const FRIGATE_RUN_TOLERANCE_MS = 1_000;
  */
 export function parseFrigateWsRecordings(
   result: unknown,
-  toleranceMs: number = FRIGATE_SPAN_TOLERANCE_MS,
-  runToleranceMs: number = FRIGATE_RUN_TOLERANCE_MS,
+  toleranceMs: number = FRIGATE_MEDIA_TOLERANCE_MS,
 ): FootageSpan[] {
   let raw: unknown = result;
   if (typeof raw === "string") {
@@ -324,27 +277,14 @@ export function parseFrigateWsRecordings(
     })
     .filter((s): s is { startMs: number; endMs: number } => s !== null)
     .sort((a, b) => a.startMs - b.startMs);
-  const spans: (FootageSpan & { runs: FootageRun[] })[] = [];
+  const spans: FootageSpan[] = [];
   for (const seg of segments) {
     const last = spans[spans.length - 1];
     if (last && seg.startMs - last.endMs <= toleranceMs) {
-      // Inside the drawn span. The last run always ends where the span ends, so the gap to it is
-      // the gap to the span; sub-second (or overlapping) extends the run, wider opens a new one.
-      const run = last.runs[last.runs.length - 1];
-      if (seg.startMs - run.endMs <= runToleranceMs) {
-        run.endMs = Math.max(run.endMs, seg.endMs);
-      } else {
-        last.runs.push({ startMs: seg.startMs, endMs: seg.endMs });
-      }
       last.endMs = Math.max(last.endMs, seg.endMs);
       continue;
     }
-    spans.push({
-      startMs: seg.startMs,
-      endMs: seg.endMs,
-      playable: true,
-      runs: [{ startMs: seg.startMs, endMs: seg.endMs }],
-    });
+    spans.push({ startMs: seg.startMs, endMs: seg.endMs, playable: true });
   }
   return spans;
 }

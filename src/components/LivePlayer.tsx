@@ -10,6 +10,7 @@ import {
   canStreamWebRtc,
 } from "../lib/cameraUrl";
 import { go2rtcMaybeAvailable, go2rtcStreamsKnown, primeGo2rtcStreams } from "../lib/go2rtc";
+import { useMediaAspect } from "../lib/mediaAspect";
 import { HlsPlayer } from "./HlsPlayer";
 import { WebRtcPlayer } from "./WebRtcPlayer";
 import { Go2rtcPlayer } from "./Go2rtcPlayer";
@@ -53,6 +54,10 @@ export function LivePlayer({
   wakeable?: boolean;
 }) {
   const baseUrl = useHaBaseUrl();
+  // The image tiers (resolving snapshot, MJPEG, snapshot poll) render at the
+  // picture's true shape too, so a panoramic camera doesn't get letterboxed while
+  // the ladder is below the video tiers — see mediaAspect.
+  const { style: aspectStyle, onImageLoad } = useMediaAspect();
   const mjpeg = mjpegUrl(entity, baseUrl);
   const hasSnapshot = snapshotUrl(entity, baseUrl) !== null;
   const canWebRtc = canStreamWebRtc(entity) && supportsWebRtc();
@@ -179,7 +184,9 @@ export function LivePlayer({
         <img
           src={snapshotUrl(entity, baseUrl) ?? undefined}
           alt="Live camera view"
-          className="aspect-video w-full rounded-lg bg-black object-contain"
+          onLoad={onImageLoad}
+          className="w-full rounded-lg bg-black object-contain"
+          style={aspectStyle}
         />
       );
     }
@@ -202,7 +209,9 @@ export function LivePlayer({
       src={imgSrc ?? undefined}
       alt="Live camera view"
       onError={() => stepDownFrom(mode)}
-      className="aspect-video w-full rounded-lg bg-black object-contain"
+      onLoad={onImageLoad}
+      className="w-full rounded-lg bg-black object-contain"
+      style={aspectStyle}
     />
   );
 }

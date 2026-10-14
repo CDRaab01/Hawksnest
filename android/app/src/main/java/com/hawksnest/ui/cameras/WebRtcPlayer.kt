@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -120,7 +121,15 @@ fun WebRtcPlayer(
     }
 
     val session = remember { mutableStateOf<WebRtcSession?>(null) }
-    DisposableEffect(entityId, wakeable) {
+    // Bumped when the activity comes back from STOPPED, so the effect below negotiates afresh.
+    val restarts = remember { mutableIntStateOf(0) }
+    // Screen off / app backgrounded: close NOW (close() is idempotent, so the onDispose that
+    // follows the restart is harmless). See StopWhileBackgrounded for why this can't be a recompose.
+    StopWhileBackgrounded(
+        onStop = { session.value?.close() },
+        onRestart = { restarts.intValue += 1 },
+    )
+    DisposableEffect(entityId, wakeable, restarts.intValue) {
         connecting.value = true // re-show "Connecting…" for the newly-selected camera
         val s = WebRtcSession(
             scope,

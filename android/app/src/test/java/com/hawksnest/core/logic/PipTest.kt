@@ -36,6 +36,8 @@ class PipTest {
     fun `extreme wide clamps to the platform maximum`() {
         // 32:9 super-ultrawide is past Android's 2.39:1 limit.
         assertEquals(239 to 100, pipAspect(3200, 900))
+        // The real one: the Home Hub cameras' stitched dual-lens frame.
+        assertEquals(239 to 100, pipAspect(1536, 432))
     }
 
     @Test

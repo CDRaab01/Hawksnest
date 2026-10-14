@@ -10,6 +10,7 @@ const cam = (id: string, name: string, dingId: string | null): LogicalCamera => 
   snapshotEntity: { entity_id: `${id}_snapshot`, state: "idle", attributes: {} },
   eventStreamId: null,
   eventSelectId: null,
+  ringSelectorLive: false,
   dingId,
   motionId: null,
   sirenSwitchId: null,

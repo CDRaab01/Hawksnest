@@ -3,7 +3,19 @@ package com.hawksnest.ui.cameras
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.hawksnest.core.logic.DirectStreams
+import com.hawksnest.core.logic.chooseDirectStreams
+import com.hawksnest.core.net.DirectStreamSource
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.hawksnest.core.logic.LIVE_VIEW_LABEL
+import com.hawksnest.core.logic.LIVE_VIEW_RENEW_BEFORE_SEC
+import com.hawksnest.core.logic.LIVE_VIEW_SEGMENT_SEC
+import com.hawksnest.core.logic.eventIdFromCreateResponse
+import com.hawksnest.core.logic.frigateEnabledTopic
+import com.hawksnest.core.logic.liveViewGuardEntity
+import com.hawksnest.core.logic.needsFrigateWake
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.HassEntity
 import com.hawksnest.core.ha.ServiceData
@@ -23,7 +35,6 @@ import com.hawksnest.core.logic.ringEventIdToMs
 import com.hawksnest.core.logic.ringEventOptions
 import com.hawksnest.core.logic.ringEventsFromOptions
 import com.hawksnest.core.logic.FootageSpan
-import com.hawksnest.core.logic.footageLaneRefreshKeys
 import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.matchDevice
@@ -88,6 +99,7 @@ class CameraPlayerViewModel @Inject constructor(
     private val credentialStore: CredentialStore,
     private val httpClient: OkHttpClient,
     private val cameraSession: CameraSession,
+    private val directStreamSource: DirectStreamSource,
 ) : ViewModel() {
 
     /** True while the activity is minimized into system PiP — the player hides its chrome off
@@ -97,8 +109,112 @@ class CameraPlayerViewModel @Inject constructor(
     /** Report live-vs-recorded so MainActivity can gate PiP entry (live only). */
     fun reportLive(isLive: Boolean) = cameraSession.reportLive(isLive)
 
-    /** Report the live video's real (width, height) so the PiP window takes the source aspect. */
+    // ---- Live-view recording (core/logic/LiveViewRecording.kt) -------------------------------
+
+    /** The open live-view recording, if any. One player, one session. */
+    private var liveViewJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Record a live view of [cameraEntityId] until [stopLiveViewRecording] is called.
+     *
+     * Runs as one long-lived coroutine that mints a bounded Frigate event and renews it while the
+     * view is still open, so an app that dies mid-view leaks at most one segment rather than a
+     * camera that records forever. Failures are swallowed on purpose: a camera you cannot mark is
+     * still a camera you can watch, and the live tiers must not care.
+     *
+     * [cameraName] is the Frigate/HA base name, needed for the battery-camera wake below.
+     */
+    fun startLiveViewRecording(cameraEntityId: String, cameraName: String, isBattery: Boolean) {
+        if (liveViewJob?.isActive == true) return
+        liveViewJob = viewModelScope.launch {
+            // A parked battery camera records nothing until Frigate is turned on for it, and the
+            // HA parking automation must be told to leave it alone while someone is watching.
+            if (needsFrigateWake(isBattery)) {
+                runCatching { setLiveViewGuard(cameraName, on = true) }
+                runCatching { publishFrigateEnabled(cameraName, on = true) }
+            }
+            var eventId: String? = null
+            try {
+                while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                    val next = runCatching { createLiveViewEvent(cameraEntityId) }.getOrNull()
+                    // Chain the renewal before ending the previous segment so the timeline has no
+                    // gap; if minting failed there is nothing to chain and we simply stop trying.
+                    eventId?.let { prev -> runCatching { endLiveViewEvent(cameraEntityId, prev) } }
+                    eventId = next ?: break
+                    delay((LIVE_VIEW_SEGMENT_SEC - LIVE_VIEW_RENEW_BEFORE_SEC) * 1000L)
+                }
+            } finally {
+                // NonCancellable: this runs on the way out of a cancelled scope, and an event left
+                // unended is a camera left recording.
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    eventId?.let { runCatching { endLiveViewEvent(cameraEntityId, it) } }
+                    if (needsFrigateWake(isBattery)) {
+                        runCatching { publishFrigateEnabled(cameraName, on = false) }
+                        runCatching { setLiveViewGuard(cameraName, on = false) }
+                    }
+                }
+            }
+        }
+    }
+
+    /** End the open live-view recording, if any. Idempotent. */
+    fun stopLiveViewRecording() {
+        liveViewJob?.cancel()
+        liveViewJob = null
+    }
+
+    private suspend fun createLiveViewEvent(entityId: String): String? =
+        eventIdFromCreateResponse(
+            connection.callServiceForResponse(
+                "frigate", "create_event",
+                ServiceData(
+                    entityId = entityId,
+                    extra = mapOf(
+                        "label" to LIVE_VIEW_LABEL,
+                        "duration" to LIVE_VIEW_SEGMENT_SEC,
+                        "include_recording" to true,
+                    ),
+                ),
+            ),
+        )
+
+    private suspend fun endLiveViewEvent(entityId: String, eventId: String) {
+        connection.callService(
+            "frigate", "end_event",
+            ServiceData(entityId = entityId, extra = mapOf("event_id" to eventId)),
+        )
+    }
+
+    /** Turn the camera's Frigate pipeline on/off — the same topic the HA parking automation uses. */
+    private suspend fun publishFrigateEnabled(cameraName: String, on: Boolean) {
+        connection.callService(
+            "mqtt", "publish",
+            ServiceData(
+                extra = mapOf(
+                    "topic" to frigateEnabledTopic(cameraName),
+                    "payload" to if (on) "ON" else "OFF",
+                ),
+            ),
+        )
+    }
+
+    /** Hold off the parking automation while someone is watching. */
+    private suspend fun setLiveViewGuard(cameraName: String, on: Boolean) {
+        connection.callService(
+            "input_boolean", if (on) "turn_on" else "turn_off",
+            ServiceData(entityId = liveViewGuardEntity(cameraName)),
+        )
+    }
+
+    /**
+     * Report the media's real (width, height). Shapes the **player frame** as well as the PiP
+     * window: every camera surface renders at the picture's true aspect ratio rather than a
+     * hardcoded 16:9 (`core/logic/MediaAspect.kt`, the twin of web's `lib/mediaAspect.ts`).
+     */
     fun reportVideoSize(width: Int, height: Int) = cameraSession.reportVideoSize(width, height)
+
+    /** The measured picture size, or null until the first frame lands. */
+    val videoSize: kotlinx.coroutines.flow.StateFlow<Pair<Int, Int>?> = cameraSession.videoSize
 
     /**
      * Whether to attempt the go2rtc live tier for [cameraName], asked once per camera open.
@@ -112,18 +228,31 @@ class CameraPlayerViewModel @Inject constructor(
         return go2rtcStreams.maybeAvailable(cameraName)
     }
 
+    /** Whether go2rtc serves [streamName] at all, whatever the relay's recent health. */
+    suspend fun go2rtcLists(streamName: String): Boolean {
+        go2rtcStreams.prime(baseUrl())
+        return go2rtcStreams.listed(streamName)
+    }
+
     /**
      * The direct-to-camera RTSP URL for [cameraName], or null when the tier doesn't apply.
      *
-     * Null unless the user has configured all three of an account, a password and an IP for this
-     * specific camera — an unconfigured app behaves exactly as it did before this tier existed.
-     * Reads local DataStore only, so it is effectively instant.
+     * The settings are this device's own (Settings → Camera direct stream) when it has a complete
+     * set, and otherwise whatever the Hawksnest server provides to signed-in devices
+     * ([DirectStreamSource]), so a phone needs no setup. The server's copy is normally already
+     * cached (Home prefetches it on connect); the wait for it is bounded so a slow server can only
+     * ever cost this tier, never hold up the ladder.
      */
     suspend fun rtspUrlFor(cameraName: String): String? {
-        val ip = credentialStore.rtspCameraIps.first()[cameraName] ?: return null
-        val user = credentialStore.rtspUser.first()?.takeIf { it.isNotBlank() } ?: return null
-        val pass = credentialStore.rtspPass.first()?.takeIf { it.isNotBlank() } ?: return null
-        return reolinkRtspUrl(ip, user, pass)
+        val manual = DirectStreams(
+            user = credentialStore.rtspUser.first().orEmpty(),
+            pass = credentialStore.rtspPass.first().orEmpty(),
+            cameras = credentialStore.rtspCameraIps.first(),
+        )
+        val server = if (manual.usable) null else withTimeoutOrNull(SERVER_SETTINGS_WAIT_MS) { directStreamSource.get() }
+        val chosen = chooseDirectStreams(manual, server) ?: return null
+        val ip = chosen.cameras[cameraName] ?: return null
+        return reolinkRtspUrl(ip, chosen.user, chosen.pass)
     }
 
     /**
@@ -200,8 +329,9 @@ class CameraPlayerViewModel @Inject constructor(
     /**
      * Ring timeline events at their REAL times: the selector's current options (`Motion N`, kept as
      * the playable handles) paired with real event times decoded from the `eventId` attribute history
-     * (Ring Snowflake). Falls back to even spacing per-option when a time can't be recovered, so the
-     * timeline degrades gracefully rather than emptying.
+     * (Ring Snowflake). An option whose time can't be recovered is **dropped** — the timeline
+     * emptying is the honest answer, and the even-spacing fallback it replaced drew moments that
+     * had never happened (see `ringEventsFromOptions`).
      */
     suspend fun ringEvents(eventSelectId: String, cameraName: String, startMs: Long, endMs: Long): List<CameraEvent> {
         val options = ringEventOptions(entity(eventSelectId))
@@ -212,7 +342,7 @@ class CameraPlayerViewModel @Inject constructor(
             .mapNotNull { ringEventIdToMs(it) }
             .filter { it in startMs..endMs }
             .sortedDescending()
-        return ringEventsFromOptions(options, timesDesc, cameraName, endMs)
+        return ringEventsFromOptions(options, timesDesc, cameraName)
     }
 
     fun recordingUrl(camera: String, startMs: Long, endMs: Long): String? =
@@ -265,14 +395,6 @@ class CameraPlayerViewModel @Inject constructor(
     /** Continuous-recording spans for a Frigate camera — the timeline's footage lane. */
     suspend fun cameraFootage(camera: String, startMs: Long, endMs: Long): List<FootageSpan> =
         connection.fetchCameraFootage(camera, startMs, endMs)
-
-    /**
-     * The key the player re-runs [cameraFootage] on while a camera stays open: the Frigate camera
-     * entity's state for a camera that sleeps (each `idle` ⇄ `streaming` flip around a PIR wake is
-     * new footage), a constant for everything else. See [footageLaneRefreshKeys].
-     */
-    fun laneRefreshKeys(entityId: String, isBattery: Boolean): Flow<String?> =
-        footageLaneRefreshKeys(connection.state.entities, entityId, isBattery)
 
     /** HA token for media requests that must authenticate themselves — see [ConnectionManager.haToken]. */
     /**
@@ -483,3 +605,6 @@ class CameraPlayerViewModel @Inject constructor(
  * minutes-slow. Mirrors the web `RING_CLIP_TIMEOUT_MS`.
  */
 private const val RING_CLIP_TIMEOUT_MS = 20_000L
+
+/** How long opening a camera waits for the server's direct-stream settings when none are cached. */
+private const val SERVER_SETTINGS_WAIT_MS = 2_000L

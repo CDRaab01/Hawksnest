@@ -135,47 +135,60 @@ describe("vodRangeFor", () => {
     const island = [{ startMs: head - 10 * 60_000, endMs: head + 10 * 60_000, playable: true }];
     expect(vodRangeFor(head, bounds, island)).toEqual(vodRangeFor(head + 60_000, bounds, island));
   });
+});
 
-  // One drawn span (the 15 s drawing tolerance bridged an 8 s hole) made of two contiguous runs.
-  // Frigate's VOD plays whatever exists back-to-back, so a range that straddled the hole would
-  // show a frame 8 s late for every moment after it.
-  const bridged = {
-    startMs: head - 60_000,
-    endMs: head + 60_000,
+describe("regression: wall-clock and playlist time must not drift (nursery_high, 2026-10-01)", () => {
+  // A stuck Frigate record process left ~2 s holes between every ~10 s segment on one camera.
+  // Every hole was under the lane's 15 s coalescing tolerance, which was ALSO the parse default,
+  // so the lane reported one unbroken span across the whole 2-hour page. `vodRangeFor` therefore
+  // narrowed nothing, and `vodPositionSecondsInPage` — which assumes the page is solid footage —
+  // seeked by wall-clock offset into a playlist that is only the surviving footage concatenated.
+  // A scrub to 7:13:14 PM played 7:23:28 PM, and a clip exported from that playhead was cut at
+  // the marked time rather than the time on screen, so it came back "the wrong time".
+  const PAGE_START = 1790805600_000; // 18:00:00 local, a 2h grid boundary
+  const bounds = { startMs: PAGE_START, endMs: PAGE_START + 4 * HOUR };
+  const TARGET = 1790809994_000; // 19:13:14 local — what the user marked
+
+  /** The real shape: 10 s of footage every 12 s of wall clock. */
+  const gappy = Array.from({ length: 600 }, (_, i) => ({
+    startMs: PAGE_START + i * 12_000,
+    endMs: PAGE_START + i * 12_000 + 10_000,
     playable: true,
-    runs: [
-      { startMs: head - 60_000, endMs: head - 10_000 },
-      { startMs: head - 2_000, endMs: head + 60_000 },
-    ],
-  };
+  }));
 
-  it("scrub past a bridged hole mounts the second run", () => {
-    // The range starts at the RUN, so playlist time == wall-clock offset from head - 2 s.
-    expect(vodRangeFor(head, bounds, [bridged])).toEqual({ startMs: head - 2_000, endMs: head + 60_000 });
-    // And inside the first run, the first run — never the span.
-    expect(vodRangeFor(head - 30_000, bounds, [bridged])).toEqual({
-      startMs: head - 60_000,
-      endMs: head - 10_000,
-    });
+  it("narrows the page to the contiguous segment under the playhead", () => {
+    const range = vodRangeFor(TARGET, bounds, gappy);
+    expect(range).not.toBeNull();
+    // Not the whole 2h page — just the one ~10 s run the playhead is actually inside.
+    expect(range!.endMs - range!.startMs).toBeLessThanOrEqual(10_000);
+    expect(range!.startMs).toBeLessThanOrEqual(TARGET);
+    expect(range!.endMs).toBeGreaterThan(TARGET);
   });
 
-  it("scrub into a bridged hole yields null", () => {
-    // Drawn as footage, but nothing was recorded here and the VOD cannot show it.
-    expect(vodRangeFor(head - 5_000, bounds, [bridged])).toBeNull();
-    // Half-open like footageSpanAt: the first run's end is the hole's first instant.
-    expect(vodRangeFor(head - 10_000, bounds, [bridged])).toBeNull();
-    expect(vodRangeFor(head - 2_000, bounds, [bridged])).not.toBeNull();
+  it("keeps the seek honest: offset into the range is offset into the media", () => {
+    const range = vodRangeFor(TARGET, bounds, gappy)!;
+    // The invariant vodRangeFor exists to guarantee: because the range is contiguous footage,
+    // wall-clock offset from its start IS the playlist position. Under the old behaviour the
+    // range was the full page and this offset was 4394 s into a playlist holding only ~3855 s of
+    // footage before that moment — the 10-minute drift.
+    const pos = vodPositionSecondsInPage(TARGET, range.startMs);
+    expect(pos).toBeLessThanOrEqual(10);
+    expect(pos).toBe(Math.floor((TARGET - range.startMs) / 1000));
   });
 
-  it("a solid span yields the same range as before", () => {
-    // A 24/7 camera's span is one run == the span, so the URL is byte-identical to the run-less
-    // form — no regression on the cameras this never applied to.
-    const solid = { startMs: 0, endMs: 100 * DAY, playable: true };
-    const withRun = { ...solid, runs: [{ startMs: 0, endMs: 100 * DAY }] };
-    expect(vodRangeFor(head, bounds, [withRun])).toEqual(vodRangeFor(head, bounds, [solid]));
-    expect(vodRangeFor(head, bounds, [withRun])).toEqual(page);
-    const island = { startMs: head - 2 * 60_000, endMs: head + 3 * 60_000, playable: true };
-    const islandRun = { ...island, runs: [{ startMs: island.startMs, endMs: island.endMs }] };
-    expect(vodRangeFor(head, bounds, [islandRun])).toEqual(vodRangeFor(head, bounds, [island]));
+  it("would have drifted ~10 minutes with the page unnarrowed", () => {
+    // Pin the old failure so nobody restores the single-tolerance shortcut by accident.
+    const naive = vodPositionSecondsInPage(TARGET, PAGE_START);
+    const footageBefore =
+      gappy
+        .filter((s) => s.startMs < TARGET)
+        .reduce((a, s) => a + (Math.min(s.endMs, TARGET) - s.startMs), 0) / 1000;
+    expect(naive).toBe(4394);
+    expect(Math.round(naive - footageBefore)).toBeGreaterThan(600);
+  });
+
+  it("a scrub into one of the holes is an honest 'no recording', not a wrong frame", () => {
+    const inHole = PAGE_START + 11_000; // between segment 0 (ends +10s) and segment 1 (+12s)
+    expect(vodRangeFor(inHole, bounds, gappy)).toBeNull();
   });
 });

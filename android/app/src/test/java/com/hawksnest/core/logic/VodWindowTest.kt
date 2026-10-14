@@ -148,52 +148,55 @@ class VodWindowTest {
         )
     }
 
-    // One drawn span (the 15 s drawing tolerance bridged an 8 s hole) made of two contiguous runs.
-    // Frigate's VOD plays whatever exists back-to-back, so a range that straddled the hole would
-    // show a frame 8 s late for every moment after it.
-    private val bridged = FootageSpan(
-        rangeHead - 60_000L,
-        rangeHead + 60_000L,
-        playable = true,
-        runs = listOf(
-            FootageRun(rangeHead - 60_000L, rangeHead - 10_000L),
-            FootageRun(rangeHead - 2_000L, rangeHead + 60_000L),
-        ),
-    )
+    // ---- regression: wall-clock and playlist time must not drift (nursery_high, 2026-10-01) ----
+    // A stuck Frigate record process left ~2 s holes between every ~10 s segment on one camera.
+    // Every hole was under the lane's 15 s coalescing tolerance, which was ALSO the parse default,
+    // so the lane reported one unbroken span across the whole 2-hour page. vodRangeFor therefore
+    // narrowed nothing, and vodPositionMsInPage - which assumes the page is solid footage - seeked
+    // by wall-clock offset into a playlist that is only the surviving footage concatenated. A
+    // scrub to 7:13:14 PM played 7:23:28 PM, and a clip exported from that playhead was cut at the
+    // marked time rather than the time on screen, so it came back "the wrong time".
 
-    @Test
-    fun `scrub past a bridged hole mounts the second run`() {
-        // The range starts at the RUN, so playlist time == wall-clock offset from head - 2 s.
-        assertEquals(
-            TimeRange(rangeHead - 2_000L, rangeHead + 60_000L),
-            vodRangeFor(rangeHead, rangeBounds, listOf(bridged)),
-        )
-        // And inside the first run, the first run — never the span.
-        assertEquals(
-            TimeRange(rangeHead - 60_000L, rangeHead - 10_000L),
-            vodRangeFor(rangeHead - 30_000L, rangeBounds, listOf(bridged)),
-        )
+    private val pageStart = 1_790_805_600_000L // 18:00:00 local, a 2h grid boundary
+    private val driftBounds = TimeRange(pageStart, pageStart + 4 * hour)
+    private val target = 1_790_809_994_000L // 19:13:14 local - what the user marked
+
+    /** The real shape: 10 s of footage every 12 s of wall clock. */
+    private val gappy = (0 until 600).map {
+        FootageSpan(pageStart + it * 12_000L, pageStart + it * 12_000L + 10_000L, playable = true)
     }
 
     @Test
-    fun `scrub into a bridged hole yields null`() {
-        // Drawn as footage, but nothing was recorded here and the VOD cannot show it.
-        assertNull(vodRangeFor(rangeHead - 5_000L, rangeBounds, listOf(bridged)))
-        // Half-open like footageSpanAt: the first run's end is the hole's first instant.
-        assertNull(vodRangeFor(rangeHead - 10_000L, rangeBounds, listOf(bridged)))
-        assertNotEquals(null, vodRangeFor(rangeHead - 2_000L, rangeBounds, listOf(bridged)))
+    fun `narrows the page to the contiguous segment under the playhead`() {
+        val range = vodRangeFor(target, driftBounds, gappy)
+        assertTrue(range != null)
+        assertTrue(range!!.endMs - range.startMs <= 10_000L)
+        assertTrue(range.startMs <= target && range.endMs > target)
     }
 
     @Test
-    fun `a solid span yields the same range as before`() {
-        // A 24/7 camera's span is one run == the span, so the URL is identical to the run-less
-        // form — no regression on the cameras this never applied to.
-        val solid = FootageSpan(0, 100 * day, playable = true)
-        val withRun = solid.copy(runs = listOf(FootageRun(0, 100 * day)))
-        assertEquals(vodRangeFor(rangeHead, rangeBounds, listOf(solid)), vodRangeFor(rangeHead, rangeBounds, listOf(withRun)))
-        assertEquals(vodPageFor(rangeHead, rangeBounds), vodRangeFor(rangeHead, rangeBounds, listOf(withRun)))
-        val island = FootageSpan(rangeHead - 2 * 60_000L, rangeHead + 3 * 60_000L, playable = true)
-        val islandRun = island.copy(runs = listOf(FootageRun(island.startMs, island.endMs)))
-        assertEquals(vodRangeFor(rangeHead, rangeBounds, listOf(island)), vodRangeFor(rangeHead, rangeBounds, listOf(islandRun)))
+    fun `keeps the seek honest - offset into the range is offset into the media`() {
+        val range = vodRangeFor(target, driftBounds, gappy)!!
+        // The invariant vodRangeFor exists to guarantee: because the range is contiguous footage,
+        // wall-clock offset from its start IS the playlist position.
+        val pos = vodPositionMsInPage(target, range.startMs)
+        assertTrue(pos <= 10_000L)
+        assertEquals(target - range.startMs, pos)
+    }
+
+    @Test
+    fun `would have drifted ~10 minutes with the page unnarrowed`() {
+        // Pin the old failure so nobody restores the single-tolerance shortcut by accident.
+        val naive = vodPositionMsInPage(target, pageStart)
+        val footageBefore = gappy.filter { it.startMs < target }
+            .sumOf { minOf(it.endMs, target) - it.startMs }
+        assertEquals(4_394_000L, naive)
+        assertTrue(naive - footageBefore > 600_000L)
+    }
+
+    @Test
+    fun `a scrub into one of the holes is an honest no-recording not a wrong frame`() {
+        val inHole = pageStart + 11_000L // between segment 0 (ends +10s) and segment 1 (+12s)
+        assertNull(vodRangeFor(inHole, driftBounds, gappy))
     }
 }

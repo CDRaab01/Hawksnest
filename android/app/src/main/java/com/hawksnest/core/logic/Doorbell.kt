@@ -1,8 +1,7 @@
 package com.hawksnest.core.logic
 
 import com.hawksnest.core.ha.HassEntity
-import java.time.Instant
-import java.time.OffsetDateTime
+import com.hawksnest.core.ha.haTimeMs
 
 /** A doorbell press surfaced from a camera's ding sensor (`_ding` or `_visitor`). */
 data class DoorbellPress(
@@ -11,13 +10,6 @@ data class DoorbellPress(
     /** Epoch ms of the press (the ding sensor's last_changed). */
     val whenMs: Long,
 )
-
-private fun parseMs(iso: String?, fallback: Long): Long {
-    if (iso == null) return fallback
-    return runCatching { Instant.parse(iso).toEpochMilli() }
-        .recoverCatching { OffsetDateTime.parse(iso).toInstant().toEpochMilli() }
-        .getOrDefault(fallback)
-}
 
 /**
  * The most recent active doorbell press across all cameras — a camera whose
@@ -37,7 +29,9 @@ fun activeDoorbellPress(
         val dingId = cam.dingId ?: continue
         val ding = entities[dingId] ?: continue
         if (ding.state != "on") continue
-        val whenMs = parseMs(ding.lastChanged, nowMs)
+        // Websocket updates carry last_changed as epoch seconds, REST as ISO; haTimeMs reads both.
+        // Only an absent time falls back to "now", and that is a sensor HA gave no time for at all.
+        val whenMs = haTimeMs(ding.lastChanged) ?: nowMs
         if (nowMs - whenMs > windowMs) continue
         if (best == null || whenMs > best.whenMs) {
             best = DoorbellPress(cameraId = cam.id, name = cam.name, whenMs = whenMs)

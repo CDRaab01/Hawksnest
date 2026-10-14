@@ -1,6 +1,7 @@
 package com.hawksnest.widget
 
 import android.content.Context
+import android.os.Build
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ import com.hawksnest.widget.data.ActionTarget
 import com.hawksnest.widget.data.WidgetEntryPoint
 import com.hawksnest.widget.data.blocker
 import com.hawksnest.widget.data.companionEntityId
+import com.hawksnest.widget.data.entityId
 import com.hawksnest.widget.data.pendingSince
 import com.hawksnest.widget.data.room
 import com.hawksnest.widget.data.sceneLeds
@@ -46,6 +48,7 @@ import com.hawksnest.widget.ui.SCENE_KEY_GAP_SMALL
 import com.hawksnest.widget.ui.ScenePadKeyFace
 import com.hawksnest.widget.ui.WidgetHeader
 import com.hawksnest.widget.ui.WidgetPanel
+import com.hawksnest.widget.ui.openDevice
 import com.hawksnest.widget.ui.openWidgetConfig
 import kotlinx.serialization.json.Json
 
@@ -126,10 +129,16 @@ private fun ScenePadBody(prefs: Preferences, json: Json) {
                     icon = R.drawable.ic_glyph_power,
                     pending = view.pending,
                     note = blocker?.let { blockerCopy(it).headline } ?: view.staleness,
-                    // The one widget whose title reopens its own setup rather than the app.
-                    // It carries ten settings and Android gives no other way back to them, so
-                    // "open Hawksnest" would be a dead end where the settings are the point.
-                    onClick = openWidgetConfig(),
+                    // The name opens the ZEN32 itself (its relay; the preset selector when no relay
+                    // is set), like every other widget. Its ten settings live behind the launcher's
+                    // long-press "Settings" now (widgetFeatures="reconfigurable"). That menu item
+                    // only exists on Android 12+, so older launchers keep the header as the way
+                    // back into setup rather than lose it.
+                    onClick = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        openDevice(prefs.companionEntityId() ?: prefs.entityId())
+                    } else {
+                        openWidgetConfig()
+                    },
                 )
                 Spacer(modifier = GlanceModifier.height(6.dp))
             }

@@ -27,11 +27,11 @@ describe("nginx.conf — same-origin HA reverse proxy", () => {
   it("explicitly clears X-Forwarded-For on every HA-proxied location", () => {
     // HA (use_x_forwarded_for) 400s a request carrying an XFF from an untrusted
     // proxy. The TLS front (Tailscale Serve) injects XFF and nginx passes inbound
-    // headers through, so each HA location must actively blank it. Five HA
+    // headers through, so each HA location must actively blank it. Six HA
     // locations: /api/websocket, /api/camera_proxy_stream/, /api/hls/,
-    // /api/frigate/, /api/.
+    // /api/frigate/, /api/, and the direct-streams token check (/_hawksnest_ha_auth).
     const cleared = nginx.match(/proxy_set_header\s+X-Forwarded-For\s+""/g) ?? [];
-    expect(cleared.length).toBe(5);
+    expect(cleared.length).toBe(6);
     expect(nginx).toMatch(/proxy_set_header\s+X-Forwarded-Proto\s+""/);
     // And it must never PASS one through (i.e. never set it to the inbound value).
     expect(nginx).not.toMatch(/proxy_set_header\s+X-Forwarded-For\s+\$/);
@@ -94,6 +94,54 @@ describe("nginx.conf — same-origin HA reverse proxy", () => {
   it("never lets the browser cache the service worker", () => {
     expect(nginx).toMatch(/location\s+=\s+\/sw\.js/);
     expect(nginx).toMatch(/no-cache/);
+  });
+});
+
+describe("direct-streams endpoint — camera account for signed-in devices only", () => {
+  // /hawksnest/direct-streams hands out the camera password (owner-approved
+  // 2026-09-29). Every guard on it is pinned here, so an edit can't quietly
+  // widen who gets it or where it's stored.
+  const nginx = read("deploy/nginx.conf");
+  const deployment = read("deploy/k8s/deployment.yaml");
+  const dockerfile = read("Dockerfile");
+  const script = read("deploy/render-direct-streams.sh");
+  // One location block: from its opening line to the first 4-space-indented `}`.
+  const block = (start: string) => nginx.slice(nginx.indexOf(start)).split(/\r?\n {4}\}/)[0];
+
+  it("serves the file only after Home Assistant accepts the request's token", () => {
+    const endpoint = block("location = /hawksnest/direct-streams");
+    expect(endpoint).toMatch(/if \(\$http_authorization = ""\)/);
+    expect(endpoint).toContain("return 401");
+    expect(endpoint).toContain("auth_request /_hawksnest_ha_auth");
+    expect(endpoint).toMatch(/Cache-Control "no-store" always/);
+    expect(endpoint).toContain("alias /etc/hawksnest/direct-streams.json");
+  });
+
+  it("checks the token against HA's /api/, internally only, forwarding no body", () => {
+    const auth = block("location = /_hawksnest_ha_auth");
+    expect(auth).toContain("internal;");
+    expect(auth).toContain("proxy_pass http://homeassistant/api/");
+    expect(auth).toContain("proxy_pass_request_body off");
+  });
+
+  it("mounts the Secret only in the renderer, and keeps the output in memory", () => {
+    expect(dockerfile).toContain("COPY deploy/render-direct-streams.sh /usr/local/bin/render-direct-streams.sh");
+    const init = deployment.slice(deployment.indexOf("initContainers:"), deployment.indexOf("- name: hawksnest"));
+    const main = deployment.slice(deployment.indexOf("- name: hawksnest"), deployment.lastIndexOf("volumes:"));
+    expect(init).toContain("name: render-direct-streams");
+    expect(init).toContain("mountPath: /secrets");
+    expect(main).not.toContain("camera-secrets");
+    expect(main).toContain("mountPath: /etc/hawksnest");
+    expect(deployment).toMatch(/secretName:\s+frigate-credentials\s+optional:\s+true/);
+    expect(deployment).toMatch(/emptyDir:\s+medium:\s+Memory/);
+  });
+
+  it("never echoes a value and never fails the pod", () => {
+    // The only output is a count; the file is written, not printed.
+    expect(script).not.toMatch(/echo[^\n]*\$(ip|cams|pass|user|b64)/i);
+    expect(script).not.toMatch(/\bcat\b/);
+    expect(script).not.toMatch(/set -e/);
+    expect(script.trimEnd().endsWith("exit 0")).toBe(true);
   });
 });
 

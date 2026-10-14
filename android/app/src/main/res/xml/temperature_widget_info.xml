@@ -20,4 +20,5 @@
     android:previewImage="@drawable/ic_glyph_thermometer"
     android:description="@string/widget_temperature_description"
     android:configure="com.hawksnest.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable"
     android:widgetCategory="home_screen" />

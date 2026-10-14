@@ -267,6 +267,18 @@ class WidgetRepository @Inject constructor(
     /** The entity a widget is configured for, or null when it was never set up. */
     suspend fun storedEntityId(glanceId: GlanceId): String? = prefs(glanceId).entityId()
 
+    /** Everything the config screen can change on this widget, or null when it was never set up. */
+    suspend fun storedConfig(glanceId: GlanceId): StoredWidgetConfig? {
+        val prefs = prefs(glanceId)
+        val entityId = prefs.entityId() ?: return null
+        return StoredWidgetConfig(
+            entityId = entityId,
+            thresholds = prefs.tempThresholds(),
+            room = prefs.room(),
+            scenePad = ScenePadConfig(prefs.companionEntityId(), prefs.scenePresets(), prefs.sceneLeds()),
+        )
+    }
+
     /** Read [entityId] and store it. Returns the new state, or null when the fetch failed. */
     private suspend fun fetch(kind: WidgetKind, glanceId: GlanceId, entityId: String): String? {
         // Counted whatever the outcome: a failing fetch must throttle the next render's attempt

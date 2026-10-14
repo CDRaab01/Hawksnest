@@ -41,6 +41,7 @@ const GATE: LogicalCamera = {
   snapshotEntity: entity,
   eventStreamId: "camera.gate_event",
   eventSelectId: "select.gate_event_select",
+  ringSelectorLive: true,
   dingId: null,
   motionId: null,
   sirenSwitchId: null,

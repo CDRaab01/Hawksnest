@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import android.content.Context
 import com.hawksnest.core.ha.ConnectionManager
 import com.hawksnest.core.ha.ConnectionStatus
+import com.hawksnest.core.logic.DirectStreams
+import com.hawksnest.core.net.DirectStreamSource
 import com.hawksnest.core.net.ReachabilityProbe
 import com.hawksnest.crash.CrashReporter
 import com.hawksnest.core.logic.ThemePref
@@ -38,7 +40,15 @@ class SettingsViewModel @Inject constructor(
     private val devicePrefs: DevicePrefsStore,
     @ApplicationContext private val appContext: Context,
     okHttpClient: OkHttpClient,
+    private val directStreamSource: DirectStreamSource,
 ) : ViewModel() {
+
+    /** The direct-stream settings the Hawksnest server provides, if any (see DirectStreamSource). */
+    val serverDirectStreams: StateFlow<DirectStreams?> = directStreamSource.provided
+
+    init {
+        viewModelScope.launch { directStreamSource.get() }
+    }
 
     /**
      * Recent crashes, read from disk rather than observed: files only change when the process
@@ -167,6 +177,8 @@ class SettingsViewModel @Inject constructor(
     fun disconnect() {
         viewModelScope.launch {
             credentialStore.clear()
+            // The camera account the server handed this phone goes with the token that fetched it.
+            directStreamSource.forget()
             connectionManager.reconnect()
         }
     }

@@ -1,16 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
   chooseRecordedSource,
-  footageLaneRefreshKey,
-  footageRunAt,
   footageSegmentAt,
   footageSpanAt,
   footageSpans,
   isPlayable,
   offsetInSegmentSeconds,
+  FRIGATE_LANE_TOLERANCE_MS,
+  coalesceSpans,
   parseFrigateWsRecordings,
   parseRingFootage,
-  sameFootageSpans,
   type FootageSegment,
   type FootageSpan,
 } from "../ringFootage";
@@ -184,9 +183,7 @@ describe("parseFrigateWsRecordings (frigate/recordings/get websocket result)", (
     const spans = parseFrigateWsRecordings(
       JSON.stringify([seg(1000, 1010), seg(1010.2, 1020), seg(1020.1, 1030)]),
     );
-    expect(spans).toEqual([
-      { startMs: 1000_000, endMs: 1030_000, playable: true, runs: [{ startMs: 1000_000, endMs: 1030_000 }] },
-    ]);
+    expect(spans).toEqual([{ startMs: 1000_000, endMs: 1030_000, playable: true }]);
   });
 
   it("keeps a real gap (beyond tolerance) as two spans — the lane must show honest holes", () => {
@@ -196,17 +193,40 @@ describe("parseFrigateWsRecordings (frigate/recordings/get websocket result)", (
     expect(spans[1].startMs).toBe(1100_000);
   });
 
-  it("bridges a single dropped segment (a hole within tolerance)", () => {
-    // One missing ~10s cache segment is real but not worth drawing as a gap.
+  it("KEEPS a single dropped segment as a hole — the parse is media-accurate, not drawable", () => {
+    // One missing ~10s cache segment is not worth DRAWING as a gap, but it is absolutely worth
+    // keeping here: `vodRangeFor` reads these spans to decide how far a VOD page may stretch, and
+    // Frigate's VOD concatenates rather than pads, so a bridged hole becomes permanent drift
+    // between the playhead and the picture. The lane widens them later (see coalesceSpans).
     const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(1022, 1032)]);
-    expect(spans).toHaveLength(1);
+    expect(spans).toHaveLength(2);
+  });
+
+  it("merges only float rounding at the seam, not real holes", () => {
+    // Frigate's segment times are floats; abutting segments differ by milliseconds.
+    expect(parseFrigateWsRecordings([seg(1000, 1010), seg(1010.3, 1020)])).toHaveLength(1);
+    // 1.5 s is a real hole — exactly the shape nursery_high produced while its record process was
+    // stuck, and the shape that cost 10 minutes of drift when it was bridged.
+    expect(parseFrigateWsRecordings([seg(1000, 1010), seg(1011.5, 1021)])).toHaveLength(2);
+  });
+
+  it("regression: a page of 1-2s holes no longer collapses into one span", () => {
+    // The nursery_high shape: ~10 s segments with ~2 s holes. Under the old 15 s parse tolerance
+    // every hole was bridged, so the whole window read as ONE span, vodRangeFor narrowed nothing,
+    // and the linear seek drifted by the accumulated missing footage.
+    const segments = Array.from({ length: 30 }, (_, i) => seg(1000 + i * 12, 1000 + i * 12 + 10));
+    const spans = parseFrigateWsRecordings(segments);
+    expect(spans).toHaveLength(30);
+    // Media actually present is 300 s, while the wall-clock span is 358 s — a 58 s difference that
+    // the old behaviour handed to the player as if it were solid footage.
+    const media = spans.reduce((a, s) => a + (s.endMs - s.startMs), 0);
+    expect(media).toBe(300_000);
+    expect(spans[spans.length - 1].endMs - spans[0].startMs).toBe(358_000);
   });
 
   it("sorts unordered input before coalescing", () => {
     const spans = parseFrigateWsRecordings([seg(1020, 1030), seg(1000, 1010), seg(1010, 1020)]);
-    expect(spans).toEqual([
-      { startMs: 1000_000, endMs: 1030_000, playable: true, runs: [{ startMs: 1000_000, endMs: 1030_000 }] },
-    ]);
+    expect(spans).toEqual([{ startMs: 1000_000, endMs: 1030_000, playable: true }]);
   });
 
   it("drops malformed entries and returns [] for junk rather than throwing", () => {
@@ -215,64 +235,52 @@ describe("parseFrigateWsRecordings (frigate/recordings/get websocket result)", (
     expect(parseFrigateWsRecordings({ recordings: [] })).toEqual([]);
     // end <= start and missing fields drop only themselves.
     const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(2000, 2000), { start_time: 3000 }]);
-    expect(spans).toEqual([
-      { startMs: 1000_000, endMs: 1010_000, playable: true, runs: [{ startMs: 1000_000, endMs: 1010_000 }] },
-    ]);
-  });
-
-  it("a bridged hole is drawn as one span but exposed as two runs", () => {
-    // 8 s hole: inside the 15 s drawing tolerance (one span on the strip), far outside the 1 s run
-    // tolerance. Frigate's VOD would play these back-to-back, so a seek measured from the span
-    // start would land 8 s late anywhere after the hole — the runs are what let vodRangeFor avoid it.
-    const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(1018, 1028)]);
-    expect(spans).toHaveLength(1);
-    expect(spans[0]).toMatchObject({ startMs: 1000_000, endMs: 1028_000 });
-    expect(spans[0].runs).toEqual([
-      { startMs: 1000_000, endMs: 1010_000 },
-      { startMs: 1018_000, endMs: 1028_000 },
-    ]);
-  });
-
-  it("abutting segments form one run", () => {
-    // Sub-second seams and a slight overlap are how Frigate's own segments actually meet.
-    const spans = parseFrigateWsRecordings([seg(1000, 1010), seg(1010.2, 1020), seg(1019.9, 1030)]);
-    expect(spans).toHaveLength(1);
-    expect(spans[0].runs).toEqual([{ startMs: 1000_000, endMs: 1030_000 }]);
-  });
-
-  it("footageRunAt is half-open and null inside a bridged hole", () => {
-    const [span] = parseFrigateWsRecordings([seg(1000, 1010), seg(1018, 1028)]);
-    expect(footageRunAt(span.runs!, 1000_000)).toEqual({ startMs: 1000_000, endMs: 1010_000 });
-    expect(footageRunAt(span.runs!, 1010_000)).toBeNull();
-    expect(footageRunAt(span.runs!, 1017_999)).toBeNull();
-    expect(footageRunAt(span.runs!, 1018_000)).toEqual({ startMs: 1018_000, endMs: 1028_000 });
-  });
-
-  it("sameFootageSpans compares spans and runs by value", () => {
-    const a = parseFrigateWsRecordings([seg(1000, 1010), seg(1018, 1028)]);
-    const b = parseFrigateWsRecordings([seg(1000, 1010), seg(1018, 1028)]);
-    expect(a).not.toBe(b);
-    expect(sameFootageSpans(a, b)).toBe(true);
-    // Same drawn span, different runs — a refetch that learned a hole closed is a real change.
-    const c = parseFrigateWsRecordings([seg(1000, 1010), seg(1010.5, 1028)]);
-    expect(c[0]).toMatchObject({ startMs: 1000_000, endMs: 1028_000 });
-    expect(sameFootageSpans(a, c)).toBe(false);
-    expect(sameFootageSpans([], [])).toBe(true);
-    expect(sameFootageSpans(a, [])).toBe(false);
+    expect(spans).toEqual([{ startMs: 1000_000, endMs: 1010_000, playable: true }]);
   });
 });
 
-describe("footageLaneRefreshKey", () => {
-  it("is the camera state for a battery camera and constant for everything else", () => {
-    // Each wake flips the Frigate entity idle → streaming → idle; each flip is one refetch.
-    expect(footageLaneRefreshKey(true, "idle")).toBe("idle");
-    expect(footageLaneRefreshKey(true, "streaming")).toBe("streaming");
-    expect(footageLaneRefreshKey(true, undefined)).toBeNull();
-    // A 24/7 camera's state changes say nothing about new footage — it is all new footage.
-    expect(footageLaneRefreshKey(false, "idle")).toBeNull();
-    expect(footageLaneRefreshKey(false, "streaming")).toBeNull();
+describe("coalesceSpans (the lane's widening, applied at the point of drawing)", () => {
+  const span = (startMs: number, endMs: number, playable = true): FootageSpan => ({
+    startMs,
+    endMs,
+    playable,
+  });
+
+  it("bridges a dropped segment at the lane tolerance", () => {
+    // The behaviour that used to live in the parser — still wanted, just no longer imposed on the
+    // VOD range math.
+    const out = coalesceSpans([span(1000, 11_000), span(23_000, 33_000)], FRIGATE_LANE_TOLERANCE_MS);
+    expect(out).toEqual([{ startMs: 1000, endMs: 33_000, playable: true }]);
+  });
+
+  it("leaves a hole longer than the tolerance alone", () => {
+    const out = coalesceSpans([span(1000, 11_000), span(40_000, 50_000)], FRIGATE_LANE_TOLERANCE_MS);
+    expect(out).toHaveLength(2);
+  });
+
+  it("never merges across a playability change", () => {
+    // Same rule as footageSpans: a greyed encrypted run stays visually distinct.
+    const out = coalesceSpans([span(1000, 11_000), span(11_100, 21_000, false)], 15_000);
+    expect(out).toHaveLength(2);
+  });
+
+  it("does not mutate its input", () => {
+    const input = [span(1000, 11_000), span(11_100, 21_000)];
+    coalesceSpans(input, 15_000);
+    expect(input[0].endMs).toBe(11_000);
+  });
+
+  it("collapses the nursery_high shape for drawing while the media set keeps the holes", () => {
+    const segments = Array.from({ length: 30 }, (_, i) => ({
+      start_time: 1000 + i * 12,
+      end_time: 1000 + i * 12 + 10,
+    }));
+    const media = parseFrigateWsRecordings(segments);
+    expect(media).toHaveLength(30);
+    expect(coalesceSpans(media, FRIGATE_LANE_TOLERANCE_MS)).toHaveLength(1);
   });
 });
+
 
 
 

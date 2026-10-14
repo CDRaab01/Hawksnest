@@ -82,3 +82,20 @@ private fun HassEntity.applyChange(change: JsonObject): HassEntity {
 /** HA sends `lc`/`lu` as epoch-second floats; keep them as their raw string (display-only). */
 private fun numberAsString(el: kotlinx.serialization.json.JsonElement?): String? =
     (el as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+
+/**
+ * Parse an entity's `last_changed` / `last_updated` to epoch ms, or null when absent or
+ * unparseable.
+ *
+ * The same field arrives in two shapes: epoch SECONDS as a numeric string over the compressed
+ * websocket (above), and ISO-8601 over REST. Anything that does arithmetic on these times must
+ * accept both. A parser that only knows ISO silently fails on every websocket update, which is
+ * how the doorbell banner came to treat every press as "just now".
+ */
+fun haTimeMs(raw: String?): Long? {
+    if (raw.isNullOrEmpty()) return null
+    raw.toDoubleOrNull()?.let { return (it * 1000).toLong() }
+    return runCatching { java.time.Instant.parse(raw).toEpochMilli() }
+        .recoverCatching { java.time.OffsetDateTime.parse(raw).toInstant().toEpochMilli() }
+        .getOrNull()
+}

@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -21,8 +22,10 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -47,12 +50,22 @@ fun MjpegView(
     streamUrl: String,
     snapshotUrl: String?,
     modifier: Modifier = Modifier,
+    /** The decoded frame's real (width, height), so the frame around this tier takes the
+     *  picture's shape — see `core/logic/MediaAspect.kt`. */
+    onVideoSize: ((Int, Int) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val client = remember { entryPoint(context).okHttpClient() }
     var frame by remember(streamUrl) { mutableStateOf<ImageBitmap?>(null) }
 
-    LaunchedEffect(streamUrl) {
+    // Stop reading with the activity and reopen on return (see StopWhileBackgrounded). The cancel
+    // lands at the next frame boundary, which on a live MJPEG feed is a fraction of a second.
+    var restarts by remember { mutableIntStateOf(0) }
+    var reader by remember { mutableStateOf<Job?>(null) }
+    StopWhileBackgrounded(onStop = { reader?.cancel() }, onRestart = { restarts += 1 })
+
+    LaunchedEffect(streamUrl, restarts) {
+        reader = coroutineContext.job
         withContext(Dispatchers.IO) {
             runCatching { streamMjpeg(client, streamUrl) { bmp -> frame = bmp } }
         }
@@ -60,6 +73,7 @@ fun MjpegView(
 
     val current = frame
     if (current != null) {
+        LaunchedEffect(current.width, current.height) { onVideoSize?.invoke(current.width, current.height) }
         Image(
             bitmap = current,
             contentDescription = "Live camera",
@@ -68,7 +82,11 @@ fun MjpegView(
         )
     } else {
         // No frame yet — hold the (self-refreshing) snapshot so the view is never blank.
-        RefreshingSnapshot(url = snapshotUrl, modifier = modifier)
+        RefreshingSnapshot(
+            url = snapshotUrl,
+            modifier = modifier,
+            onAspect = { r -> onVideoSize?.invoke((r * 1000f).toInt(), 1000) },
+        )
     }
 }
 

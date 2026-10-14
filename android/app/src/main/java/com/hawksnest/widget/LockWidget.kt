@@ -33,12 +33,14 @@ import com.hawksnest.ui.glance.PulseGlanceTheme
 import com.hawksnest.widget.data.WidgetEntryPoint
 import com.hawksnest.widget.data.blocker
 import com.hawksnest.widget.data.confirmSince
+import com.hawksnest.widget.data.entityId
 import com.hawksnest.widget.data.pendingSince
 import com.hawksnest.widget.data.snapshot
 import com.hawksnest.widget.ui.BlockerBody
 import com.hawksnest.widget.ui.WidgetButton
 import com.hawksnest.widget.ui.WidgetHeader
 import com.hawksnest.widget.ui.WidgetPanel
+import com.hawksnest.widget.ui.openDevice
 import com.hawksnest.widget.ui.readAtLabel
 import kotlinx.serialization.json.Json
 
@@ -112,6 +114,7 @@ private fun LockBody(prefs: Preferences, json: Json) {
         } else {
             WidgetHeader(
                 name = view.name,
+                onClick = openDevice(prefs.entityId()),
                 detail = view.label,
                 // The bolt as HA last reported it: thrown when locked (or throwing), open
                 // otherwise — a jam included, because a jammed bolt is an unthrown one.

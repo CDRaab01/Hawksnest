@@ -111,6 +111,17 @@ data class ScenePadConfig(
     val leds: Map<ScenePadKey, LedColor>,
 )
 
+/**
+ * What a placed widget is set to, so reopening its setup (the launcher's long-press "Settings")
+ * starts from the widget as it is rather than from scratch. Only the parts the config screen edits.
+ */
+data class StoredWidgetConfig(
+    val entityId: String,
+    val thresholds: Triple<Double, Double, Double>,
+    val room: String?,
+    val scenePad: ScenePadConfig,
+)
+
 internal fun Preferences.companionEntityId(): String? =
     this[WidgetKeys.COMPANION_ENTITY_ID]?.takeIf { it.isNotBlank() }
 
