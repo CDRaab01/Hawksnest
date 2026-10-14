@@ -9,6 +9,7 @@ import {
 } from "../../../store/connection";
 import { useEntityStore } from "../../../store/entityStore";
 import { resetGo2rtcForTest } from "../../../lib/go2rtc";
+import type { FootageSpan } from "../../../lib/ringFootage";
 import type { HassEntity } from "../../../lib/ha";
 import type { LogicalCamera } from "../../../lib/cameraModel";
 
@@ -32,7 +33,7 @@ vi.mock("../../../store/connection", async (importOriginal) => {
 const signed = signedRecordingUrlAt as unknown as ReturnType<typeof vi.fn>;
 const footage = fetchCameraFootage as unknown as ReturnType<typeof vi.fn>;
 
-function frigateCamera(base: string, name: string): LogicalCamera {
+function frigateCamera(base: string, name: string, { battery = false } = {}): LogicalCamera {
   const entity: HassEntity = {
     entity_id: `camera.${base}`,
     state: "idle",
@@ -53,12 +54,15 @@ function frigateCamera(base: string, name: string): LogicalCamera {
     dingId: null,
     motionId: null,
     sirenSwitchId: null,
-    batteryId: null,
+    // `sensor.<base>_battery` is the tell that a camera SLEEPS (`isBatteryCamera`).
+    batteryId: battery ? `sensor.${base}_battery` : null,
   };
 }
 
 const BEDROOM = frigateCamera("bedroom", "Bedroom");
 const KITCHEN = frigateCamera("kitchen", "Kitchen");
+/** A battery Reolink behind the Home Hub: a Frigate camera that is parked `idle` between wakes. */
+const FRONT = frigateCamera("front", "Front", { battery: true });
 
 /**
  * 15:00Z, which sits in the MIDDLE of a VOD page.
@@ -200,6 +204,79 @@ describe("CameraPlayer — gap-aware scrub (event-only cameras)", () => {
     await recordedVideo();
     // The signed range is the island, so playlist time == wall-clock offset from its start.
     expect(signed).toHaveBeenCalledWith("bedroom", island.startMs, island.endMs);
+  });
+});
+
+/**
+ * A battery camera records DURING the session — every PIR wake is new footage — so its lane
+ * cannot be fetched once per open like a 24/7 camera's. HA flips the Frigate camera entity's
+ * state around each wake (`idle` → `streaming` → `idle`); each transition is exactly one refetch,
+ * and the spans already on screen stay until the new ones land.
+ */
+describe("CameraPlayer — battery camera lane refresh", () => {
+  const now = NOON_ISH.getTime();
+  const island: FootageSpan[] = [
+    { startMs: now - 50 * 60_000, endMs: now - 40 * 60_000, playable: true },
+  ];
+
+  /** HA publishing the camera entity with a new state (or only new attributes). */
+  function publish(camera: LogicalCamera, state: string, attributes: Record<string, unknown> = {}) {
+    act(() => {
+      useEntityStore.getState().upsertEntities([
+        { ...camera.liveEntity, state, attributes: { ...camera.liveEntity.attributes, ...attributes } },
+      ]);
+    });
+  }
+
+  async function settle() {
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  }
+
+  it("refetches the lane exactly once per entity state transition, keeping the old spans meanwhile", async () => {
+    let releaseRefresh: (spans: FootageSpan[]) => void = () => undefined;
+    footage
+      .mockResolvedValueOnce(island)
+      .mockImplementationOnce(() => new Promise<FootageSpan[]>((resolve) => (releaseRefresh = resolve)))
+      .mockResolvedValueOnce(island);
+    publish(FRONT, "idle");
+    renderPlayer(FRONT);
+    await waitFor(() => expect(footage).toHaveBeenCalledTimes(1));
+    await settle();
+    // The lane is drawn (" · 24/7" is the strip's own tell that footage spans exist).
+    expect(screen.getByText(/24\/7/)).toBeInTheDocument();
+
+    // The PIR woke it: one transition, one refetch…
+    publish(FRONT, "streaming");
+    await waitFor(() => expect(footage).toHaveBeenCalledTimes(2));
+    // …and while that refetch is in flight the lane must not flash to empty.
+    expect(screen.getByText(/24\/7/)).toBeInTheDocument();
+    // Attribute-only churn (battery %, snapshot republish) is not a transition.
+    publish(FRONT, "streaming", { battery_level: 87 });
+    await settle();
+    expect(footage).toHaveBeenCalledTimes(2);
+
+    act(() => releaseRefresh(island));
+    await settle();
+    // Back to sleep: the third and last refetch, which is when the new footage is on disk.
+    publish(FRONT, "idle");
+    await waitFor(() => expect(footage).toHaveBeenCalledTimes(3));
+    await settle();
+    expect(screen.getByText(/24\/7/)).toBeInTheDocument();
+    expect(footage).toHaveBeenCalledTimes(3);
+  });
+
+  it("never refetches for a camera that does not sleep", async () => {
+    footage.mockResolvedValueOnce(island);
+    publish(BEDROOM, "idle");
+    renderPlayer(BEDROOM);
+    await waitFor(() => expect(footage).toHaveBeenCalledTimes(1));
+
+    // A 24/7 camera's state says nothing about new footage — it is all new footage.
+    publish(BEDROOM, "streaming");
+    await settle();
+    publish(BEDROOM, "idle");
+    await settle();
+    expect(footage).toHaveBeenCalledTimes(1);
   });
 });
 

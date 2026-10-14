@@ -208,6 +208,17 @@ closed):
   same convention `clipExport.coverage` uses). 24/7 cameras are byte-identical: their lane is one
   span per uninterrupted run. This also closed a platform gap — Android's Frigate VOD had no
   `onError` at all, so a dead page stalled silently; it now has `vodFailed` + Retry like the web.
+- **A battery camera's lane is refetched while it is open (2026-09-13, landed 2026-10-14).** The
+  Frigate lane was fetched once per camera-open, which is right for a 24/7 camera and wrong for one
+  that records only while awake: every wake during the session was invisible until the player was
+  reopened. For `isBatteryCamera` only, the lane fetch is keyed on the Frigate camera entity's
+  STATE (`footageLaneRefreshKey` ⇄ Kotlin twin: `idle` ⇄ `streaming` around each wake — the same
+  entity and state the tile's "Asleep" reads), so one transition is exactly one refetch; other
+  cameras' key is constant. The refresh keeps the spans on screen until the new ones land and
+  stores an equal result as the SAME value (`sameFootageSpans` on web; structural `mutableStateOf`
+  on Android), so a no-change refetch never rebuilds the page memo or remounts the player. (The
+  same PR first carried per-span contiguous `runs` for seek accuracy; #169's media-accurate parse
+  fixed that more simply, so only the refresh shipped.)
 - **The one tolerance that served two masters (fixed 2026-10-01).** `vodRangeFor`'s correctness
   rests entirely on "the range is contiguous footage, so playlist time == wall-clock offset" — so
   it is only as truthful as the spans it is handed. Those spans were coalesced at the parse

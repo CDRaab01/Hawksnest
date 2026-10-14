@@ -8,8 +8,10 @@ import {
   offsetInSegmentSeconds,
   FRIGATE_LANE_TOLERANCE_MS,
   coalesceSpans,
+  footageLaneRefreshKey,
   parseFrigateWsRecordings,
   parseRingFootage,
+  sameFootageSpans,
   type FootageSegment,
   type FootageSpan,
 } from "../ringFootage";
@@ -380,5 +382,38 @@ describe("footageSpanAt", () => {
     const spans = [span(T0, T0 + 10 * MIN), span(T0 + 5 * MIN, T0 + 8 * MIN)];
     expect(footageSpanAt(spans, T0 + 30 * MIN)).toBeNull();
     expect(footageSpanAt(spans, T0 + 6 * MIN)).toBe(spans[1]);
+  });
+});
+
+describe("sameFootageSpans", () => {
+  const lane = (...pairs: [number, number][]): FootageSpan[] =>
+    pairs.map(([startMs, endMs]) => ({ startMs, endMs, playable: true }));
+
+  it("compares spans by value, so an unchanged refetch can keep the old array", () => {
+    const a = lane([T0, T0 + MIN], [T0 + 5 * MIN, T0 + 6 * MIN]);
+    const b = lane([T0, T0 + MIN], [T0 + 5 * MIN, T0 + 6 * MIN]);
+    expect(a).not.toBe(b);
+    expect(sameFootageSpans(a, b)).toBe(true);
+    expect(sameFootageSpans([], [])).toBe(true);
+  });
+
+  it("sees a wake's new footage, a grown span, and a playability flip as changes", () => {
+    const a = lane([T0, T0 + MIN]);
+    expect(sameFootageSpans(a, lane([T0, T0 + MIN], [T0 + 5 * MIN, T0 + 6 * MIN]))).toBe(false);
+    expect(sameFootageSpans(a, lane([T0, T0 + 2 * MIN]))).toBe(false);
+    expect(sameFootageSpans(a, [{ ...a[0], playable: false }])).toBe(false);
+    expect(sameFootageSpans(a, [])).toBe(false);
+  });
+});
+
+describe("footageLaneRefreshKey", () => {
+  it("is the camera state for a battery camera and constant for everything else", () => {
+    // Each wake flips the Frigate entity idle → streaming → idle; each flip is one refetch.
+    expect(footageLaneRefreshKey(true, "idle")).toBe("idle");
+    expect(footageLaneRefreshKey(true, "streaming")).toBe("streaming");
+    expect(footageLaneRefreshKey(true, undefined)).toBeNull();
+    // A 24/7 camera's state changes say nothing about new footage — it is all new footage.
+    expect(footageLaneRefreshKey(false, "idle")).toBeNull();
+    expect(footageLaneRefreshKey(false, "streaming")).toBeNull();
   });
 });

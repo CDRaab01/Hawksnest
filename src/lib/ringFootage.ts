@@ -147,6 +147,41 @@ export function footageSpanAt(spans: FootageSpan[], t: number): FootageSpan | nu
   return best;
 }
 
+/**
+ * Whether two lanes describe the same footage — spans compared by VALUE.
+ *
+ * The lane is refetched while a battery camera is open (each wake adds footage), and React keys
+ * the VOD source effect on what the lane says is under the playhead. A refetch that comes back
+ * unchanged must therefore leave the SAME array in state, or an equal-but-new lane would rebuild
+ * the page memo and remount the player mid-playback. See ARCHITECTURE.md's identity rule.
+ */
+export function sameFootageSpans(a: FootageSpan[], b: FootageSpan[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (x.startMs !== y.startMs || x.endMs !== y.endMs || x.playable !== y.playable) return false;
+  }
+  return true;
+}
+
+/**
+ * The key that re-runs the Frigate footage-lane fetch while a camera stays open.
+ *
+ * The lane is otherwise fetched once per camera-open, which is right for a 24/7 camera (nothing
+ * new to learn) and wrong for a battery camera behind a Home Hub: everything it records DURING
+ * the session — each PIR wake — would never appear until the player was closed and reopened. HA
+ * flips the Frigate camera entity's state around every wake (`idle` → `streaming`/`recording` →
+ * `idle`), the same signal the tile's "Asleep" reads, so the state string IS the refresh key:
+ * one transition, one refetch. For everything else the key is constant, so nothing refetches.
+ * Attribute-only churn (battery %, snapshot republish) never changes it. 1:1 with
+ * `core/logic/RingFootage.kt`.
+ */
+export function footageLaneRefreshKey(isBattery: boolean, cameraState: string | null | undefined): string | null {
+  return isBattery ? (cameraState ?? null) : null;
+}
+
 /** Offset of `t` within `seg`, clamped into the span, in seconds (the player seeks in seconds). */
 export function offsetInSegmentSeconds(seg: FootageSegment, t: number): number {
   const span = seg.endMs - seg.startMs;

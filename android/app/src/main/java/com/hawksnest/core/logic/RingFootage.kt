@@ -1,5 +1,9 @@
 package com.hawksnest.core.logic
 
+import com.hawksnest.core.ha.HassEntity
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -144,6 +148,33 @@ fun footageSpanAt(spans: List<FootageSpan>, t: Long): FootageSpan? {
     }
     return best
 }
+
+/**
+ * The key that re-runs the Frigate footage-lane fetch while a camera stays open.
+ *
+ * The lane is otherwise fetched once per camera-open, which is right for a 24/7 camera (nothing
+ * new to learn) and wrong for a battery camera behind a Home Hub: everything it records DURING
+ * the session — each PIR wake — would never appear until the player was closed and reopened. HA
+ * flips the Frigate camera entity's state around every wake (`idle` → `streaming`/`recording` →
+ * `idle`), the same signal the tile's "Asleep" reads, so the state string IS the refresh key:
+ * one transition, one refetch. For everything else the key is constant, so nothing refetches.
+ * Attribute-only churn (battery %, snapshot republish) never changes it. 1:1 with the web's
+ * `footageLaneRefreshKey`.
+ */
+fun footageLaneRefreshKey(isBattery: Boolean, cameraState: String?): String? =
+    if (isBattery) cameraState else null
+
+/**
+ * [footageLaneRefreshKey] over a live entity map: one emission per state transition of [entityId],
+ * none for attribute-only churn, and a single constant emission for a camera that does not sleep.
+ * The player keys its lane fetch on this, so every emission after the first is exactly one refetch.
+ */
+fun footageLaneRefreshKeys(
+    entities: Flow<Map<String, HassEntity>>,
+    entityId: String,
+    isBattery: Boolean,
+): Flow<String?> =
+    entities.map { footageLaneRefreshKey(isBattery, it[entityId]?.state) }.distinctUntilChanged()
 
 /** Offset of [t] within [seg], clamped into the span, in milliseconds (ExoPlayer seeks in ms). */
 fun offsetInSegmentMs(seg: FootageSegment, t: Long): Long {
