@@ -134,6 +134,25 @@ describe("timeAxis", () => {
     expect(ticks.every((t) => /\d/.test(t.label) && !/:/.test(t.label))).toBe(true);
   });
 
+  it("keeps a 30-day axis's ticks west of UTC", () => {
+    // The grid is anchored at local midnight. West of UTC that falls before T0,
+    // and rounding the step up to 14 days then left two labels across a month;
+    // this test only ever ran in CI's UTC, where the anchor happens to equal T0.
+    const saved = process.env.TZ;
+    try {
+      for (const zone of ["UTC", "America/New_York", "America/Los_Angeles", "Asia/Tokyo"]) {
+        process.env.TZ = zone;
+        const ticks = timeAxis(T0, T0 + 30 * DAY);
+        expect(ticks.length, zone).toBeGreaterThanOrEqual(4);
+        const gaps = new Set(ticks.slice(1).map((t, i) => t.t - ticks[i].t));
+        expect([...gaps], zone).toEqual([7 * DAY]);
+      }
+    } finally {
+      if (saved === undefined) delete process.env.TZ;
+      else process.env.TZ = saved;
+    }
+  });
+
   it("uses clock labels over a 6-hour range", () => {
     const ticks = timeAxis(T0, T0 + 6 * HOUR);
     expect(ticks.every((t) => /^\d{2}:\d{2}$/.test(t.label))).toBe(true);

@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import com.hawksnest.core.ha.ConnectionStatus
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -113,10 +115,25 @@ class EntityDetailViewModel @Inject constructor(
     private val _history = MutableStateFlow<HistoryUi>(HistoryUi.Loading)
     val history: StateFlow<HistoryUi> = _history.asStateFlow()
 
+    /**
+     * Whether the app can answer for this entity yet: connected (or in demo). A screen opened from
+     * a widget or a notification usually starts BEFORE the socket is up, and until then "no such
+     * entity" means "not loaded yet", not "missing". The screen waits on this rather than saying
+     * "Device not found", and history is fetched once it is true rather than once, too early.
+     */
+    val ready: StateFlow<Boolean> =
+        state.status.map { it == ConnectionStatus.CONNECTED || it == ConnectionStatus.DEMO }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     init {
-        // collectLatest cancels an in-flight fetch when the range changes (the web `active` flag).
+        // collectLatest cancels an in-flight fetch when the range changes (the web `active` flag),
+        // and refetches when the connection comes up, which a cold deep link always waits for.
         viewModelScope.launch {
-            _hours.collectLatest { h -> loadHistory(h) }
+            combine(_hours, ready) { h, isReady -> h to isReady }
+                .distinctUntilChanged()
+                .collectLatest { (h, isReady) ->
+                    if (isReady) loadHistory(h) else _history.value = HistoryUi.Loading
+                }
         }
     }
 

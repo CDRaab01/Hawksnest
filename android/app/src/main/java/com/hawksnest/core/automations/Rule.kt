@@ -102,7 +102,7 @@ fun newRule(): Rule = Rule(
     alias = "",
     trigger = RuleTrigger.State(entityId = "", to = ""),
     conditions = emptyList(),
-    actions = listOf(RuleAction(domain = "lock", verb = "lock", targetEntityIds = emptyList())),
+    actions = listOf(RuleAction(domain = "light", verb = "turn_on", targetEntityIds = emptyList())),
     mode = "single",
 )
 

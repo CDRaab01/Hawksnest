@@ -4,7 +4,8 @@ package com.hawksnest.core.automations
  * Curated domain/verb/state lookup tables for the automation builder — the Kotlin port of the
  * tables in `src/lib/automations.ts`. They mirror exactly what the device cards already invoke
  * (lock.lock/unlock, light.turn_on/off, alarm arm/disarm…), so an automation can only do what the
- * app can already do by hand.
+ * app can already do by hand. What a trigger or condition device offers, in its own words, is in
+ * `RuleWords.kt`.
  */
 
 data class StateOption(val value: String, val label: String)
@@ -13,43 +14,20 @@ data class VerbDef(val verb: String, val label: String, val service: String)
 
 data class TriggerTypeOption(val kind: TriggerKind, val label: String, val hint: String)
 
-/**
- * Curated "to state" options per domain for the trigger/condition pickers. Domains absent here fall
- * back to a free-text state input. Mirrors the state vocabulary the cards use.
- */
-private val STATE_OPTIONS: Map<String, List<StateOption>> = mapOf(
-    "alarm_control_panel" to listOf(
-        StateOption("disarmed", "Disarmed"),
-        StateOption("armed_home", "Armed — Home"),
-        StateOption("armed_away", "Armed — Away"),
-        StateOption("armed_night", "Armed — Night"),
-        StateOption("triggered", "Triggered"),
-    ),
-    "lock" to listOf(
-        StateOption("locked", "Locked"),
-        StateOption("unlocked", "Unlocked"),
-    ),
-    "binary_sensor" to listOf(
-        StateOption("on", "Detected / On"),
-        StateOption("off", "Clear / Off"),
-    ),
-    "light" to listOf(StateOption("on", "On"), StateOption("off", "Off")),
-    "switch" to listOf(StateOption("on", "On"), StateOption("off", "Off")),
-    "fan" to listOf(StateOption("on", "On"), StateOption("off", "Off")),
-    "cover" to listOf(StateOption("open", "Open"), StateOption("closed", "Closed")),
-    "person" to listOf(StateOption("home", "Home"), StateOption("not_home", "Away")),
-    "device_tracker" to listOf(StateOption("home", "Home"), StateOption("not_home", "Away")),
-)
-
-/** Action verbs per domain → the HA service they call. */
+/** Action verbs per domain → the HA service they call. Map order is the picker's order. */
 private val ACTION_VERBS: Map<String, List<VerbDef>> = mapOf(
+    "light" to listOf(
+        VerbDef("turn_on", "Turn on", "light.turn_on"),
+        VerbDef("turn_off", "Turn off", "light.turn_off"),
+    ),
     "lock" to listOf(
         VerbDef("lock", "Lock", "lock.lock"),
         VerbDef("unlock", "Unlock", "lock.unlock"),
     ),
-    "light" to listOf(
-        VerbDef("turn_on", "Turn on", "light.turn_on"),
-        VerbDef("turn_off", "Turn off", "light.turn_off"),
+    "alarm_control_panel" to listOf(
+        VerbDef("arm_home", "Arm — Home", "alarm_control_panel.alarm_arm_home"),
+        VerbDef("arm_away", "Arm — Away", "alarm_control_panel.alarm_arm_away"),
+        VerbDef("disarm", "Disarm", "alarm_control_panel.alarm_disarm"),
     ),
     "switch" to listOf(
         VerbDef("turn_on", "Turn on", "switch.turn_on"),
@@ -62,11 +40,6 @@ private val ACTION_VERBS: Map<String, List<VerbDef>> = mapOf(
     "cover" to listOf(
         VerbDef("open", "Open", "cover.open_cover"),
         VerbDef("close", "Close", "cover.close_cover"),
-    ),
-    "alarm_control_panel" to listOf(
-        VerbDef("arm_home", "Arm — Home", "alarm_control_panel.alarm_arm_home"),
-        VerbDef("arm_away", "Arm — Away", "alarm_control_panel.alarm_arm_away"),
-        VerbDef("disarm", "Disarm", "alarm_control_panel.alarm_disarm"),
     ),
     "scene" to listOf(VerbDef("activate", "Activate", "scene.turn_on")),
     "script" to listOf(VerbDef("run", "Run", "script.turn_on")),
@@ -86,8 +59,6 @@ val DOMAIN_LABEL: Map<String, String> = mapOf(
 
 /** Domains that can be targeted by an action, in picker order. */
 val ACTION_DOMAINS: List<String> = ACTION_VERBS.keys.toList()
-
-fun stateOptionsFor(domain: String): List<StateOption> = STATE_OPTIONS[domain] ?: emptyList()
 
 fun verbsFor(domain: String): List<VerbDef> = ACTION_VERBS[domain] ?: emptyList()
 
@@ -110,8 +81,8 @@ fun verbForService(service: String): Pair<String, String>? {
 val TRIGGER_TYPES: List<TriggerTypeOption> = listOf(
     TriggerTypeOption(TriggerKind.STATE, "A device changes", "When a device reaches a state"),
     TriggerTypeOption(TriggerKind.TIME, "At a time", "At a specific time of day"),
-    TriggerTypeOption(TriggerKind.SUN, "Sun", "At sunrise or sunset, with an offset"),
-    TriggerTypeOption(TriggerKind.PRESENCE, "Someone comes/goes", "When a person arrives or leaves"),
+    TriggerTypeOption(TriggerKind.SUN, "Sunrise or sunset", "At sunrise or sunset, with an offset"),
+    TriggerTypeOption(TriggerKind.PRESENCE, "Someone arrives or leaves", "When a person arrives or leaves"),
 )
 
 /** Sun events for the sun-trigger picker. */

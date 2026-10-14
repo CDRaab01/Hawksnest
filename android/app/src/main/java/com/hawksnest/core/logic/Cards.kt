@@ -9,6 +9,13 @@ import com.hawksnest.core.ha.domainOf
  */
 enum class CardType {
     LOCK, CAMERA, BINARY_SENSOR, LIGHT, SWITCH, ALARM, COVER, CLIMATE, MEDIA_PLAYER, FAN, GENERIC,
+
+    /**
+     * A siren that HA exposes as a `switch` ([isSirenSwitch]). Its own kind so no surface can draw
+     * it as a one-tap toggle: every siren control confirms before sounding. Android-only for now;
+     * the web's `cards.ts` still maps these to its switch card.
+     */
+    SIREN,
 }
 
 private val CARD_BY_DOMAIN: Map<String, CardType> = mapOf(
@@ -30,7 +37,8 @@ private val CARD_BY_DOMAIN: Map<String, CardType> = mapOf(
  * [CardType.GENERIC].
  */
 fun domainToCard(entityId: String): CardType =
-    CARD_BY_DOMAIN[domainOf(entityId)] ?: CardType.GENERIC
+    if (isSirenSwitch(entityId)) CardType.SIREN
+    else CARD_BY_DOMAIN[domainOf(entityId)] ?: CardType.GENERIC
 
 /**
  * Domains that aren't physical "devices" and shouldn't appear in the Devices hub — automations/

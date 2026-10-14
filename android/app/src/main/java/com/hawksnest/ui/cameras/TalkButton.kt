@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +69,12 @@ fun TalkButton(
     src: String,
     viewModel: CameraPlayerViewModel,
     modifier: Modifier = Modifier,
+    /**
+     * Open the mic as soon as this mounts: the doorbell notification's "Talk" button. Still the
+     * same deliberate act (the owner pressed Talk, just on the notification), still asks for the
+     * microphone permission first, and still ends with the view like any other session.
+     */
+    autoStart: Boolean = false,
 ) {
     val context = LocalContext.current
     var state by remember { mutableStateOf(TalkState.IDLE) }
@@ -103,6 +110,9 @@ fun TalkButton(
         if (state != TalkState.ERROR) state = TalkState.IDLE
     }
 
+    LaunchedEffect(Unit) { if (autoStart) startTalk() }
+    // A permission granted from the prompt that auto-start raised finishes the job it started.
+    LaunchedEffect(hasPermission) { if (autoStart && hasPermission && session == null) startTalk() }
     DisposableEffect(Unit) { onDispose { session?.close() } }
     // A latched mic must not survive the screen turning off either — unmounting can't cover that
     // (a STOPPED activity keeps its composition; see StopWhileBackgrounded). No restart: an open

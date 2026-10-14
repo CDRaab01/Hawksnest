@@ -1,5 +1,9 @@
 package com.hawksnest.ui.entity
 
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import com.hawksnest.core.logic.prettifyEntityId
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -69,6 +73,7 @@ fun EntityDetailScreen(
     val diagnostics by viewModel.diagnostics.collectAsState()
     val isZWave by viewModel.isZWave.collectAsState()
     val maintenanceMsg by viewModel.maintenanceMsg.collectAsState()
+    val ready by viewModel.ready.collectAsState()
     val pulse = HawksnestTheme.pulse
     val channel = domainChannel(domainOf(viewModel.entityId), pulse)
     // Z-Wave node diagnostics read from the device's diagnostic siblings, shown as
@@ -104,7 +109,8 @@ fun EntityDetailScreen(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    device?.name ?: viewModel.entityId,
+                    // Before HA answers, a readable name from the id rather than the raw id itself.
+                    device?.name ?: prettifyEntityId(viewModel.entityId),
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
@@ -122,11 +128,34 @@ fun EntityDetailScreen(
         if (current == null) {
             Column(modifier = Modifier.padding(horizontal = HawksnestTheme.spacing.lg)) {
                 PanelCard {
-                    Text(
-                        "Device not found. It may be unavailable or hidden.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    if (!ready) {
+                        // Opened from a widget or notification before the socket is up. Say what
+                        // is happening; "not found" is only true once HA has answered.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Column(Modifier.padding(start = HawksnestTheme.spacing.md)) {
+                                Text(
+                                    "Connecting to Home Assistant",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    "This device's state shows as soon as it answers.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            "Device not found. It may be unavailable or hidden.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
             return@Column

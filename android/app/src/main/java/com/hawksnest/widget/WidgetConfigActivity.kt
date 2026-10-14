@@ -7,12 +7,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Row
@@ -33,6 +35,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,6 +60,7 @@ import com.hawksnest.core.ha.stringListAttr
 import com.hawksnest.core.logic.LedColor
 import com.hawksnest.core.logic.SCENE_PAD_KEYS
 import com.hawksnest.core.logic.ScenePadKey
+import com.hawksnest.core.logic.ThemePref
 import com.hawksnest.core.logic.WIDGET_TEMP_COLD_BELOW_DEFAULT
 import com.hawksnest.core.logic.ZEN32_DEFAULT_LEDS
 import com.hawksnest.core.logic.WIDGET_TEMP_HOT_ABOVE_DEFAULT
@@ -64,11 +68,14 @@ import com.hawksnest.core.logic.WIDGET_TEMP_WARM_ABOVE_DEFAULT
 import com.hawksnest.core.logic.WidgetBlocker
 import com.hawksnest.core.logic.WidgetKind
 import com.hawksnest.core.logic.blockerCopy
+import com.hawksnest.core.logic.resolveDarkTheme
 import com.hawksnest.core.logic.resolveName
 import com.hawksnest.core.logic.widgetCandidates
 import com.hawksnest.ui.theme.HawksnestTheme
+import com.hawksnest.util.DevicePrefsStore
 import com.hawksnest.widget.data.HaCall
 import com.hawksnest.widget.data.ScenePadConfig
+import com.hawksnest.widget.data.StoredWidgetConfig
 import com.hawksnest.widget.data.WidgetEntryPoint
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
@@ -93,6 +100,9 @@ class WidgetConfigActivity : ComponentActivity() {
      * the Ring/ring-mqtt twins, neither of which REST can see.
      */
     @Inject lateinit var connectionManager: ConnectionManager
+
+    /** The owner's Light/Dark/System choice, so this screen matches the app it belongs to. */
+    @Inject lateinit var devicePrefs: DevicePrefsStore
 
     private var appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
 
@@ -120,51 +130,70 @@ class WidgetConfigActivity : ComponentActivity() {
         }
 
         setContent {
-            HawksnestTheme {
+            val pref by devicePrefs.themePref.collectAsState(initial = ThemePref.DEFAULT)
+            HawksnestTheme(darkTheme = resolveDarkTheme(pref, isSystemInDarkTheme())) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    // A temperature widget needs a second step: the sensor alone
-                    // says nothing about what "comfortable" means in that room.
-                    var pendingSensor by remember { mutableStateOf<HassEntity?>(null) }
-                    val sensor = pendingSensor
-                    if (kind == WidgetKind.SCENE_PAD && sensor != null) {
-                        ScenePadScreen(
-                            select = sensor,
-                            name = resolveName(sensor, overrides),
-                            relayCandidates = relayCandidates(),
-                            onBack = { pendingSensor = null },
-                            onSave = { config -> save(kind, sensor, scenePad = config) },
-                        )
-                    } else if (kind == WidgetKind.TEMPERATURE && sensor != null) {
-                        ThresholdScreen(
-                            sensor = sensor,
-                            name = resolveName(sensor, overrides),
-                            // HA's own area for this sensor, prefilled and editable. Resolved
-                            // HERE because this screen has the app's socket; the widget itself
-                            // speaks REST, which cannot read the area registry at all.
-                            suggestedRoom = connectionManager.state.areas.value[sensor.entityId],
-                            onBack = { pendingSensor = null },
-                            onSave = { cold, warm, hot, room ->
-                                save(kind, sensor, Triple(cold, warm, hot), room)
-                            },
-                        )
-                    } else {
-                        PickerScreen(
-                            kind = kind,
-                            connectionManager = connectionManager,
-                            onPick = { entity ->
-                                // The two kinds with a second step. Both reuse `pendingSensor`
-                                // as "the entity chosen on step one, waiting on step two".
-                                if (kind == WidgetKind.TEMPERATURE || kind == WidgetKind.SCENE_PAD) {
-                                    pendingSensor = entity
-                                } else {
-                                    save(kind, entity)
-                                }
-                            },
-                            onOpenApp = { startActivity(Intent(this, MainActivity::class.java)) },
-                        )
+                    // Android 15 draws every app edge to edge, and without the inset the title sat
+                    // under the status bar. The launcher's long-press "Settings" makes this an
+                    // everyday screen now, not a once-per-widget one.
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        // A temperature widget needs a second step: the sensor alone
+                        // says nothing about what "comfortable" means in that room.
+                        var pendingSensor by remember { mutableStateOf<HassEntity?>(null) }
+                        // What this widget is set to now, when this is the launcher's "Settings" on a
+                        // placed widget rather than a fresh drop. Each step starts from it, so changing
+                        // one LED colour doesn't mean re-entering the other nine settings.
+                        var stored by remember { mutableStateOf<StoredWidgetConfig?>(null) }
+                        LaunchedEffect(Unit) {
+                            val glanceId = GlanceAppWidgetManager(this@WidgetConfigActivity).getGlanceIdBy(appWidgetId)
+                            stored = WidgetEntryPoint.get(this@WidgetConfigActivity).repository().storedConfig(glanceId)
+                        }
+                        val sensor = pendingSensor
+                        // The saved settings only apply to the entity they were saved for.
+                        val storedHere = stored?.takeIf { sensor != null && it.entityId == sensor.entityId }
+                        if (kind == WidgetKind.SCENE_PAD && sensor != null) {
+                            ScenePadScreen(
+                                select = sensor,
+                                name = resolveName(sensor, overrides),
+                                stored = storedHere?.scenePad,
+                                relayCandidates = relayCandidates(),
+                                onBack = { pendingSensor = null },
+                                onSave = { config -> save(kind, sensor, scenePad = config) },
+                            )
+                        } else if (kind == WidgetKind.TEMPERATURE && sensor != null) {
+                            ThresholdScreen(
+                                sensor = sensor,
+                                name = resolveName(sensor, overrides),
+                                // HA's own area for this sensor, prefilled and editable. Resolved
+                                // HERE because this screen has the app's socket; the widget itself
+                                // speaks REST, which cannot read the area registry at all.
+                                suggestedRoom = connectionManager.state.areas.value[sensor.entityId],
+                                stored = storedHere,
+                                onBack = { pendingSensor = null },
+                                onSave = { cold, warm, hot, room ->
+                                    save(kind, sensor, Triple(cold, warm, hot), room)
+                                },
+                            )
+                        } else {
+                            PickerScreen(
+                                kind = kind,
+                                currentEntityId = stored?.entityId,
+                                connectionManager = connectionManager,
+                                onPick = { entity ->
+                                    // The two kinds with a second step. Both reuse `pendingSensor`
+                                    // as "the entity chosen on step one, waiting on step two".
+                                    if (kind == WidgetKind.TEMPERATURE || kind == WidgetKind.SCENE_PAD) {
+                                        pendingSensor = entity
+                                    } else {
+                                        save(kind, entity)
+                                    }
+                                },
+                                onOpenApp = { startActivity(Intent(this@WidgetConfigActivity, MainActivity::class.java)) },
+                            )
+                        }
                     }
                 }
             }
@@ -243,6 +272,8 @@ private sealed interface PickerState {
 @Composable
 private fun PickerScreen(
     kind: WidgetKind,
+    /** The device this widget shows now, listed first and marked, or null on a fresh drop. */
+    currentEntityId: String?,
     connectionManager: ConnectionManager,
     onPick: (HassEntity) -> Unit,
     onOpenApp: () -> Unit,
@@ -334,11 +365,15 @@ private fun PickerScreen(
                         )
                     }
                 } else {
+                    // A stable sort, so everything after the current device keeps its A-Z order.
+                    val ordered = remember(current.entities, currentEntityId) {
+                        current.entities.sortedByDescending { it.entityId == currentEntityId }
+                    }
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
-                        items(current.entities, key = { it.entityId }) { entity ->
+                        items(ordered, key = { it.entityId }) { entity ->
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -350,7 +385,11 @@ private fun PickerScreen(
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
                                 Text(
-                                    text = entity.entityId,
+                                    text = if (entity.entityId == currentEntityId) {
+                                        "Current · ${entity.entityId}"
+                                    } else {
+                                        entity.entityId
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -377,16 +416,20 @@ private fun ThresholdScreen(
     sensor: HassEntity,
     name: String,
     suggestedRoom: String?,
+    /** This widget's own saved settings when it is being changed rather than placed. */
+    stored: StoredWidgetConfig?,
     onBack: () -> Unit,
     onSave: (Double, Double, Double, String) -> Unit,
 ) {
     val unit = sensor.stringAttr("unit_of_measurement") ?: ""
     // Prefilled from HA's area and editable, because the area registry is not always populated
     // and "which room is this" is a question the owner can always answer even when HA cannot.
-    var room by remember { mutableStateOf(suggestedRoom.orEmpty()) }
-    var cold by remember { mutableStateOf(WIDGET_TEMP_COLD_BELOW_DEFAULT.toDisplay()) }
-    var warm by remember { mutableStateOf(WIDGET_TEMP_WARM_ABOVE_DEFAULT.toDisplay()) }
-    var hot by remember { mutableStateOf(WIDGET_TEMP_HOT_ABOVE_DEFAULT.toDisplay()) }
+    var room by remember { mutableStateOf(stored?.room ?: suggestedRoom.orEmpty()) }
+    val (coldStart, warmStart, hotStart) = stored?.thresholds
+        ?: Triple(WIDGET_TEMP_COLD_BELOW_DEFAULT, WIDGET_TEMP_WARM_ABOVE_DEFAULT, WIDGET_TEMP_HOT_ABOVE_DEFAULT)
+    var cold by remember { mutableStateOf(coldStart.toDisplay()) }
+    var warm by remember { mutableStateOf(warmStart.toDisplay()) }
+    var hot by remember { mutableStateOf(hotStart.toDisplay()) }
     val coldValue = cold.trim().toDoubleOrNull()
     val warmValue = warm.trim().toDoubleOrNull()
     val hotValue = hot.trim().toDoubleOrNull()
@@ -486,18 +529,28 @@ private fun ThresholdScreen(
 private fun ScenePadScreen(
     select: HassEntity,
     name: String,
+    /** This pad's own saved settings when it is being changed rather than placed. */
+    stored: ScenePadConfig?,
     relayCandidates: List<HassEntity>,
     onBack: () -> Unit,
     onSave: (ScenePadConfig) -> Unit,
 ) {
     val options = select.stringListAttr("options")
-    var relay by remember { mutableStateOf<HassEntity?>(null) }
+    // Held as an id, not an entity: offline, the candidate list is empty, and a saved relay must
+    // survive a trip through this screen that only changed a colour.
+    var relayId by remember { mutableStateOf(stored?.relayEntityId) }
     val presets = remember {
         mutableStateMapOf<ScenePadKey, String>().apply {
-            SCENE_PAD_KEYS.forEachIndexed { index, key -> options.getOrNull(index)?.let { put(key, it) } }
+            if (stored != null) {
+                putAll(stored.presets)
+            } else {
+                SCENE_PAD_KEYS.forEachIndexed { index, key -> options.getOrNull(index)?.let { put(key, it) } }
+            }
         }
     }
-    val leds = remember { mutableStateMapOf<ScenePadKey, LedColor>().apply { putAll(ZEN32_DEFAULT_LEDS) } }
+    val leds = remember {
+        mutableStateMapOf<ScenePadKey, LedColor>().apply { putAll(stored?.leds ?: ZEN32_DEFAULT_LEDS) }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
@@ -519,12 +572,13 @@ private fun ScenePadScreen(
 
         SettingRow(label = "Big key toggles") {
             ChoiceMenu(
-                current = relay?.let { resolveName(it, overrides) }
+                current = relayCandidates.firstOrNull { it.entityId == relayId }?.let { resolveName(it, overrides) }
+                    ?: relayId
                     // Not an error state: a pad with no relay simply draws that key dead. Plenty
                     // of installs will want the four scenes and nothing else.
                     ?: if (relayCandidates.isEmpty()) "Unavailable offline" else "None",
                 options = relayCandidates.map { resolveName(it, overrides) },
-                onPick = { index -> relay = relayCandidates[index] },
+                onPick = { index -> relayId = relayCandidates[index].entityId },
             )
             LedMenu(current = leds.getValue(ScenePadKey.RELAY)) { leds[ScenePadKey.RELAY] = it }
         }
@@ -549,7 +603,7 @@ private fun ScenePadScreen(
                 onClick = {
                     onSave(
                         ScenePadConfig(
-                            relayEntityId = relay?.entityId,
+                            relayEntityId = relayId,
                             presets = presets.toMap(),
                             leds = leds.toMap(),
                         )

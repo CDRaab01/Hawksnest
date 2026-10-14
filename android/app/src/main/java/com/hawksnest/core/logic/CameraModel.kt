@@ -22,6 +22,14 @@ data class LogicalCamera(
      */
     val eventStreamId: String?,
     val eventSelectId: String?,
+    /**
+     * Whether [eventSelectId] is actually *reporting*. Registered is not the same as alive:
+     * retiring a Ring camera leaves its selector registered but `unavailable`, still holding a
+     * frozen `options` list, and the base name it holds may since have been taken over by a real
+     * camera on another backend. Consumed by `recordedBackendOf` so a dead selector can lose to
+     * a backend that can actually answer. See [DEAD_STATES].
+     */
+    val ringSelectorLive: Boolean = false,
     /** Doorbell press sensor (ring-mqtt `_ding` or Reolink `_visitor`), if present. */
     val dingId: String?,
     val motionId: String?,
@@ -57,8 +65,17 @@ data class LogicalCamera(
  */
 private val DING_SUFFIXES = listOf("_ding", "_visitor")
 
-/** States meaning "this entity is registered but not reporting". */
-private val DEAD_STATES = setOf("unavailable", "unknown")
+/**
+ * States meaning "this entity is registered but not reporting".
+ *
+ * **Retiring a backend does not unregister its entities**, so this guards every sibling binding
+ * whose mere presence would otherwise be read as "that backend owns this camera": the doorbell
+ * press ([dingIdFor]), the ring event selector ([LogicalCamera.ringSelectorLive]) and the ring
+ * siren switch. `camera.front` is the worked example — a Frigate camera on a base name whose
+ * retired Ring device left `select.front_event_select` (still holding 30 frozen options) and
+ * `switch.front_siren` behind.
+ */
+internal val DEAD_STATES = setOf("unavailable", "unknown")
 
 private fun objectIdOf(entityId: String): String =
     entityId.substringAfter('.', entityId)
@@ -108,6 +125,13 @@ fun resolveCameras(
      * bind the dead sensor and the banner would never fire. First live candidate wins; fall
      * back to declaration order only when none are reporting.
      */
+    /**
+     * Like [has], but only when the entity is actually reporting — the single-candidate form of
+     * the rule [dingIdFor] applies to the doorbell. For bindings where a dead entity must not be
+     * bound at all, as opposed to merely losing a vote.
+     */
+    fun liveOnly(id: String?): String? = id?.takeIf { entities[it]?.state !in DEAD_STATES }
+
     fun dingIdFor(base: String): String? {
         val candidates = DING_SUFFIXES.mapNotNull { has("binary_sensor.$base$it") }
         return candidates.firstOrNull { entities[it]?.state !in DEAD_STATES }
@@ -126,9 +150,15 @@ fun resolveCameras(
                 snapshotEntity = snapshotEntity,
                 eventStreamId = g["event"]?.entityId,
                 eventSelectId = has("select.${base}_event_select"),
+                // The id is kept even when dead — it is the *handle* ring clip resolution calls
+                // `select_option` on — but its liveness travels separately, so the backend split
+                // can tell "Ring owns this" from "Ring's corpse is still registered here".
+                ringSelectorLive = liveOnly(has("select.${base}_event_select")) != null,
                 dingId = dingIdFor(base),
                 motionId = has("binary_sensor.${base}_motion"),
-                sirenSwitchId = has("switch.${base}_siren"),
+                // Dropped outright when dead: this only ever paints one chip and calls
+                // `switch.turn_on`, so a switch that cannot answer must not offer a button.
+                sirenSwitchId = liveOnly(has("switch.${base}_siren")),
                 batteryId = has("sensor.${base}_battery"),
             ),
         )

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -22,9 +23,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -33,9 +36,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.hawksnest.core.logic.CameraEvent
+import com.hawksnest.core.logic.LiveTier
+import com.hawksnest.core.logic.aspectFromDimensions
 import com.hawksnest.core.logic.canReachSpeaker
+import com.hawksnest.core.logic.DEFAULT_ASPECT
 import com.hawksnest.core.logic.NO_ZOOM
 import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
@@ -44,6 +54,8 @@ import com.hawksnest.core.logic.TimeWindow
 import com.hawksnest.core.logic.defaultSelection
 import com.hawksnest.core.logic.exportBounds
 import com.hawksnest.core.logic.frigateCameraName
+import com.hawksnest.core.logic.liveLabel
+import com.hawksnest.core.logic.liveTier
 import com.hawksnest.core.logic.nudge as nudgeClip
 import com.hawksnest.core.logic.setEdge as setClipEdge
 import com.hawksnest.core.logic.RecordedBackend
@@ -51,11 +63,15 @@ import com.hawksnest.core.logic.RecordedSource
 import com.hawksnest.core.logic.RingFootage
 import com.hawksnest.core.logic.RingTimeline
 import com.hawksnest.core.logic.isFrigateCamera
+import com.hawksnest.core.logic.CameraStart
+import com.hawksnest.core.logic.shouldRecordLiveView
 import com.hawksnest.core.logic.recordedBackendOf
 import com.hawksnest.core.logic.chooseRecordedSource
 import com.hawksnest.core.logic.clipContaining
 import com.hawksnest.core.logic.clipSpanEndMs
 import com.hawksnest.core.logic.FootageSpan
+import com.hawksnest.core.logic.FRIGATE_LANE_TOLERANCE_MS
+import com.hawksnest.core.logic.coalesceSpans
 import com.hawksnest.core.logic.footageSpans
 import com.hawksnest.core.logic.offsetInClipMs
 import com.hawksnest.core.logic.TimeRange
@@ -92,6 +108,20 @@ fun CameraPlayer(
     viewModel: CameraPlayerViewModel,
     /** Frigate event to open on, from a tapped camera alert. Null = open live. */
     initialEventId: String? = null,
+    /** How this camera starts when something outside asked for it: a doorbell notification's
+     *  "Talk" opens the mic, the reply fallback opens the quick-reply sheet. */
+    startWith: CameraStart = CameraStart.LIVE,
+    /** Fullscreen (immersive landscape, picture only). Held by the lightbox so it survives a
+     *  camera switch, which remounts this player. */
+    fullscreen: Boolean = false,
+    onFullscreenChange: (Boolean) -> Unit = {},
+    /**
+     * The space this player may fill. The picture then gets a STAGE: all the height the controls
+     * and timeline leave free, with the picture fitted in the middle, so pinch-zoom and pan use the
+     * whole middle of the screen instead of the picture's own rectangle (a 3.5:1 panorama is a
+     * thin strip). Null sizes the picture to its own shape, as before.
+     */
+    viewport: DpSize? = null,
     modifier: Modifier = Modifier,
 ) {
     val cameraName = cameraNameOf(cam.id)
@@ -105,6 +135,7 @@ fun CameraPlayer(
         recordedBackendOf(
             hasRingSelector = cam.eventSelectId != null,
             hasFrigateCamera = isFrigateCamera(viewModel.entity(cam.entityId)),
+            ringSelectorLive = cam.ringSelectorLive,
         )
     }
     val isRing = backend == RecordedBackend.RING
@@ -167,19 +198,28 @@ fun CameraPlayer(
         timelineNonce += 1
     }
     // The continuous track as drawable spans (coalesced so a stitch seam doesn't read as a gap).
-    // Ring's spans come off its timeline fetch; Frigate's are fetched below, pre-coalesced.
+    // Ring's spans come off its timeline fetch; Frigate's are fetched below, media-accurate, and
+    // widened for drawing only at the end (see [frigateLane]).
     val ringLane = remember(footage) { footage?.let { footageSpans(it.segments) } ?: emptyList() }
     // The Frigate continuous lane — where recordings actually exist, so the strip shows "you can
     // scrub anywhere here" instead of rendering blank between event chips. Empty until it
     // resolves — the lane just appears, nothing blocks on it. Mirrors the web CameraPlayer.
     // Keyed on the window too: it opens at the 24h fallback and widens to the real retention when
     // frigateRetentionDays resolves — without the key the lane would stay 24h on a 3-day strip.
-    val frigateLane: List<FootageSpan> by produceState(emptyList(), cam.id, startMs, endMs) {
+    val frigateFootage: List<FootageSpan> by produceState(emptyList(), cam.id, startMs, endMs) {
         value = if (isRing) {
             emptyList()
         } else {
             runCatching { viewModel.cameraFootage(cameraName, startMs, endMs) }.getOrDefault(emptyList())
         }
+    }
+    // Widened for DRAWING only. [frigateFootage] stays media-accurate — every real hole preserved —
+    // because [vodRangeFor] reads it to decide how far a VOD page may stretch, and bridging a hole
+    // there desynchronises the playhead from the picture for the rest of the page (see
+    // FRIGATE_MEDIA_TOLERANCE_MS). Drawing wants the opposite: a 2 s hole is not a gap worth
+    // rendering. Two tolerances at their own point of use, not one serving both.
+    val frigateLane = remember(frigateFootage) {
+        coalesceSpans(frigateFootage, FRIGATE_LANE_TOLERANCE_MS)
     }
     val footageLane = if (isRing) ringLane else frigateLane
 
@@ -271,15 +311,13 @@ fun CameraPlayer(
     var showPtz by remember(cam.id) { mutableStateOf(false) }
     // Keyed on cam.id so switching cameras closes the sheet: the replies would still be addressed
     // to the camera you were looking at a moment ago, which is a message played in the wrong room.
-    var showReplies by remember(cam.id) { mutableStateOf(false) }
+    var showReplies by remember(cam.id) { mutableStateOf(startWith == CameraStart.REPLY) }
 
     // Pinch-zoom over the picture. Keyed on cam.id so switching cameras starts unzoomed —
     // a magnified corner carried over to a different room is disorienting and reads as a bug.
     var zoom by remember(cam.id) { mutableStateOf(NO_ZOOM) }
-    // Fullscreen is NOT keyed on cam.id: switching cameras while fullscreen should stay
-    // fullscreen, which is what the camera switcher in the overlay is for.
-    var fullscreen by remember { mutableStateOf(false) }
-    FullscreenEffect(fullscreen)
+    // Fullscreen lives in the lightbox (see the `fullscreen` parameter): switching cameras while
+    // fullscreen should stay fullscreen, and this player is remounted per camera.
 
     // System picture-in-picture (home/gesture-away on a live camera). In PiP the window IS the
     // picture: every piece of chrome hides behind the same guards fullscreen uses, so entering
@@ -290,6 +328,17 @@ fun CameraPlayer(
     // would fix it isn't available there.
     val inPip by viewModel.inPip.collectAsState()
     LaunchedEffect(inPip) { if (inPip) zoom = NO_ZOOM }
+    // Entering or leaving fullscreen swaps the stage for one of a completely different shape
+    // (portrait middle ↔ the whole landscape screen), so a zoom framed for one would land somewhere
+    // arbitrary in the other. Start each from the whole picture.
+    LaunchedEffect(fullscreen) { zoom = NO_ZOOM }
+    // The frame takes the PICTURE's shape, not a hardcoded 16:9 — the fleet is no longer all
+    // 16:9 (the two Home Hub cameras are 1536x432 dual-lens panoramas, the doorbell is 4:3).
+    // Measured from the media itself via the size the renderers already report for PiP, so there
+    // is no per-camera resolution table; DEFAULT_ASPECT holds until the first frame arrives.
+    // The snapshot tiers, which decode rather than render, report through `reportImageSize`.
+    val videoSize by viewModel.videoSize.collectAsState()
+    val frameAspect = videoSize?.let { (w, h) -> aspectFromDimensions(w, h) } ?: DEFAULT_ASPECT
     // Live vs recorded feeds the PiP gate in MainActivity — only a LIVE camera minimizes.
     LaunchedEffect(playhead == null) { viewModel.reportLive(playhead == null) }
 
@@ -299,8 +348,11 @@ fun CameraPlayer(
     CameraVolumeKeys()
     CameraAudioFocus(active = !muted)
 
+    // Whether go2rtc serves a sub stream at all — NOT whether the relay is healthy. Asking the
+    // relay's breaker hid the toggle after one relay failure, which is exactly when switching to
+    // the lighter stream is the way out of the reduced fallback.
     val subAvailable: Boolean by produceState(false, cam.id) {
-        value = runCatching { viewModel.canGo2rtc("${cameraName}_sub") }.getOrDefault(false)
+        value = runCatching { viewModel.go2rtcLists("${cameraName}_sub") }.getOrDefault(false)
     }
     val useSub = qualityLow && subAvailable
     val go2rtcSrc = if (useSub) "${cameraName}_sub" else cameraName
@@ -327,8 +379,45 @@ fun CameraPlayer(
     val liveUrl: String? by produceState<String?>(null, cam.id, wantsHls) {
         value = if (wantsHls) viewModel.liveStreamUrl(cam.entityId) else null
     }
+    // Which rung of the live ladder is drawing the picture. The ladder below and the status label
+    // both read this one value, so "Live" can never be claimed by a fallback (core/logic/LiveTier).
+    val tier = liveTier(
+        canRtsp = canRtsp,
+        useSub = useSub,
+        canGo2rtc = canGo2rtc,
+        go2rtcFailed = go2rtcFailed,
+        canWebRtc = canWebRtc,
+        webRtcFailed = webRtcFailed,
+        hasHlsUrl = liveUrl != null,
+        hasMjpeg = cam.streamUrl != null,
+    )
 
     val isLive = playhead == null
+
+    // Watching a camera leaves a mark on its own timeline, the way Ring does it: a live view opens
+    // a real Frigate manual event for its duration, so it is playable afterwards rather than a
+    // note that something happened (core/logic/LiveViewRecording.kt). DisposableEffect, not a
+    // state flip: leaving the player must end the event, because an unended one keeps the camera
+    // recording.
+    val recordLiveView = shouldRecordLiveView(backend, isLive)
+    DisposableEffect(cam.id, recordLiveView) {
+        if (recordLiveView) {
+            viewModel.startLiveViewRecording(cam.entityId, cameraName, cam.isBattery)
+        }
+        onDispose { viewModel.stopLiveViewRecording() }
+    }
+    // Turning the screen off does NOT dispose the effect above: a stopped activity keeps its
+    // composition (see StopWhileBackgrounded). The renewal loop used to run on until the socket
+    // stopped thirty seconds later; then the end-event, park and guard-release calls all failed
+    // silently, and a battery camera stayed awake until HA's 30-minute guard backstop fired. End
+    // the recording synchronously at ON_STOP, while the socket is still up to carry those calls,
+    // and start a fresh one if the view comes back.
+    StopWhileBackgrounded(
+        onStop = { viewModel.stopLiveViewRecording() },
+        onRestart = {
+            if (recordLiveView) viewModel.startLiveViewRecording(cam.entityId, cameraName, cam.isBattery)
+        },
+    )
     val headTime = playhead ?: endMs
 
     // --- Clip export ---------------------------------------------------------------------
@@ -452,11 +541,11 @@ fun CameraPlayer(
     // Reolink behind a Home Hub) is mostly gap, and a scrub into it yields null — "No saved
     // recording for this moment" — instead of a dead player. An unresolved lane keeps the plain
     // page: unknown is not none. Mirrors the web CameraPlayer.
-    val vodPage = remember(isLive, isRing, isFrigate, headTime, startMs, endMs, frigateLane) {
+    val vodPage = remember(isLive, isRing, isFrigate, headTime, startMs, endMs, frigateFootage) {
         if (isLive || isRing) {
             null
         } else {
-            vodRangeFor(headTime, TimeRange(startMs, endMs), if (isFrigate) frigateLane else emptyList())
+            vodRangeFor(headTime, TimeRange(startMs, endMs), if (isFrigate) frigateFootage else emptyList())
         }
     }
     // Frigate VOD must also be SIGNED or every segment 401s and the video is silently black — see
@@ -501,9 +590,26 @@ fun CameraPlayer(
     // In fullscreen the picture IS the screen: the chrome, timeline, description and transport
     // are all hidden, so the system back gesture has to be the way out or the user is stuck with
     // only the small overlay button. Registered before the layout so it wins over navigation.
-    BackHandler(enabled = fullscreen) { fullscreen = false }
+    BackHandler(enabled = fullscreen) { onFullscreenChange(false) }
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // The stage: what's left of the viewport once the controls above and the timeline below have
+    // taken theirs, and never less than the picture's own height (then the lightbox scrolls, as
+    // it always has). Until both are measured, the picture's own height, so the first frame
+    // doesn't jump from a too-tall stage.
+    var topPx by remember { mutableIntStateOf(-1) }
+    var bottomPx by remember { mutableIntStateOf(-1) }
+    val density = LocalDensity.current
+    val stageHeight: Dp? = viewport?.let { vp ->
+        val fit = vp.width / frameAspect
+        if (topPx < 0 || bottomPx < 0) {
+            fit
+        } else {
+            val chrome = with(density) { (topPx + bottomPx).toDp() } + PLAYER_GAP * 2
+            maxOf(vp.height - chrome, fit)
+        }
+    }
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(PLAYER_GAP)) {
         // ONE FlowRow that wraps only when it has to.
         //
         // A plain Row cannot hold this many controls on a phone: Row gives every
@@ -516,6 +622,7 @@ fun CameraPlayer(
         // the set genuinely varies (Move only for PTZ, Low/High only with a sub
         // stream, Talk only for Ring, Siren only where one exists).
         if (!fullscreen && !inPip) FlowRow(
+            modifier = Modifier.onSizeChanged { topPx = it.height },
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -531,10 +638,15 @@ fun CameraPlayer(
                 )
             }
             if (isLive && subAvailable) {
-                QualityToggle(low = qualityLow, onChange = { qualityLow = it })
+                QualityToggle(
+                    low = qualityLow,
+                    // Choosing a quality is also a retry: after the relay fell through to the
+                    // reduced stream, Low is the lighter stream most likely to get through.
+                    onChange = { qualityLow = it; go2rtcFailed = false },
+                )
             }
             MuteButton(muted = muted, onToggle = { muted = !muted })
-            FullscreenButton(active = fullscreen, onToggle = { fullscreen = !fullscreen })
+            FullscreenButton(active = fullscreen, onToggle = { onFullscreenChange(!fullscreen) })
             SnapshotButton(snapshotUrl = cam.snapshotUrl, cameraName = cameraName)
             // The one and only gate. Frigate is the only backend that can cut an arbitrary range:
             // Ring exposes whole pre-signed event clips that expire in ~15 min and cannot be
@@ -561,7 +673,7 @@ fun CameraPlayer(
             // seven Reolinks from a feature they support. Now the same question the Reply button
             // asks, through the same predicate, so the two can never disagree about one camera.
             if (canReachSpeaker(canGo2rtc) && isLive) {
-                TalkButton(cameraName, viewModel)
+                TalkButton(cameraName, viewModel, autoStart = startWith == CameraStart.TALK)
             }
             // Prerecorded messages, played out of the camera's own speaker by go2rtc. A chip like
             // every other control here, deliberately: the 2026-08-03 attempt to give it a larger
@@ -576,17 +688,18 @@ fun CameraPlayer(
             }
             cam.sirenSwitchId?.let { sirenId -> SirenButton(sirenId, viewModel) }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                val label = liveLabel(tier)
                 Box(
                     Modifier
                         .size(8.dp)
                         .clip(CircleShape)
                         .background(
-                            if (isLive) HawksnestTheme.pulse.recovery
+                            if (isLive && label.realtime) HawksnestTheme.pulse.recovery
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
                 )
                 Text(
-                    if (isLive) "Live" else "Recorded",
+                    if (isLive) label.text else "Recorded",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -603,20 +716,21 @@ fun CameraPlayer(
         //
         // ZoomableFrame wraps the WHOLE ladder rather than any one tier: all seven already share
         // this one `frame` modifier, so pinch-zoom applies to every one of them identically and
-        // cannot drift. Fullscreen swaps the fixed 16:9 box for the whole screen — the `when`
-        // stays in the same composition slot either way, so the player is NOT torn down and
-        // re-created (which on the WebRTC tiers is a 2-4s renegotiation).
+        // cannot drift. Fullscreen swaps the box for the whole screen — the `when` stays in the
+        // same composition slot either way, so the player is NOT torn down and re-created (which
+        // on the WebRTC tiers is a 2-4s renegotiation).
         ZoomableFrame(
             zoom = zoom,
             onZoomChange = { zoom = it },
             // In PiP the window itself already has the video's aspect (set via the PiP params),
             // so fill it; the renderers' SCALE_ASPECT_FIT keeps the picture correct even while
             // the window and source briefly disagree.
-            modifier = if (fullscreen || inPip) {
-                Modifier.fillMaxSize()
-            } else {
-                Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+            modifier = when {
+                fullscreen || inPip -> Modifier.fillMaxSize()
+                stageHeight != null -> Modifier.fillMaxWidth().height(stageHeight)
+                else -> Modifier.fillMaxWidth().aspectRatio(frameAspect)
             },
+            pictureAspect = frameAspect,
         ) { zoomed ->
         val frame = zoomed.fillMaxSize()
         when {
@@ -627,6 +741,10 @@ fun CameraPlayer(
                     paused = paused,
                     muted = muted,
                     seekToMs = seekToMs,
+                    // Recordings report their shape too: the stage fits and zooms by it, and a
+                    // camera that has not streamed live this session would otherwise be laid out
+                    // as 16:9 (a panorama's double-tap then filled only half the stage).
+                    onVideoSize = viewModel::reportVideoSize,
                     // Learn the loaded ring clip's real duration from the media; an ExoPlayer
                     // failure after the URL resolved is a (retryable) failure too.
                     onDurationMs = if (isRing) {
@@ -699,15 +817,16 @@ fun CameraPlayer(
                 },
                 modifier = frame,
             )
-            // Low quality bypasses RTSP-direct (it plays the main stream) — see `useSub`.
-            isLive && canRtsp && !useSub -> RtspPlayer(
+            // Every live arm below keys on `tier`, the same value the status label reads.
+            isLive && tier == LiveTier.DIRECT -> RtspPlayer(
                 url = rtspUrl!!,
                 camera = cameraName,
                 onFail = { rtspFailed = true },
                 muted = muted,
+                onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
             )
-            isLive && (canGo2rtc == true || useSub) && !go2rtcFailed -> Go2rtcPlayer(
+            isLive && tier == LiveTier.RELAY -> Go2rtcPlayer(
                 src = go2rtcSrc,
                 cameraId = cam.id,
                 baseUrl = viewModel.baseUrl(),
@@ -723,7 +842,7 @@ fun CameraPlayer(
             // `canGo2rtc != null` holds this arm while the stream list is in flight. Starting an HA
             // WebRTC negotiation only to tear it down when go2rtc turns out to be available wastes
             // the PeerConnection; the snapshot arm below renders for the (cached, sub-second) wait.
-            isLive && canGo2rtc != null && canWebRtc && !webRtcFailed -> WebRtcPlayer(
+            isLive && tier == LiveTier.HA_WEBRTC -> WebRtcPlayer(
                 entityId = cam.entityId,
                 cameraId = cam.id,
                 viewModel = viewModel,
@@ -736,13 +855,25 @@ fun CameraPlayer(
             // live = true pins the HLS feed near the live edge (no fast-forward catch-up). loop
             // stays true so the demo clip — DEMO_CLIP_URI, which VideoPlayer excludes from live
             // handling — keeps looping as a fake-live feed.
-            liveUrl != null -> VideoPlayer(liveUrl!!, frame, loop = true, live = true, muted = muted)
-            cam.streamUrl != null -> MjpegView(
+            tier == LiveTier.HLS -> VideoPlayer(
+                liveUrl!!,
+                frame,
+                loop = true,
+                live = true,
+                muted = muted,
+                onVideoSize = viewModel::reportVideoSize,
+            )
+            (tier == LiveTier.MJPEG || tier == LiveTier.RESOLVING) && cam.streamUrl != null -> MjpegView(
                 streamUrl = cam.streamUrl!!,
                 snapshotUrl = cam.snapshotUrl,
+                onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
             )
-            else -> RefreshingSnapshot(url = cam.snapshotUrl, modifier = frame)
+            else -> RefreshingSnapshot(
+                url = cam.snapshotUrl,
+                modifier = frame,
+                onAspect = { r -> viewModel.reportVideoSize((r * 1000f).toInt(), 1000) },
+            )
         }
 
             // The only on-screen way out of fullscreen (back also works). Inside the frame so it
@@ -756,14 +887,19 @@ fun CameraPlayer(
                 FullscreenChrome(
                     muted = muted,
                     onToggleMute = { muted = !muted },
-                    onExitFullscreen = { fullscreen = false },
+                    onExitFullscreen = { onFullscreenChange(false) },
                     onReply = { showReplies = true }
                         .takeIf { canReachSpeaker(canGo2rtc) && isLive },
                 )
             }
         }
 
-        if (!fullscreen && !inPip) {
+        if (!fullscreen && !inPip) Column(
+            // Measured for the stage above. Same gap as the outer column, so the layout is
+            // unchanged; this Column only exists to be measured as one piece.
+            modifier = Modifier.onSizeChanged { bottomPx = it.height },
+            verticalArrangement = Arrangement.spacedBy(PLAYER_GAP),
+        ) {
             // Live only: moving the lens while watching recorded footage would re-aim
             // the camera with no visible feedback. Leaving composition is also what
             // guarantees an in-flight move is stopped (see PtzPad).
@@ -813,7 +949,10 @@ fun CameraPlayer(
                 ClipExportBar(
                     selection = sel,
                     playheadMs = headTime,
-                    footage = footageLane,
+                    // NOT footageLane: coverage asks how much of the range was actually recorded, and
+                    // the lane's 15 s bridging is the one thing that would hide the answer. Clip
+                    // mode is Frigate-only, so this is always the Frigate set.
+                    footage = frigateFootage,
                     state = clipState,
                     error = clipError,
                     onNudge = { edge, delta ->
@@ -977,3 +1116,6 @@ private fun SirenButton(
         )
     }
 }
+
+/** The gap between the player's control row, picture and timeline. */
+private val PLAYER_GAP = 12.dp

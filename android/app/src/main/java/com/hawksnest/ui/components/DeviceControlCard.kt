@@ -118,6 +118,16 @@ fun DeviceControlCard(
                 enabled = device.rawState != "unavailable",
                 onToggle = { onCall(if (it) "turn_on" else "turn_off", emptyMap()) },
             )
+            // Never a rocker: a siren confirms before it sounds (see SirenToggle).
+            CardType.SIREN -> SirenToggle(
+                on = device.rawState == "on",
+                pending = pending,
+                enabled = device.rawState != "unavailable",
+                onSet = { onCall(if (it) "turn_on" else "turn_off", emptyMap()) },
+                modifier = Modifier
+                    .padding(top = HawksnestTheme.spacing.md)
+                    .fillMaxWidth(),
+            )
             CardType.LIGHT -> LightControl(
                 on = device.rawState == "on",
                 dimmable = isDimmableLight(device.attributes),

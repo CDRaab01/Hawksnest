@@ -154,6 +154,13 @@ class ConnectionManager @Inject constructor(
         settled()?.callService(domain, service, data)
     }
 
+    /** [Source.callServiceForResponse] through the active source; null when nothing is connected. */
+    suspend fun callServiceForResponse(
+        domain: String,
+        service: String,
+        data: ServiceData,
+    ): kotlinx.serialization.json.JsonObject? = settled()?.callServiceForResponse(domain, service, data)
+
     /**
      * The user-facing control path: [callService] wrapped in [ControlGate] — crash-safe (failures
      * land on [controlErrors], never as an uncaught coroutine exception) with [pendingControls]
@@ -173,6 +180,9 @@ class ConnectionManager @Inject constructor(
             callService(domain, service, ServiceData(entityId = entityId, extra = extra))
         }
     }
+
+    /** Put [message] on the control snackbar for a control that could not even be attempted. */
+    fun reportControlError(message: String) = controlGate.report(message)
 
     /** Read one automation's Config-API config (live HA REST; in-memory in demo). Null if absent. */
     suspend fun getAutomationConfig(id: String): JsonObject? = current?.getAutomationConfig(id)

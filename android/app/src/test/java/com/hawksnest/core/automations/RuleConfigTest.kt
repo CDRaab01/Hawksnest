@@ -237,4 +237,36 @@ class RuleConfigTest {
         }
         assertNull(configToRule(config))
     }
+
+    @Test
+    fun `saving an edit keeps what the editor does not model`() {
+        val original = buildJsonObject {
+            put("id", "1000")
+            put("alias", "Old name")
+            put("description", "Locks up when we arm for the night.")
+            put("mode", "queued")
+            put("max", 5)
+            putJsonObject("variables") { put("who", "owner") }
+            putJsonArray("triggers") { add(buildJsonObject { put("trigger", "state") }) }
+            putJsonArray("actions") { add(buildJsonObject { put("action", "lock.lock") }) }
+        }
+        val saved = mergeRuleIntoConfig(original, lockAllWhenArmed)
+        assertEquals("Locks up when we arm for the night.", (saved["description"] as kotlinx.serialization.json.JsonPrimitive).content)
+        assertEquals("5", (saved["max"] as kotlinx.serialization.json.JsonPrimitive).content)
+        assertEquals(original["variables"], saved["variables"])
+        // The editor's fields win, in one key style only.
+        assertEquals("Lock all doors when armed home", (saved["alias"] as kotlinx.serialization.json.JsonPrimitive).content)
+        assertNull(saved["triggers"])
+        assertNull(saved["actions"])
+        assertEquals(ruleToConfig(lockAllWhenArmed)["trigger"], saved["trigger"])
+        // A mode the editor can't show is kept.
+        assertEquals("queued", (saved["mode"] as kotlinx.serialization.json.JsonPrimitive).content)
+    }
+
+    @Test
+    fun `a new automation, or one in an editable mode, saves exactly the editor's config`() {
+        assertEquals(ruleToConfig(lockAllWhenArmed), mergeRuleIntoConfig(null, lockAllWhenArmed))
+        val restart = buildJsonObject { put("mode", "restart") }
+        assertEquals("single", (mergeRuleIntoConfig(restart, lockAllWhenArmed)["mode"] as kotlinx.serialization.json.JsonPrimitive).content)
+    }
 }

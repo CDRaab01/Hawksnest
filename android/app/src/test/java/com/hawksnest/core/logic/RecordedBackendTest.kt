@@ -23,6 +23,26 @@ class RecordedBackendTest {
         assertEquals(RecordedBackend.RING, recordedBackendOf(hasRingSelector = true, hasFrigateCamera = true))
     }
 
+    // camera.front, verbatim: a Frigate camera whose base name still carries the retired Ring
+    // camera's `unavailable` selector. Ring cannot answer, so it must not win.
+    @Test
+    fun `a registered but dead ring selector loses to frigate`() {
+        assertEquals(
+            RecordedBackend.FRIGATE,
+            recordedBackendOf(hasRingSelector = true, hasFrigateCamera = true, ringSelectorLive = false),
+        )
+    }
+
+    // A ring-mqtt restart must not cost a ring-only camera its timeline for the whole session:
+    // a dead selector loses only to a backend that can actually answer.
+    @Test
+    fun `a dead ring selector still wins when nothing else records`() {
+        assertEquals(
+            RecordedBackend.RING,
+            recordedBackendOf(hasRingSelector = true, hasFrigateCamera = false, ringSelectorLive = false),
+        )
+    }
+
     @Test
     fun `frigate when only frigate knows the camera`() {
         assertEquals(RecordedBackend.FRIGATE, recordedBackendOf(hasRingSelector = false, hasFrigateCamera = true))

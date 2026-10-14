@@ -93,6 +93,11 @@ class ControlGate @Inject constructor(
         if (!echoed) _errors.emit("$label didn't respond.")
     }
 
+    /** A failure that never got as far as a call (a shortcut with no house to act on yet). */
+    fun report(message: String) {
+        _errors.tryEmit(message)
+    }
+
     private fun failureText(label: String, e: Exception): String = when (e) {
         is HaAuthException -> "Home Assistant rejected the access token."
         is HaClosedException, is IllegalStateException -> "Couldn't reach $label — not connected."
