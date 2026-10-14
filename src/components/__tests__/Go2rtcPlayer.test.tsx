@@ -11,13 +11,25 @@ import { go2rtcMaybeAvailable, resetGo2rtcForTest } from "../../lib/go2rtc";
  * verdict from a wake that never completed.
  */
 
-/** A peer connection that never connects — the watchdog is the only thing that can end it. */
+/** A receiver that exposes the standard playout knob, unset — as a real Chrome/Firefox does. */
+type FakeReceiver = { jitterBufferTarget: number | null };
+
+/**
+ * A peer connection that never connects — the watchdog is the only thing that can end it. It
+ * hands out one {@link FakeReceiver} per transceiver so a spec can see what the player did to
+ * the receivers before negotiation.
+ */
 class StuckPeerConnection {
+  static receivers: FakeReceiver[] = [];
   connectionState = "new";
   onconnectionstatechange: (() => void) | null = null;
   ontrack: ((e: unknown) => void) | null = null;
   onicecandidate: ((e: unknown) => void) | null = null;
-  addTransceiver() {}
+  addTransceiver() {
+    const receiver: FakeReceiver = { jitterBufferTarget: null };
+    StuckPeerConnection.receivers.push(receiver);
+    return { receiver };
+  }
   close() {}
   createOffer() {
     return Promise.resolve({ sdp: "offer" });
@@ -49,6 +61,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("RTCPeerConnection", StuckPeerConnection);
   vi.stubGlobal("WebSocket", SilentWebSocket);
+  StuckPeerConnection.receivers = [];
   resetGo2rtcForTest();
 });
 
@@ -88,5 +101,25 @@ describe("Go2rtcPlayer — wakeable cameras and the session breaker", () => {
     expect(onFail).toHaveBeenCalledTimes(1);
     // This camera's wake says nothing about go2rtc: the other cameras keep their best tier.
     expect(go2rtcMaybeAvailable("garage")).toBe(true);
+  });
+});
+
+/**
+ * The battery cameras' frames arrive in clumps over the Home Hub's Wi-Fi hop, so their receivers
+ * get a half-second playout buffer. The wired cameras must NOT pay that latency: their frames
+ * already arrive evenly, and a doorbell conversation wants every millisecond.
+ */
+describe("Go2rtcPlayer — receiver playout buffer", () => {
+  it("asks both receivers to hold 500 ms for a wakeable camera", () => {
+    render(<Go2rtcPlayer src="driveway" wakeable onFail={vi.fn()} />);
+    // One video + one audio transceiver, both buffered so they stay in step.
+    expect(StuckPeerConnection.receivers).toHaveLength(2);
+    expect(StuckPeerConnection.receivers.map((r) => r.jitterBufferTarget)).toEqual([500, 500]);
+  });
+
+  it("leaves an always-on camera's receivers at the browser default", () => {
+    render(<Go2rtcPlayer src="kitchen" onFail={vi.fn()} />);
+    expect(StuckPeerConnection.receivers).toHaveLength(2);
+    expect(StuckPeerConnection.receivers.map((r) => r.jitterBufferTarget)).toEqual([null, null]);
   });
 });
