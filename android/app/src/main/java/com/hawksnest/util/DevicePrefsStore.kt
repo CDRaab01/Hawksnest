@@ -44,6 +44,24 @@ class DevicePrefsStore @Inject constructor(
     // order (same reason `entity_renames` above is JSON-in-a-string).
     private val pinnedKey = stringPreferencesKey("pinned_entities")
 
+    private val lowQualityKey = stringSetPreferencesKey("live_quality_low")
+
+    /**
+     * Cameras the user set to Low live quality (go2rtc's `<name>_sub`), by camera name. Remembered
+     * per camera because the choice is about that camera's link: Low is for the one whose Wi-Fi
+     * cannot carry the fixed 3–4 Mbps main stream, and it used to reset to High on every open, so
+     * that camera stalled again each time before the user could escape it.
+     */
+    val lowQualityCameras: Flow<Set<String>> =
+        context.devicePrefsDataStore.data.map { it[lowQualityKey] ?: emptySet() }
+
+    suspend fun setLowQuality(camera: String, low: Boolean) {
+        context.devicePrefsDataStore.edit { prefs ->
+            val cur = prefs[lowQualityKey] ?: emptySet()
+            prefs[lowQualityKey] = if (low) cur + camera else cur - camera
+        }
+    }
+
     /** Entity ids the user hid from the Devices list. */
     val hidden: Flow<Set<String>> =
         context.devicePrefsDataStore.data.map { it[hiddenKey] ?: emptySet() }

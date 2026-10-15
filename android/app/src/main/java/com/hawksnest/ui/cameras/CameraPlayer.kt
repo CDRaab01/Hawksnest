@@ -314,7 +314,13 @@ fun CameraPlayer(
     // the RTSP-direct tier is bypassed too: that tier plays the MAIN stream
     // straight off the camera, which is exactly what a user on weak cellular is
     // trying to escape.
-    var qualityLow by remember { mutableStateOf(false) }
+    //
+    // Remembered per camera (DevicePrefsStore): it is a fact about that camera's link, and resetting
+    // to High on every open meant the camera that needed Low stalled again before you could pick it.
+    // `null` until the store is read — the live tier waits on that (see `qualityKnown`).
+    val lowQualityCameras by viewModel.lowQualityCameras.collectAsState()
+    val qualityKnown = lowQualityCameras != null
+    val qualityLow = lowQualityCameras?.contains(cameraName) == true
 
     // Movement controls, if this camera has any. Resolved from the entity ids that
     // exist rather than derived from the camera name — see core/logic/CameraPtz.kt
@@ -384,7 +390,12 @@ fun CameraPlayer(
     // Snapshot the breaker at mount (mirrors canWebRtc) so a verdict landing mid-view can't yank
     // the transport out from under a session that is playing fine.
     val rtspHealthy = remember(cam.id) { RtspHealth.maybeAvailable(cameraName) }
-    val canRtsp = rtspUrl != null && rtspHealthy && !rtspFailed
+    // Gated on `qualityKnown` like the relay below: deciding before the remembered quality is read
+    // would open the main stream for a camera that is remembered at Low, then tear it down.
+    val canRtsp = rtspUrl != null && rtspHealthy && !rtspFailed && qualityKnown
+    // The relay's "is it listed" answer, held at undecided (null) until the quality is known too —
+    // null is what makes the ladder wait (RESOLVING) instead of picking a tier it would then change.
+    val go2rtcDecision: Boolean? = if (qualityKnown) canGo2rtc else null
 
     // Resolve the HLS stream URL only once the HLS tier could actually render — NOT eagerly on
     // open. `camera/stream` makes HA spin up a stream pipeline, which on a battery camera wakes
@@ -392,7 +403,7 @@ fun CameraPlayer(
     // on the ladder (the request itself is bounded at 15s in HaSource). Every tier above must be
     // exhausted before we resolve HLS — and "undecided" is not exhaustion, so neither a pending
     // go2rtc list nor a pending RTSP lookup may resolve it.
-    val wantsHls = !canRtsp && (canGo2rtc == false || go2rtcFailed) && !(canWebRtc && !webRtcFailed)
+    val wantsHls = !canRtsp && (go2rtcDecision == false || go2rtcFailed) && !(canWebRtc && !webRtcFailed)
     val liveUrl: String? by produceState<String?>(null, cam.id, wantsHls) {
         value = if (wantsHls) viewModel.liveStreamUrl(cam.entityId) else null
     }
@@ -401,13 +412,20 @@ fun CameraPlayer(
     val tier = liveTier(
         canRtsp = canRtsp,
         useSub = useSub,
-        canGo2rtc = canGo2rtc,
+        canGo2rtc = go2rtcDecision,
         go2rtcFailed = go2rtcFailed,
         canWebRtc = canWebRtc,
         webRtcFailed = webRtcFailed,
         hasHlsUrl = liveUrl != null,
         hasMjpeg = cam.streamUrl != null,
     )
+
+    // The still every live tier shows while it connects, and through a failover from one tier to
+    // the next (core/logic/LivePoster.kt) — the Reolink app's trick, and most of why it reads as
+    // instant. Passed as a lambda so the LiveFrameStore read happens inside the overlay, not here.
+    val poster: @Composable () -> Unit = remember(cam.id, cam.snapshotUrl, sleeps) {
+        { LivePoster(cameraId = cam.id, snapshotUrl = cam.snapshotUrl, sleeps = sleeps) }
+    }
 
     val isLive = playhead == null
 
@@ -659,7 +677,7 @@ fun CameraPlayer(
                     low = qualityLow,
                     // Choosing a quality is also a retry: after the relay fell through to the
                     // reduced stream, Low is the lighter stream most likely to get through.
-                    onChange = { qualityLow = it; go2rtcFailed = false },
+                    onChange = { viewModel.setLowQuality(cameraName, it); go2rtcFailed = false },
                 )
             }
             MuteButton(muted = muted, onToggle = { muted = !muted })
@@ -842,6 +860,7 @@ fun CameraPlayer(
                 muted = muted,
                 onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
+                poster = poster,
             )
             isLive && tier == LiveTier.RELAY -> Go2rtcPlayer(
                 src = go2rtcSrc,
@@ -855,6 +874,7 @@ fun CameraPlayer(
                 wakeable = cam.isBattery,
                 onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
+                poster = poster,
             )
             // `canGo2rtc != null` holds this arm while the stream list is in flight. Starting an HA
             // WebRTC negotiation only to tear it down when go2rtc turns out to be available wastes
@@ -868,6 +888,7 @@ fun CameraPlayer(
                 wakeable = cam.isBattery,
                 onVideoSize = viewModel::reportVideoSize,
                 modifier = frame,
+                poster = poster,
             )
             // live = true pins the HLS feed near the live edge (no fast-forward catch-up). loop
             // stays true so the demo clip — DEMO_CLIP_URI, which VideoPlayer excludes from live
