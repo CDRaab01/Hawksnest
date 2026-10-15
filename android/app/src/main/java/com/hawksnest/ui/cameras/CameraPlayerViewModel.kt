@@ -248,7 +248,13 @@ class CameraPlayerViewModel @Inject constructor(
      * slow answer never wakes a battery camera's stream pipeline.
      */
     suspend fun canGo2rtc(cameraName: String): Boolean {
-        go2rtcStreams.prime(baseUrl())
+        val base = baseUrl()
+        // No server (demo data, signed out): there is no relay to reach. `prime` skips a blank base
+        // and an unfetched list reads as optimistic, so this used to say "available" — and the
+        // relay then built `/go2rtc/api/ws` with no scheme and OkHttp threw on the main thread:
+        // opening any camera in demo mode crashed the app.
+        if (base.isBlank()) return false
+        go2rtcStreams.prime(base)
         return go2rtcStreams.maybeAvailable(cameraName)
     }
 
