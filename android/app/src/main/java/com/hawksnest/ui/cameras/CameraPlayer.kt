@@ -56,6 +56,7 @@ import com.hawksnest.core.logic.exportBounds
 import com.hawksnest.core.logic.frigateCameraName
 import com.hawksnest.core.logic.liveLabel
 import com.hawksnest.core.logic.liveTier
+import com.hawksnest.core.logic.warmBridge
 import com.hawksnest.core.logic.nudge as nudgeClip
 import com.hawksnest.core.logic.setEdge as setClipEdge
 import com.hawksnest.core.logic.RecordedBackend
@@ -426,6 +427,15 @@ fun CameraPlayer(
     val poster: @Composable () -> Unit = remember(cam.id, cam.snapshotUrl, sleeps) {
         { LivePoster(cameraId = cam.id, snapshotUrl = cam.snapshotUrl, sleeps = sleeps) }
     }
+
+    // The warm bridge (core/logic/LiveTier.kt `warmBridge`): RTSP-direct opens with the camera's
+    // already-flowing sub stream drawn over it, and drops it the moment the main stream's first
+    // frame is up. `mainShown` ends it for this open; `bridgeFailed` drops a bridge that could not
+    // connect, leaving RTSP-direct to carry on alone exactly as before.
+    var mainShown by remember(cam.id, rtspUrl) { mutableStateOf(false) }
+    var bridgeFailed by remember(cam.id) { mutableStateOf(false) }
+    val bridging = !mainShown &&
+        warmBridge(tier, subAvailable, go2rtcDecision, go2rtcFailed, bridgeFailed, sleeps)
 
     val isLive = playhead == null
 
@@ -853,15 +863,36 @@ fun CameraPlayer(
                 modifier = frame,
             )
             // Every live arm below keys on `tier`, the same value the status label reads.
-            isLive && tier == LiveTier.DIRECT -> RtspPlayer(
-                url = rtspUrl!!,
-                camera = cameraName,
-                onFail = { rtspFailed = true },
-                muted = muted,
-                onVideoSize = viewModel::reportVideoSize,
-                modifier = frame,
-                poster = poster,
-            )
+            isLive && tier == LiveTier.DIRECT -> Box(frame) {
+                RtspPlayer(
+                    url = rtspUrl!!,
+                    camera = cameraName,
+                    onFail = { rtspFailed = true },
+                    muted = muted,
+                    onVideoSize = viewModel::reportVideoSize,
+                    modifier = Modifier.fillMaxSize(),
+                    poster = poster,
+                    // The bridge brings its own overlay; this one would sit above its picture.
+                    showConnecting = !bridging,
+                    onFirstFrame = { mainShown = true },
+                )
+                // Above the main stream's surface (media overlay) until that surface has a frame.
+                // Muted: the sub carries no WebRTC-playable audio, and the main's sound starts
+                // with its picture. Its frames also feed LiveFrameStore, i.e. the next open's still.
+                if (bridging) {
+                    Go2rtcPlayer(
+                        src = "${cameraName}_sub",
+                        cameraId = cam.id,
+                        baseUrl = viewModel.baseUrl(),
+                        onFail = { bridgeFailed = true },
+                        muted = true,
+                        onVideoSize = viewModel::reportVideoSize,
+                        modifier = Modifier.fillMaxSize(),
+                        poster = poster,
+                        mediaOverlay = true,
+                    )
+                }
+            }
             isLive && tier == LiveTier.RELAY -> Go2rtcPlayer(
                 src = go2rtcSrc,
                 cameraId = cam.id,

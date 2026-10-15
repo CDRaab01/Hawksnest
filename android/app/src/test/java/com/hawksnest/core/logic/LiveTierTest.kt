@@ -51,4 +51,42 @@ class LiveTierTest {
         assertEquals("Snapshots only", liveLabel(LiveTier.SNAPSHOT).text)
         assertTrue(listOf(LiveTier.RESOLVING, LiveTier.MJPEG, LiveTier.SNAPSHOT).none { liveLabel(it).realtime })
     }
+
+    private fun bridge(
+        tier: LiveTier = LiveTier.DIRECT,
+        subListed: Boolean = true,
+        canGo2rtc: Boolean? = true,
+        go2rtcFailed: Boolean = false,
+        bridgeFailed: Boolean = false,
+        sleeps: Boolean = false,
+    ) = warmBridge(tier, subListed, canGo2rtc, go2rtcFailed, bridgeFailed, sleeps)
+
+    @Test
+    fun `RTSP-direct opens behind the warm sub when the relay can serve it`() {
+        assertTrue(bridge())
+    }
+
+    @Test
+    fun `no bridge off the direct tier - Low and the relay tiers are already the relay`() {
+        LiveTier.values().filter { it != LiveTier.DIRECT }.forEach { assertFalse(bridge(tier = it), "$it") }
+    }
+
+    @Test
+    fun `no bridge without a listed sub stream or a working relay`() {
+        assertFalse(bridge(subListed = false))
+        assertFalse(bridge(canGo2rtc = false))
+        assertFalse(bridge(canGo2rtc = null))
+        assertFalse(bridge(go2rtcFailed = true))
+    }
+
+    @Test
+    fun `a failed bridge is dropped and direct carries on alone`() {
+        assertFalse(bridge(bridgeFailed = true))
+    }
+
+    @Test
+    fun `a sleeping camera is never bridged - asking for its sub wakes it`() {
+        assertFalse(bridge(sleeps = true))
+    }
 }
+
