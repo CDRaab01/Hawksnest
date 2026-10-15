@@ -53,10 +53,19 @@ fun RtspPlayer(
     onVideoSize: ((Int, Int) -> Unit)? = null,
     /** A still of this camera for the ~2 s the camera takes to send anything — see [LivePoster]. */
     poster: (@Composable () -> Unit)? = null,
+    /**
+     * False while a warm bridge ([com.hawksnest.core.logic.warmBridge]) is drawn over this player:
+     * the bridge has its own connecting overlay, and this one — Compose, so above every video
+     * surface — would cover the bridge's picture.
+     */
+    showConnecting: Boolean = true,
+    /** The first frame is on screen — the moment a warm bridge above can be dropped. */
+    onFirstFrame: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val currentOnFail by rememberUpdatedState(onFail)
     val currentOnVideoSize by rememberUpdatedState(onVideoSize)
+    val currentOnFirstFrame by rememberUpdatedState(onFirstFrame)
     var ready by remember(url) { mutableStateOf(false) }
     var failed by remember(url) { mutableStateOf(false) }
     // The first frame actually on screen. Clears the connecting overlay and satisfies the deadline
@@ -119,6 +128,7 @@ fun RtspPlayer(
             override fun onRenderedFirstFrame() {
                 firstFrame = true
                 RtspHealth.report(camera, true)
+                currentOnFirstFrame?.invoke()
             }
 
             // Rotation-corrected the same way the WebRTC renderers do it, so a rotated source
@@ -195,6 +205,12 @@ fun RtspPlayer(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     useController = false
+                    // Transparent, not PlayerView's default black. The shutter is an ordinary
+                    // View, so it draws in the window ABOVE every video surface — including a
+                    // warm bridge's media-overlay surface, which it would black out until this
+                    // player's first frame. Nothing is lost: until then the connecting overlay
+                    // (or the bridge) covers this frame anyway.
+                    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                     this.player = player
                 }
             },
@@ -207,7 +223,7 @@ fun RtspPlayer(
         // for the ~2 s a Reolink takes to answer a new RTSP viewer — measured on the owner's phone
         // as a black box at a 2.4 s median, against the vendor app's still at 0.4 s. The same
         // overlay the WebRTC tiers use, with the camera's still under it.
-        if (!firstFrame && !failed) ConnectingOverlay(poster = poster)
+        if (showConnecting && !firstFrame && !failed) ConnectingOverlay(poster = poster)
     }
 }
 

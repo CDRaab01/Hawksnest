@@ -939,6 +939,23 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   above; and the `LiveFrameStore` read happens inside the overlay, because the store is Compose
   state a playing tier writes every 3 s and a read in `CameraPlayer` would recompose the player.
   The web players still show their scrim over black — a known divergence.
+- **RTSP-direct opens behind a warm bridge** (Android, 2026-10-15; `core/logic/LiveTier.kt`
+  `warmBridge`, the DIRECT arm of `CameraPlayer`). With the still in place the remaining gap to the
+  vendor app was time-to-live (~1.7 s vs ~0.4 s), and it is the camera's: a Reolink answers any new
+  RTSP viewer in ~2 s. hawksnest-automation's `warm-sub` sidecar holds every always-on camera's
+  `<name>_sub` open in go2rtc around the clock, so a viewer joining it gets packets in 0.1–0.2 s
+  and a decodable frame at the camera's next keyframe (sub I-frame interval set to 1x on the
+  cameras; go2rtc keeps no cached keyframe). The DIRECT arm therefore mounts two players: RTSP-
+  direct on the main stream, and a `Go2rtcPlayer` on `<name>_sub` drawn above it until the main
+  stream's first frame (`RtspPlayer.onFirstFrame`), then dropped — a second or two of sub
+  resolution, never a lower-resolution session. Three mechanics: the bridge's renderer is a
+  **media-overlay** surface (`setZOrderMediaOverlay`), because two plain SurfaceViews have no
+  defined order; PlayerView's shutter is made **transparent**, because it is an ordinary View that
+  draws in the window above every surface and would black out the bridge; and RtspPlayer hides its
+  own connecting overlay while bridged (`showConnecting`), because Compose draws above both
+  surfaces. It fails safe both ways: a bridge that cannot connect sets `bridgeFailed` and RTSP-
+  direct carries on alone exactly as before; a main stream that fails steps the ladder down to the
+  relay as before. Never for a camera that sleeps — its sub is not held open and asking wakes it.
   **Cleartext:** verified against media3 1.10.1 that the RTSP module never consults
   `NetworkSecurityPolicy` (raw `java.net.Socket`), so `cleartextTrafficPermitted="false"` stands
   unchanged — see CLAUDE.md for what to do if that ever changes.

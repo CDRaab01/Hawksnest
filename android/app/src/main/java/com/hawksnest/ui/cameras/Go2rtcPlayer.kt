@@ -76,6 +76,13 @@ fun Go2rtcPlayer(
     modifier: Modifier = Modifier,
     /** A still of this camera for the connecting wait — see [ConnectingOverlay] and [LivePoster]. */
     poster: (@Composable () -> Unit)? = null,
+    /**
+     * Draw above another video surface in the same frame — a warm bridge over RTSP-direct
+     * ([com.hawksnest.core.logic.warmBridge]). Two plain SurfaceViews have no defined order; a
+     * media-overlay surface sits above regular ones (still below the window, so Compose chrome
+     * stays on top). Fixed per mount: it must be set before the view is attached.
+     */
+    mediaOverlay: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -104,6 +111,7 @@ fun Go2rtcPlayer(
                 },
             )
             setEnableHardwareScaler(true)
+            if (mediaOverlay) setZOrderMediaOverlay(true)
             // Show the WHOLE frame; do not crop to fill.
             //
             // SurfaceViewRenderer defaults to SCALE_ASPECT_BALANCED, which crops when the
