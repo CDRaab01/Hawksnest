@@ -47,8 +47,13 @@ import com.hawksnest.core.logic.reolinkRtspUrl
 import com.hawksnest.core.net.Go2rtcStreams
 import com.hawksnest.core.net.RingTimelineClient
 import com.hawksnest.util.CredentialStore
+import com.hawksnest.util.DevicePrefsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -101,7 +106,25 @@ class CameraPlayerViewModel @Inject constructor(
     private val httpClient: OkHttpClient,
     private val cameraSession: CameraSession,
     private val directStreamSource: DirectStreamSource,
+    private val devicePrefs: DevicePrefsStore,
 ) : ViewModel() {
+
+    /**
+     * Cameras remembered at Low live quality — `null` until the store has been read. The player
+     * holds its live-tier choice on that null (a few ms on open), because guessing High first
+     * would open the camera's 3–4 Mbps main stream only to drop it for the sub stream a moment
+     * later. Eager, so the read starts with the screen rather than with the first composition.
+     */
+    val lowQualityCameras: StateFlow<Set<String>?> =
+        devicePrefs.lowQualityCameras
+            // The live ladder waits on this value, so a store that cannot be read must still
+            // answer: nothing remembered (High), never "still loading" for ever.
+            .catch { emit(emptySet()) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun setLowQuality(camera: String, low: Boolean) {
+        viewModelScope.launch { devicePrefs.setLowQuality(camera, low) }
+    }
 
     /** True while the activity is minimized into system PiP — the player hides its chrome off
      *  this, the same way it does for fullscreen. */

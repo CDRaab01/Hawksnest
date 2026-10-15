@@ -1,6 +1,8 @@
 package com.hawksnest.ui.cameras
 
 import android.net.Uri
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -16,6 +18,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import androidx.media3.ui.PlayerView
@@ -48,12 +51,17 @@ fun RtspPlayer(
     /** The media's real (width, height), so the frame around this tier takes the picture's shape
      *  rather than a hardcoded 16:9 — see `core/logic/MediaAspect.kt`. */
     onVideoSize: ((Int, Int) -> Unit)? = null,
+    /** A still of this camera for the ~2 s the camera takes to send anything — see [LivePoster]. */
+    poster: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val currentOnFail by rememberUpdatedState(onFail)
     val currentOnVideoSize by rememberUpdatedState(onVideoSize)
     var ready by remember(url) { mutableStateOf(false) }
     var failed by remember(url) { mutableStateOf(false) }
+    // The first frame actually on screen. Clears the connecting overlay and satisfies the deadline
+    // below; READY alone could arrive a little later (it also waits for the start buffer).
+    var firstFrame by remember(url) { mutableStateOf(false) }
     // Rises while playback is stalled; reset whenever it is not.
     var bufferingSince by remember(url) { mutableStateOf<Long?>(null) }
 
@@ -68,6 +76,21 @@ fun RtspPlayer(
                 RtspMediaSource.Factory()
                     .setForceUseRtpTcp(true)
                     .setTimeoutMs(CONNECT_TIMEOUT_MS),
+            )
+            // ExoPlayer's stock buffering is for files and VOD: hold 1 s of media before playing,
+            // 2 s after any stall (media3 1.11). A camera's RTSP feed arrives in real time, so each
+            // of those seconds is a second of a frozen or missing picture — and of permanent lag,
+            // since a live feed never runs ahead to refill it. Play the moment frames decode; come
+            // back from a Wi-Fi blip in well under a second.
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        LIVE_MIN_BUFFER_MS,
+                        LIVE_MAX_BUFFER_MS,
+                        START_BUFFER_MS,
+                        REBUFFER_MS,
+                    )
+                    .build(),
             )
             .build()
             .apply { volume = if (muted) 0f else 1f }
@@ -91,6 +114,11 @@ fun RtspPlayer(
 
             override fun onPlayerError(error: PlaybackException) {
                 fail()
+            }
+
+            override fun onRenderedFirstFrame() {
+                firstFrame = true
+                RtspHealth.report(camera, true)
             }
 
             // Rotation-corrected the same way the WebRTC renderers do it, so a rotated source
@@ -139,7 +167,7 @@ fun RtspPlayer(
 
     LaunchedEffect(url) {
         delay(READY_DEADLINE_MS)
-        if (!ready && !failed && !everStopped) {
+        if (!ready && !firstFrame && !failed && !everStopped) {
             failed = true
             RtspHealth.report(camera, false)
             currentOnFail()
@@ -161,31 +189,58 @@ fun RtspPlayer(
         }
     }
 
-    AndroidView(
-        modifier = modifier,
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                useController = false
-                this.player = player
-            }
-        },
-        // `factory` runs once per view, but `player` is rebuilt whenever the url changes. Without
-        // this the view stayed bound to the released player: its last frame frozen on screen,
-        // the new stream connected and invisible. Same guard VideoPlayer has.
-        update = { view -> if (view.player !== player) view.player = player },
-    )
+    Box(modifier) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    useController = false
+                    this.player = player
+                }
+            },
+            // `factory` runs once per view, but `player` is rebuilt whenever the url changes. Without
+            // this the view stayed bound to the released player: its last frame frozen on screen,
+            // the new stream connected and invisible. Same guard VideoPlayer has.
+            update = { view -> if (view.player !== player) view.player = player },
+        )
+        // This tier used to show nothing at all until the first frame: PlayerView's black shutter
+        // for the ~2 s a Reolink takes to answer a new RTSP viewer — measured on the owner's phone
+        // as a black box at a 2.4 s median, against the vendor app's still at 0.4 s. The same
+        // overlay the WebRTC tiers use, with the camera's still under it.
+        if (!firstFrame && !failed) ConnectingOverlay(poster = poster)
+    }
 }
 
 /** RTSP SETUP/DESCRIBE deadline. Short: an unreachable camera should cost about a second. */
 private const val CONNECT_TIMEOUT_MS = 4_000L
 
 /**
- * No first frame by this point, error or not, and the tier gives up. Seven seconds, not five: the
- * slowest measured in-app first frame was 4.0 s and the camera side alone reached 4.8 s in probes
- * (the new viewer waits for the next keyframe, one every 2 s). Missing the deadline is expensive,
- * since the relay then starts from scratch, so it has to clear the slow tail, not the median.
+ * No first frame by this point, error or not, and the tier gives up.
+ *
+ * Five seconds (it was seven). Measured 2026-10-14: a Reolink sends a new RTSP viewer its first
+ * packet ~2.0–2.2 s after the request (main stream, 24 cold connects across four cameras, worst
+ * 2.75 s), and the phone showed a first frame at 2.0–3.4 s — while still holding ExoPlayer's 1 s
+ * start buffer, which [START_BUFFER_MS] removes. Five seconds still clears that tail by ~2 s.
+ * The seven-second figure dated from that buffer (September's slowest in-app frame, 4.0 s,
+ * included it), and it was paid in full every time this tier failed: one Garage open in eleven
+ * missed it and showed nothing for 11.5 s. A failover now keeps the camera's still on screen
+ * (see [ConnectingOverlay]), so stepping down early costs a second, not a black screen.
  */
-private const val READY_DEADLINE_MS = 7_000L
+private const val READY_DEADLINE_MS = 5_000L
+
+/** Play as soon as a quarter-second is decoded — enough to ride out one late packet, no more. */
+private const val START_BUFFER_MS = 250
+
+/** After a stall, half a second buffered and go again (ExoPlayer's default is 2 s). */
+private const val REBUFFER_MS = 500
+
+/**
+ * Keep loading while under this much. A live feed can only ever be as far ahead as the network
+ * jitter, so these bound nothing in practice — they only have to satisfy DefaultLoadControl's
+ * ordering (min >= both play thresholds, max >= min).
+ */
+private const val LIVE_MIN_BUFFER_MS = 2_000
+private const val LIVE_MAX_BUFFER_MS = 5_000
 
 /** Continuous stall after playback started — the link cannot carry a fixed-bitrate main stream. */
 private const val STALL_TIMEOUT_MS = 7_000L

@@ -299,7 +299,12 @@ WebRTC `AudioTrack` that org.webrtc would otherwise auto-play), snapshot-to-file
 Low/High live-quality toggle (`QualityToggle`) that swaps the go2rtc tier onto the camera's
 `<name>_sub` stream. The toggle renders only when go2rtc's stream list carries the `_sub` name, so
 Ring/demo cameras never see it; on Android, Low also bypasses the RTSP-direct tier (which plays the
-fixed-bitrate main stream — the thing a weak link is trying to escape).
+fixed-bitrate main stream — the thing a weak link is trying to escape). **Android remembers the
+choice per camera** (`DevicePrefsStore.lowQualityCameras`, key `live_quality_low`, since
+2026-10-14): Low is a fact about one camera's link, and resetting it to High on every open meant
+the camera that needed it stalled again before it could be picked. The player holds its live-tier
+decision until the store has been read (`qualityKnown`; a few ms) so a camera remembered at Low
+never opens its main stream first. The web toggle still resets per open — a known divergence.
 `"none"` (demo / no NVR) is the only backend whose media loops, and the only one that ignores
 playback errors — the source hands it the same bundled clip for every seek.
 
@@ -891,10 +896,19 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   public. After changing the camera password or an IP in the Secret, restart the `hawksnest`
   deployment: the file is rendered once per pod start.
   **Fails fast, three ways**, because the tier is optional and a dead frame is worse than a
-  step-down: a 4 s RTSP connect timeout, a 7 s no-first-frame deadline (an unreachable camera can
-  hang setup without ever erroring; it was 5 s until the September 2026 audit timed first frames at
-  up to 4.0 s in-app and 4.8 s camera-side, and missing it restarts the relay from scratch), and a
-  7 s post-play stall timeout. That last one matters
+  step-down: a 4 s RTSP connect timeout, a 5 s no-first-frame deadline (an unreachable camera can
+  hang setup without ever erroring), and a 7 s post-play stall timeout. The deadline was 5 s, then
+  7 s after the September 2026 audit timed first frames at up to 4.0 s in-app, and is 5 s again
+  since 2026-10-14: that 4.0 s included ExoPlayer's 1 s start buffer, which this tier no longer
+  holds, and the camera side measured 2.0–2.2 s (worst 2.75 s) to a new viewer's first packet over
+  24 cold connects. Seven seconds was paid in full on every failure — one Garage open in eleven on
+  the owner's phone showed nothing for 11.5 s — and a failover now keeps the camera's still on
+  screen (below), so stepping down early costs a second, not a black screen.
+  **No VOD buffering** (`DefaultLoadControl`, 2026-10-14): ExoPlayer's stock thresholds — 1 s of
+  media before playing, 2 s after any stall (media3 1.10/1.11) — are built for files. A camera's
+  RTSP feed arrives in real time, so each buffered second was a second of missing picture and of
+  permanent lag (a live feed never runs ahead to refill it). The tier plays at 250 ms buffered and
+  resumes from a stall at 500 ms. That last one matters
   because the main stream is FIXED-bitrate — a weak link degrades to a stall, not to lower quality,
   whereas go2rtc's WebRTC below it adapts. Only the first two report to `core/net/RtspHealth`; a
   stall is the network's fault, not the camera's.
@@ -907,6 +921,24 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   holds the sub stream, go2rtc the main, each viewing phone one more — an over-budget open is
   rejected and steps down, by design), and off-LAN this needs the camera IPs routed onto the
   tailnet (per-camera `/32` subnet routes, not the whole LAN).
+- **The connecting wait shows the camera, not black** (Android, 2026-10-14; `core/logic/LivePoster.kt`,
+  `LivePoster` + `ConnectingOverlay(poster)` in `ui/cameras/LiveOverlay.kt`). Measured head-to-head
+  on the owner's S24 Ultra, 11 cold opens per app across six cameras: the Reolink app puts a cached
+  still up at a 0.4 s median and is live at ~0.5 s (it also keeps a standing connection to every
+  camera); Hawksnest showed a black rectangle until the first frame at a 2.4 s median, because a
+  Reolink takes ~2 s to answer any new RTSP viewer. Every live tier (RTSP-direct, go2rtc relay, HA
+  WebRTC) now draws a still of the camera under its "Connecting…" scrim: the frame grabbed the last
+  time it played live (`LiveFrameStore`) if that is under two minutes old, else its snapshot (for
+  Frigate, Frigate's latest frame — seconds old), else nothing. A parked battery camera never gets
+  its snapshot (Frigate's grey `camera-error.jpg`, the same reason Home calls it "Asleep"), only
+  its last frame. The still rides through a failover too: each tier's overlay shows it, so an RTSP
+  miss stepping down to the relay keeps a picture up instead of going black. Two mechanics: it is
+  drawn OVER the video surface (a SurfaceView punches through anything beneath it), which makes it
+  the one opaque thing the overlay can lay over a working picture — so it drops away after 12 s
+  (`POSTER_MAX_MS`) whatever the connecting flag says, preserving the see-through-scrim defence
+  above; and the `LiveFrameStore` read happens inside the overlay, because the store is Compose
+  state a playing tier writes every 3 s and a read in `CameraPlayer` would recompose the player.
+  The web players still show their scrim over black — a known divergence.
   **Cleartext:** verified against media3 1.10.1 that the RTSP module never consults
   `NetworkSecurityPolicy` (raw `java.net.Socket`), so `cleartextTrafficPermitted="false"` stands
   unchanged — see CLAUDE.md for what to do if that ever changes.

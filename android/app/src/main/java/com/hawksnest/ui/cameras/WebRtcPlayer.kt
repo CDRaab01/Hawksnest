@@ -65,6 +65,8 @@ fun WebRtcPlayer(
      *  the PiP window's aspect ratio (see Go2rtcPlayer). */
     onVideoSize: ((width: Int, height: Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /** A still of this camera for the connecting wait — see [ConnectingOverlay] and [LivePoster]. */
+    poster: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -167,7 +169,9 @@ fun WebRtcPlayer(
 
     Box(modifier) {
         AndroidView(factory = { renderer }, modifier = Modifier.fillMaxSize())
-        if (connecting.value) ConnectingOverlay(label = if (wakeable) "Waking camera…" else "Connecting…")
+        if (connecting.value) {
+            ConnectingOverlay(label = if (wakeable) "Waking camera…" else "Connecting…", poster = poster)
+        }
     }
 }
 
