@@ -939,6 +939,21 @@ Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Ful
   above; and the `LiveFrameStore` read happens inside the overlay, because the store is Compose
   state a playing tier writes every 3 s and a read in `CameraPlayer` would recompose the player.
   The web players still show their scrim over black — a known divergence.
+- **Away from home Wi-Fi a camera opens light** (Android, 2026-10-15; `core/logic/LiveLink.kt`,
+  `core/net/LocalLink.kt`). The owner's wife, on cellular, could not get any camera to play while the
+  owner on home Wi-Fi saw nothing wrong: her proxy log was reopen loops. RTSP-direct plays the fixed
+  ~5 Mbps main stream, and off the LAN that is cellular → tailnet → host → camera over TCP, which
+  stalls (7 s) rather than degrading, then steps down to the relay's same main stream. The Reolink
+  app opens "Fluent" whenever it is remote; Hawksnest now does the same. `hasLocalLink` asks whether
+  any non-VPN network is Wi-Fi/Ethernet, unmetered and validated (it scans `allNetworks` because the
+  default network is Tailscale's VPN; a VPN-only view falls back to the VPN's merged capabilities).
+  Off a local link: RTSP-direct is never tried (`directAllowed`), and the open starts at Low
+  (`liveQualityLow`) on the relay's `<name>_sub`. Tapping High holds for that open only, and is not
+  persisted, so the next remote open starts light again; a remembered Low still wins everywhere.
+  Read once per open, like the breakers, so a Wi-Fi flap mid-view cannot tear down a playing
+  session. The relay decision also waits for the `_sub` listing on a Low open, so it never starts
+  the main stream for a moment first. Web has no RTSP tier and resets quality per open, so there is
+  no web twin to keep in step.
 - **RTSP-direct opens behind a warm bridge** (Android, 2026-10-15; `core/logic/LiveTier.kt`
   `warmBridge`, the DIRECT arm of `CameraPlayer`). With the still in place the remaining gap to the
   vendor app was time-to-live (~1.7 s vs ~0.4 s), and it is the camera's: a Reolink answers any new
