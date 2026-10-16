@@ -57,6 +57,8 @@ import com.hawksnest.core.logic.frigateCameraName
 import com.hawksnest.core.logic.liveLabel
 import com.hawksnest.core.logic.liveTier
 import com.hawksnest.core.logic.warmBridge
+import com.hawksnest.core.logic.directAllowed
+import com.hawksnest.core.logic.liveQualityLow
 import com.hawksnest.core.logic.nudge as nudgeClip
 import com.hawksnest.core.logic.setEdge as setClipEdge
 import com.hawksnest.core.logic.RecordedBackend
@@ -81,6 +83,7 @@ import com.hawksnest.core.logic.retentionRange
 import com.hawksnest.core.logic.vodRangeFor
 import com.hawksnest.core.logic.vodPositionMsInPage
 import com.hawksnest.core.net.RtspHealth
+import com.hawksnest.core.net.isOnLocalLink
 import com.hawksnest.ui.home.CameraUi
 import com.hawksnest.ui.theme.HawksnestTheme
 import kotlinx.coroutines.delay
@@ -319,9 +322,21 @@ fun CameraPlayer(
     // Remembered per camera (DevicePrefsStore): it is a fact about that camera's link, and resetting
     // to High on every open meant the camera that needed Low stalled again before you could pick it.
     // `null` until the store is read — the live tier waits on that (see `qualityKnown`).
+    //
+    // Away from home Wi-Fi the open starts at Low whatever is remembered, the way the Reolink app
+    // opens "Fluent" when remote (core/logic/LiveLink.kt has the measured why). Read once per open,
+    // like the breakers: a Wi-Fi flap mid-view must not tear down a playing session. Tapping High
+    // here holds for this open only (`highChosen`), so the next remote open starts light again.
     val lowQualityCameras by viewModel.lowQualityCameras.collectAsState()
     val qualityKnown = lowQualityCameras != null
-    val qualityLow = lowQualityCameras?.contains(cameraName) == true
+    val linkContext = LocalContext.current
+    val localLink = remember(cam.id) { isOnLocalLink(linkContext) }
+    var highChosen by remember(cam.id) { mutableStateOf(false) }
+    val qualityLow = liveQualityLow(
+        rememberedLow = lowQualityCameras?.contains(cameraName) == true,
+        localLink = localLink,
+        highChosen = highChosen,
+    )
 
     // Movement controls, if this camera has any. Resolved from the entity ids that
     // exist rather than derived from the camera name — see core/logic/CameraPtz.kt
@@ -375,9 +390,12 @@ fun CameraPlayer(
     // Whether go2rtc serves a sub stream at all — NOT whether the relay is healthy. Asking the
     // relay's breaker hid the toggle after one relay failure, which is exactly when switching to
     // the lighter stream is the way out of the reduced fallback.
-    val subAvailable: Boolean by produceState(false, cam.id) {
+    // Null until the list answers: a Low open must not start the main stream on the relay in the
+    // moment before it learns there is a sub to play instead (see `go2rtcDecision`).
+    val subListed: Boolean? by produceState<Boolean?>(null, cam.id) {
         value = runCatching { viewModel.go2rtcLists("${cameraName}_sub") }.getOrDefault(false)
     }
+    val subAvailable = subListed == true
     val useSub = qualityLow && subAvailable
     val go2rtcSrc = if (useSub) "${cameraName}_sub" else cameraName
 
@@ -393,10 +411,14 @@ fun CameraPlayer(
     val rtspHealthy = remember(cam.id) { RtspHealth.maybeAvailable(cameraName) }
     // Gated on `qualityKnown` like the relay below: deciding before the remembered quality is read
     // would open the main stream for a camera that is remembered at Low, then tear it down.
-    val canRtsp = rtspUrl != null && rtspHealthy && !rtspFailed && qualityKnown
+    // Off a local link RTSP-direct is never tried (directAllowed): it is the same fixed-bitrate main
+    // stream the relay's High plays, but over TCP through the host, where a weak link stalls for the
+    // whole timeout before stepping down.
+    val canRtsp = rtspUrl != null && rtspHealthy && !rtspFailed && qualityKnown && directAllowed(localLink)
     // The relay's "is it listed" answer, held at undecided (null) until the quality is known too —
     // null is what makes the ladder wait (RESOLVING) instead of picking a tier it would then change.
-    val go2rtcDecision: Boolean? = if (qualityKnown) canGo2rtc else null
+    // A Low open also waits for the sub listing — every remote open is Low (localLink above).
+    val go2rtcDecision: Boolean? = if (qualityKnown && !(qualityLow && subListed == null)) canGo2rtc else null
 
     // Resolve the HLS stream URL only once the HLS tier could actually render — NOT eagerly on
     // open. `camera/stream` makes HA spin up a stream pipeline, which on a battery camera wakes
@@ -687,7 +709,11 @@ fun CameraPlayer(
                     low = qualityLow,
                     // Choosing a quality is also a retry: after the relay fell through to the
                     // reduced stream, Low is the lighter stream most likely to get through.
-                    onChange = { viewModel.setLowQuality(cameraName, it); go2rtcFailed = false },
+                    onChange = {
+                        viewModel.setLowQuality(cameraName, it)
+                        highChosen = !it
+                        go2rtcFailed = false
+                    },
                 )
             }
             MuteButton(muted = muted, onToggle = { muted = !muted })
