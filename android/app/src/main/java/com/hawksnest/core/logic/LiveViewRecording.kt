@@ -100,3 +100,20 @@ fun frigateEnabledTopic(cameraName: String): String = "frigate/$cameraName/enabl
  * reason someone opens the front camera is usually that it just saw something.
  */
 fun liveViewGuardEntity(cameraName: String): String = "input_boolean.hawksnest_live_view_$cameraName"
+
+/**
+ * How long to wait before trying again to mint a live-view event that could not be minted.
+ *
+ * A failed mint used to END the recording loop, and its cleanup parks a battery camera — so a
+ * parked camera was woken and re-parked 80 ms later, every open (2026-10-15, backyard_patio:
+ * HA answered `frigate.create_event` with "did not match any entities", because a parked camera's
+ * Frigate entity is not available until Frigate has turned it back on). The mint is the optional
+ * part — a camera you cannot mark is still a camera you can watch — so it retries, and only
+ * leaving the view ends the wake. Backs off so a camera that can never be marked costs a call
+ * every half minute, not a stream of errors.
+ */
+fun liveViewMintRetryMs(failures: Int): Long =
+    (LIVE_VIEW_MINT_RETRY_BASE_MS shl (failures - 1).coerceIn(0, 4)).coerceAtMost(LIVE_VIEW_MINT_RETRY_MAX_MS)
+
+const val LIVE_VIEW_MINT_RETRY_BASE_MS = 3_000L
+const val LIVE_VIEW_MINT_RETRY_MAX_MS = 30_000L
