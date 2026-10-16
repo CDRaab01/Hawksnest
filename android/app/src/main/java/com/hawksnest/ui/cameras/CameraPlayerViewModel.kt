@@ -11,6 +11,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.hawksnest.core.logic.LIVE_VIEW_LABEL
 import com.hawksnest.core.logic.LIVE_VIEW_RENEW_BEFORE_SEC
+import com.hawksnest.core.logic.liveViewMintRetryMs
 import com.hawksnest.core.logic.LIVE_VIEW_SEGMENT_SEC
 import com.hawksnest.core.logic.eventIdFromCreateResponse
 import com.hawksnest.core.logic.frigateEnabledTopic
@@ -158,13 +159,24 @@ class CameraPlayerViewModel @Inject constructor(
                 runCatching { publishFrigateEnabled(cameraName, on = true) }
             }
             var eventId: String? = null
+            var failures = 0
             try {
                 while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                     val next = runCatching { createLiveViewEvent(cameraEntityId) }.getOrNull()
-                    // Chain the renewal before ending the previous segment so the timeline has no
-                    // gap; if minting failed there is nothing to chain and we simply stop trying.
+                    if (next == null) {
+                        // Never `break` here: the finally below parks a battery camera, and a mint
+                        // fails exactly when the camera was parked a moment ago (its Frigate entity
+                        // is unavailable until Frigate turns it on). Breaking re-parked it 80 ms
+                        // after waking it — core/logic/LiveViewRecording.kt liveViewMintRetryMs.
+                        // A still-open previous segment simply runs out at its bounded duration.
+                        failures++
+                        delay(liveViewMintRetryMs(failures))
+                        continue
+                    }
+                    failures = 0
+                    // Chain the renewal before ending the previous segment so the timeline has no gap.
                     eventId?.let { prev -> runCatching { endLiveViewEvent(cameraEntityId, prev) } }
-                    eventId = next ?: break
+                    eventId = next
                     delay((LIVE_VIEW_SEGMENT_SEC - LIVE_VIEW_RENEW_BEFORE_SEC) * 1000L)
                 }
             } finally {

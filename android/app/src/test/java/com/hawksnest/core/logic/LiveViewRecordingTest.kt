@@ -96,4 +96,14 @@ class LiveViewRecordingTest {
         // 300 s is the create_event service's own maximum; going over it would be rejected.
         assertTrue(LIVE_VIEW_SEGMENT_SEC <= 300)
     }
+
+    @Test
+    fun `a failed mint retries with backoff, capped, never zero`() {
+        assertEquals(3_000L, liveViewMintRetryMs(1))
+        assertEquals(6_000L, liveViewMintRetryMs(2))
+        assertEquals(12_000L, liveViewMintRetryMs(3))
+        assertEquals(24_000L, liveViewMintRetryMs(4))
+        assertEquals(LIVE_VIEW_MINT_RETRY_MAX_MS, liveViewMintRetryMs(50))
+        assertTrue(liveViewMintRetryMs(0) > 0)
+    }
 }

@@ -544,6 +544,13 @@ Three things it has to get right, all of them about the failure case rather than
   recording halfway through. That is the likely case, not the edge case: the reason someone opens
   the front camera is usually the same PIR hit that started the automation. `Hawksnest: release a
   stuck live-view guard` parks the camera anyway after 30 minutes if the client never clears it.
+- **A mint that fails must not end the wake** (2026-10-15). The loop used to `break` when
+  `create_event` returned nothing, and its `finally` is what parks the camera. A parked camera's
+  Frigate entity is *unavailable* until Frigate turns it back on, so HA answered the first mint
+  with "did not match any entities", and every open of a battery camera woke it and re-parked it
+  80 ms later (Frigate's log: `Turning on camera backyard_patio`, then `Turning off`, each open).
+  Now a failed mint retries on a backoff (`liveViewMintRetryMs`, 3 s doubling to 30 s) and only
+  leaving the view ends the wake; the marker is optional, the wake is not.
 
 Two things deliberately **not** done. Ring cameras are out of scope — Ring records live views
 server-side and `ring-timeline` already carries a `kind` per event, so surfacing those is a
