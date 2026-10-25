@@ -2,6 +2,7 @@ package com.hawksnest.ui.cameras
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -10,9 +11,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import com.hawksnest.core.logic.CONNECT_WATCHDOG_MS
+import com.hawksnest.core.logic.WAKE_BUDGET_MS
+import com.hawksnest.core.logic.go2rtcWatchdogMs
+import com.hawksnest.core.logic.sourceErrorRetryDelayMs
 import com.hawksnest.core.net.Go2rtcHealth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -64,9 +70,10 @@ fun Go2rtcPlayer(
      *  default; the player chrome's MuteButton is the deliberate way to sound. */
     muted: Boolean = true,
     /**
-     * The camera sleeps and must be woken to stream ([LogicalCamera.isBattery]). Widens the
-     * connect watchdog to [WAKE_WATCHDOG_MS], labels the overlay honestly, and — most importantly —
-     * keeps a slow or failed wake from tripping the session breaker in [Go2rtcHealth]: one battery
+     * The camera sleeps and must be woken to stream ([LogicalCamera.isBattery]). Gives it the
+     * wake budget ([WAKE_BUDGET_MS]) and re-asks go2rtc every second while the hub is still waking
+     * it ([sourceErrorRetryDelayMs]), labels the overlay honestly, and — most importantly — keeps
+     * a slow or failed wake from tripping the session breaker in [Go2rtcHealth]: one battery
      * camera taking its time says nothing about whether go2rtc's media path works for the rest.
      */
     wakeable: Boolean = false,
@@ -123,6 +130,8 @@ fun Go2rtcPlayer(
             //
             // FIT pillarboxes instead. Black bars beside the picture are the correct answer for a
             // security camera: seeing all of the frame beats filling all of the glass.
+            // FIT only takes effect when the view is NOT measured EXACTLY — see the
+            // wrapContentSize on the AndroidView below, which is the other half of this.
             setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
         }
     }
@@ -136,12 +145,23 @@ fun Go2rtcPlayer(
     val session = remember { mutableStateOf<Go2rtcSession?>(null) }
     // Stop with the activity, renegotiate on return (same as WebRtcPlayer; see StopWhileBackgrounded).
     val restarts = remember { mutableIntStateOf(0) }
+    // The wake budget runs from the FIRST attempt of an open (core/logic/Go2rtcWake.kt). A retry
+    // after go2rtc's source error keeps that start; anything else that (re)starts the session — a
+    // new src, a return from the background (by which time a battery camera is asleep again) —
+    // begins a fresh budget. Plain fields, not state: nothing renders from them.
+    val attempt = remember { Go2rtcAttempt() }
     StopWhileBackgrounded(
-        onStop = { session.value?.close() },
+        onStop = {
+            attempt.retryJob?.cancel()
+            session.value?.close()
+        },
         onRestart = { restarts.intValue += 1 },
     )
     DisposableEffect(src, wakeable, restarts.intValue) {
         connecting.value = true
+        val now = System.currentTimeMillis()
+        if (!attempt.retryPending) attempt.startedAt = now
+        attempt.retryPending = false
         val s = Go2rtcSession(
             scope,
             baseUrl,
@@ -150,12 +170,32 @@ fun Go2rtcPlayer(
             renderer,
             muted,
             wakeable,
+            watchdogMs = go2rtcWatchdogMs(wakeable, now - attempt.startedAt),
             onFirstFrame = { scope.launch { connecting.value = false } },
             onFail = { currentOnFail.value() },
+            // go2rtc answered, but could not open the camera. A sleeping camera is mid-wake (the
+            // hub 454s the first SETUP): ask again shortly, inside the budget. Anything else steps
+            // down now — the go2rtc tier's own watchdog would only have waited to say the same.
+            onSourceError = {
+                val wait = sourceErrorRetryDelayMs(wakeable, System.currentTimeMillis() - attempt.startedAt)
+                if (wait == null) {
+                    currentOnFail.value()
+                } else {
+                    attempt.retryJob = scope.launch {
+                        delay(wait)
+                        attempt.retryPending = true
+                        restarts.intValue += 1
+                    }
+                }
+            },
         )
         session.value = s
         s.start()
         onDispose {
+            // A retry scheduled for THIS session must not fire into the next one (a camera switch
+            // mid-wake would otherwise inherit the old camera's budget).
+            // (A retry that already fired has completed, so this is a no-op for it.)
+            attempt.retryJob?.cancel()
             session.value = null
             s.close()
         }
@@ -172,7 +212,18 @@ fun Go2rtcPlayer(
     }
 
     Box(modifier) {
-        AndroidView(factory = { renderer }, modifier = Modifier.fillMaxSize())
+        // wrapContentSize, NOT a bare fillMaxSize: SurfaceViewRenderer honours SCALE_ASPECT_FIT
+        // only in onMeasure, and only for an AT_MOST spec. Handed EXACTLY (fillMaxSize alone),
+        // it takes the whole box and its EglRenderer then CROPS the frame to the box's shape
+        // (setLayoutAspectRatio in onLayout). Harmless while the box had the picture's shape;
+        // since the stage became the whole middle of the screen it centre-cropped every WebRTC
+        // picture — a hub panorama lost most of its width and 16:9 looked "zoomed in" until PiP
+        // (whose window has the video's shape) showed the whole frame. AT_MOST lets the view
+        // size itself to the fitted picture, centred, so the black bars are real.
+        AndroidView(
+            factory = { renderer },
+            modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.Center),
+        )
         if (connecting.value) {
             ConnectingOverlay(label = if (wakeable) "Waking camera…" else "Connecting…", poster = poster)
         }
@@ -186,19 +237,15 @@ fun Go2rtcPlayer(
  * session; rendering mirrors WebRtcSession.
  */
 /**
- * How long to wait for CONNECTED before stepping down. go2rtc-direct exists because it is fast
- * (~1-2 s to first frame); a longer wait would sit on the "Connecting…" overlay instead of trying
- * the tier below, and every failure here also costs a global verdict via [Go2rtcHealth].
+ * Per-open bookkeeping for the wake retries — see `attempt` in [Go2rtcPlayer]. The connect
+ * watchdogs themselves ([CONNECT_WATCHDOG_MS] awake, a share of [WAKE_BUDGET_MS] asleep) live in
+ * core/logic/Go2rtcWake.kt with their web twin.
  */
-private const val WATCHDOG_MS = 8_000L
-
-/**
- * The watchdog for a camera that has to be WOKEN first. A battery Reolink behind a Home Hub takes
- * up to ~20 s to wake before its RTSP even starts (Reolink's own figure — they advise a ≥20 s
- * request timeout), and go2rtc only opens the source when we ask. 8 s would step down every time
- * and never show the picture. Mirrors `WAKE_TIMEOUT_MS` in the web `Go2rtcPlayer`.
- */
-private const val WAKE_WATCHDOG_MS = 30_000L
+private class Go2rtcAttempt {
+    var startedAt = 0L
+    var retryPending = false
+    var retryJob: Job? = null
+}
 
 private class Go2rtcSession(
     private val scope: CoroutineScope,
@@ -209,8 +256,12 @@ private class Go2rtcSession(
     initialMuted: Boolean,
     /** See the composable's `wakeable` — longer watchdog, and never a global verdict. */
     private val wakeable: Boolean,
+    /** How long to wait for CONNECTED before stepping down ([go2rtcWatchdogMs]). */
+    private val watchdogMs: Long,
     onFirstFrame: () -> Unit,
     private val onFail: () -> Unit,
+    /** go2rtc replied `{"type":"error"}`: it is up, but could not open this camera's source. */
+    private val onSourceError: () -> Unit,
 ) {
     /** Per-session "video is actually arriving" signal — see [FirstFrameSink]. */
     private val firstFrame = FirstFrameSink(onFirstFrame)
@@ -231,6 +282,9 @@ private class Go2rtcSession(
     private var watchdog: Job? = null
     private val lock = Any()
     private var closed = false
+
+    /** The outcome (failure or source error) has been reported — at most one per session. */
+    private var finished = false
 
     // The received audio track, gated by the chrome's MuteButton. Volatile: the
     // track lands on org.webrtc's worker thread, setMuted comes from composition.
@@ -257,9 +311,9 @@ private class Go2rtcSession(
 
         // go2rtc-direct is meant to be fast; step down rather than hang. The "Connecting…"
         // overlay covers the wait; a stale stream / unreachable :8555 media both land here. A
-        // camera that has to wake first gets the longer leash — see WAKE_WATCHDOG_MS.
+        // camera that has to wake first gets the longer leash — see go2rtcWatchdogMs.
         watchdog = scope.launch {
-            delay(if (wakeable) WAKE_WATCHDOG_MS else WATCHDOG_MS)
+            delay(watchdogMs)
             if (peer?.connectionState() != PeerConnection.PeerConnectionState.CONNECTED) fail()
         }
     }
@@ -304,6 +358,10 @@ private class Go2rtcSession(
                     val cand = msg.optString("value")
                     if (cand.isNotEmpty()) pc.addIceCandidate(IceCandidate("0", 0, cand))
                 }
+                // go2rtc could not open the source (e.g. the hub's `454 Session Not Found` while a
+                // battery camera wakes). No answer will follow. This used to be ignored, which left
+                // the overlay up until the watchdog — 30 s on a battery camera.
+                "error" -> sourceError()
             }
         }
 
@@ -379,13 +437,32 @@ private class Go2rtcSession(
      * runs from onDispose on the main thread.
      */
     private fun fail(global: Boolean = true) {
-        val report = synchronized(lock) { !closed }
+        val report = synchronized(lock) {
+            val first = !closed && !finished
+            finished = true
+            first
+        }
         if (!report) return
         // A camera that never woke up (`wakeable`) is a fact about one sleeping camera, not about
         // go2rtc's media path — it must never condemn the tier for every other camera.
         if (global && !wakeable) Go2rtcHealth.report(false)
         watchdog?.cancel()
         scope.launch { onFail() }
+    }
+
+    /**
+     * go2rtc reported the source unopenable. Not a [fail]: go2rtc just answered, so its signalling
+     * is fine, and the decision (retry a waking camera, or step down) belongs to the composable.
+     */
+    private fun sourceError() {
+        val report = synchronized(lock) {
+            val first = !closed && !finished
+            finished = true
+            first
+        }
+        if (!report) return
+        watchdog?.cancel()
+        scope.launch { onSourceError() }
     }
 
     fun close() {

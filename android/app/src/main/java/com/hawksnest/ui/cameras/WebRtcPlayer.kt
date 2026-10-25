@@ -3,6 +3,7 @@ package com.hawksnest.ui.cameras
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -11,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -108,6 +110,8 @@ fun WebRtcPlayer(
             //
             // FIT pillarboxes instead. Black bars beside the picture are the correct answer for a
             // security camera: seeing all of the frame beats filling all of the glass.
+            // FIT only takes effect when the view is NOT measured EXACTLY — see the
+            // wrapContentSize on the AndroidView below, which is the other half of this.
             setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
         }
     }
@@ -168,7 +172,18 @@ fun WebRtcPlayer(
     }
 
     Box(modifier) {
-        AndroidView(factory = { renderer }, modifier = Modifier.fillMaxSize())
+        // wrapContentSize, NOT a bare fillMaxSize: SurfaceViewRenderer honours SCALE_ASPECT_FIT
+        // only in onMeasure, and only for an AT_MOST spec. Handed EXACTLY (fillMaxSize alone),
+        // it takes the whole box and its EglRenderer then CROPS the frame to the box's shape
+        // (setLayoutAspectRatio in onLayout). Harmless while the box had the picture's shape;
+        // since the stage became the whole middle of the screen it centre-cropped every WebRTC
+        // picture — a hub panorama lost most of its width and 16:9 looked "zoomed in" until PiP
+        // (whose window has the video's shape) showed the whole frame. AT_MOST lets the view
+        // size itself to the fitted picture, centred, so the black bars are real.
+        AndroidView(
+            factory = { renderer },
+            modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.Center),
+        )
         if (connecting.value) {
             ConnectingOverlay(label = if (wakeable) "Waking camera…" else "Connecting…", poster = poster)
         }

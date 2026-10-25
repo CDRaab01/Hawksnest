@@ -83,10 +83,12 @@ This file adds the things that are easy to get wrong and the suite context.
   PIR fires (the hub wakes a battery camera on any RTSP request and force-sleeps it after 5 min,
   so nothing may hold their stream). `isBatteryCamera` (`sensor.<base>_battery` exists — same
   rule as the HA snapshot-policy automation; Kotlin `LogicalCamera.isBattery`) gates the four
-  places that assumed always-on: live-tier watchdogs (30 s + "Waking camera…"), the go2rtc session
-  breaker (a slow wake reports nothing global), the snapshot tile (`idle` = **Asleep**, no fetch,
-  badge from the PIR's `last_changed`), and the scrub (`vodRangeFor` bounds the VOD to the
-  footage island under the playhead; a gap is "No saved recording", never Retry). Don't give the
+  places that assumed always-on: live-tier watchdogs (30 s wake budget + "Waking camera…", with
+  go2rtc's `{"type":"error"}` — the hub's 454 mid-wake — retried every second,
+  `lib/go2rtcWake.ts`), the go2rtc session breaker (a slow wake reports nothing global), the
+  snapshot tile (`idle` = **Asleep**, no fetch, badge from the PIR's `last_changed`), and the
+  scrub (`vodRangeFor` bounds the VOD to the footage island under the playhead; a gap is "No
+  saved recording", never Retry). Don't give the
   Android RTSP-direct tier the hub's IP — `ReolinkRtsp.kt` hardcodes channel `01`. **Known
   divergence, deliberate, web-only (2026-09-13):** the web WebRTC players give a `wakeable`
   camera's receivers a 500 ms playout buffer (`lib/playoutBuffer.ts`) because the hub's Wi-Fi
