@@ -172,9 +172,20 @@ lands on `_motion_2`). Four consumers had assumed always-on, and each is now gat
 `LogicalCamera.isBattery`; the same heuristic the HA `hawksnest_ring_snapshot_policy` uses; fails
 closed):
 - **Live tiers wait for the wake and say so.** `LivePlayer` passes `wakeable` down; `Go2rtcPlayer`
-  widens its connect watchdog 8 s → 30 s (`WAKE_TIMEOUT_MS` ⇄ `WAKE_WATCHDOG_MS`), `WebRtcPlayer`
-  20 s → 30 s, and the overlay reads "Waking camera…". An 8 s watchdog would step down every time
-  and never show the picture.
+  gives the open a 30 s wake budget instead of the 8 s connect watchdog, `WebRtcPlayer` 20 s → 30 s,
+  and the overlay reads "Waking camera…". An 8 s watchdog would step down every time and never show
+  the picture.
+- **go2rtc's `{"type":"error"}` is handled, and a waking camera is asked again** (2026-10-25,
+  `lib/go2rtcWake.ts` ⇄ `core/logic/Go2rtcWake.kt`, both players). While the hub wakes a camera it
+  answers the first SETUP with `454 Session Not Found`; go2rtc does not retry a source, so it sends
+  the client an error and gives up on that offer. Both players ignored that message type, so every
+  cold open sat on "Waking camera…" for the full 30 s watchdog and then stepped down to a slower
+  tier just as the camera finished waking — the main reason the Reolink app (which simply asks
+  again) felt so much faster. Now: a `wakeable` camera re-offers every `WAKE_RETRY_MS` (1 s) until
+  `WAKE_BUDGET_MS` (30 s from the open's FIRST attempt — a retry keeps the start, a new src or a
+  return from the background resets it); each attempt's watchdog is what is left of that budget,
+  floored at the 8 s awake leash. An always-on camera steps down at once. Neither is a session
+  breaker verdict: go2rtc just answered, so its signalling and media path are not in question.
 - **Live tiers buffer the bursty radio path — on the web only.** The hub's Wi-Fi hop delivers a
   battery camera's frames in clumps (measured 2026-09-13: ~40 % of frames < 10 ms apart, then
   2–6 s gaps), and WebRTC renders each frame as it lands, so the picture blinked and froze.
@@ -652,6 +663,17 @@ asymmetry is the wall itself: web gets a `col-span` from CSS grid, while Android
 `Column` of 2-up `Row`s with no `GridItemSpan` to reach for, so `wallRows` (Kotlin-only, by design,
 unit-tested including the "behaves exactly like `chunked(2)` when nothing is wide" guard) packs a
 panorama into its own full-width row.
+
+**The WebRTC renderers must not be measured EXACTLY** (2026-10-25). `SurfaceViewRenderer` applies
+`SCALE_ASPECT_FIT` only in `onMeasure`, and `RendererCommon.VideoLayoutMeasure` yields to an EXACTLY
+spec; `onLayout` then hands the view's own shape to `EglRenderer.setLayoutAspectRatio`, which
+**crops** the frame to it. A bare `fillMaxSize()` on the `AndroidView` is EXACTLY, so once the
+stage became the whole middle of the screen (taller than the picture), every go2rtc / HA WebRTC
+picture was centre-cropped: a hub panorama lost most of its width, and a 16:9 camera looked
+"zoomed in" — until PiP, whose window has the video's shape, showed the whole frame. Both players
+now use `fillMaxSize().wrapContentSize()` (AT_MOST), so the view sizes itself to the fitted picture
+and the bars are real. The RTSP/HLS/VOD tiers (`PlayerView`) were never affected — it letterboxes in
+its own `AspectRatioFrameLayout`.
 
 **The 24/7 continuous track is a second, separate source** (`/footage`, `lib/ringFootage.ts`,
 mirrored in `core/logic/RingFootage.kt`). `video_search` returns only discrete *events*, so before

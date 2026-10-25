@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { go2rtcWsUrl, reportGo2rtcMedia } from "../lib/go2rtc";
 import { applyPlayoutBuffer, BATTERY_PLAYOUT_BUFFER_MS } from "../lib/playoutBuffer";
+import { go2rtcWatchdogMs, sourceErrorRetryDelayMs } from "../lib/go2rtcWake";
 import { useMediaAspect } from "../lib/mediaAspect";
 
 /**
@@ -28,18 +29,9 @@ const DISCONNECT_GRACE_MS = 4_000;
  * other camera its best transport. Mirrors `WebRtcPlayer`'s recvonly
  * negotiation + "Connecting…" overlay.
  */
-/**
- * Connect watchdog for a camera that is awake: go2rtc-direct exists because it is fast, so a
- * session that hasn't connected in 8 s is a dead path, not a slow one.
- */
-const CONNECT_TIMEOUT_MS = 8_000;
-/**
- * …and for a camera that has to be WOKEN first. A battery Reolink behind a Home Hub takes up to
- * ~20 s to wake before its RTSP even starts (Reolink's own figure; they advise a ≥20 s request
- * timeout), and go2rtc only opens the source when we ask. 8 s would step down every time and
- * never show the picture.
- */
-const WAKE_TIMEOUT_MS = 30_000;
+// Connect watchdogs: 8 s for a camera that is awake (go2rtc-direct exists because it is fast), a
+// shared 30 s wake budget for one that sleeps. Both live in `lib/go2rtcWake.ts` with the retry
+// rule for go2rtc's `{"type":"error"}` answer, ported 1:1 to Kotlin.
 
 export function Go2rtcPlayer({
   src,
@@ -54,8 +46,9 @@ export function Go2rtcPlayer({
    *  DOM property (React only applies the `muted` attribute at mount). */
   muted?: boolean;
   /**
-   * The camera sleeps and must be woken to stream (`isBatteryCamera`). Widens the connect
-   * watchdog to {@link WAKE_TIMEOUT_MS}, labels the overlay honestly, gives the receivers a
+   * The camera sleeps and must be woken to stream (`isBatteryCamera`). Gives it the 30 s wake
+   * budget and re-asks go2rtc every second while the hub is still waking it (`lib/go2rtcWake.ts`),
+   * labels the overlay honestly, gives the receivers a
    * half-second playout buffer against the hub's bursty Wi-Fi (`lib/playoutBuffer.ts`), and —
    * most importantly — keeps a slow or failed wake from tripping the SESSION breaker: one
    * battery camera taking its time says nothing about whether go2rtc's media path works for the
@@ -70,6 +63,10 @@ export function Go2rtcPlayer({
   const onFailRef = useRef(onFail);
   onFailRef.current = onFail;
   const [connecting, setConnecting] = useState(true);
+  // Wake retries (lib/go2rtcWake.ts). The budget runs from the FIRST attempt of an open: a retry
+  // keeps `startedAt`, anything else that (re)starts the effect — a new src — begins a fresh one.
+  const [retry, setRetry] = useState(0);
+  const wakeRef = useRef({ startedAt: 0, retryPending: false });
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.muted = muted;
@@ -80,6 +77,12 @@ export function Go2rtcPlayer({
       onFailRef.current();
       return;
     }
+
+    const now = Date.now();
+    const wake = wakeRef.current;
+    if (!wake.retryPending) wake.startedAt = now;
+    wake.retryPending = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     let cancelled = false;
     let pc: RTCPeerConnection | null = new RTCPeerConnection();
@@ -108,6 +111,26 @@ export function Go2rtcPlayer({
       // camera that never woke up (`wakeable`): that is a fact about one sleeping camera.
       if (!everConnected && !wakeable) reportGo2rtcMedia(false);
       onFailRef.current();
+    };
+
+    // go2rtc answered `{"type":"error"}`: it is up, but could not open this camera's source — for
+    // a battery camera, typically the hub's `454 Session Not Found` while it wakes. No answer will
+    // follow. This used to be ignored, leaving "Waking camera…" up until the 30 s watchdog. Not a
+    // `fail()`: go2rtc just answered, so this is never a verdict on its media path.
+    const sourceError = () => {
+      if (cancelled) return;
+      cancelled = true;
+      clearRecovery();
+      clearTimeout(watchdog);
+      const wait = sourceErrorRetryDelayMs(wakeable, Date.now() - wake.startedAt);
+      if (wait === null) {
+        onFailRef.current();
+        return;
+      }
+      retryTimer = setTimeout(() => {
+        wake.retryPending = true;
+        setRetry((n) => n + 1);
+      }, wait);
     };
 
     const video = pc.addTransceiver("video", { direction: "recvonly" });
@@ -164,6 +187,8 @@ export function Go2rtcPlayer({
         void pc.setRemoteDescription({ type: "answer", sdp: msg.value }).catch(fail);
       } else if (msg.type === "webrtc/candidate" && msg.value) {
         void pc.addIceCandidate({ candidate: msg.value, sdpMid: "0" }).catch(() => {});
+      } else if (msg.type === "error") {
+        sourceError();
       }
     };
     ws.onerror = fail;
@@ -179,24 +204,26 @@ export function Go2rtcPlayer({
 
     // Watchdog: go2rtc-direct is meant to be fast; if it hasn't connected in 8s,
     // step down rather than hang (covers unreachable media / a stale stream). A camera that
-    // has to wake first gets the longer leash — see WAKE_TIMEOUT_MS.
+    // has to wake first gets what is left of its wake budget — see go2rtcWatchdogMs.
     const watchdog = setTimeout(
       () => {
         if (pc && pc.connectionState !== "connected") fail();
       },
-      wakeable ? WAKE_TIMEOUT_MS : CONNECT_TIMEOUT_MS,
+      go2rtcWatchdogMs(wakeable, now - wake.startedAt),
     );
 
     setConnecting(true);
     return () => {
       cancelled = true;
       clearTimeout(watchdog);
+      // A retry scheduled for THIS attempt must not fire into the next src's.
+      if (retryTimer !== null) clearTimeout(retryTimer);
       clearRecovery();
       ws.close();
       pc?.close();
       pc = null;
     };
-  }, [src, wakeable]);
+  }, [src, wakeable, retry]);
 
   return (
     <div className="relative">
