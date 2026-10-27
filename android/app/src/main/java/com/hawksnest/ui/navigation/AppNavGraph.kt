@@ -32,6 +32,7 @@ import com.hawksnest.ui.automations.AutomationEditScreen
 import com.hawksnest.ui.automations.AutomationsScreen
 import com.hawksnest.ui.devices.DevicesScreen
 import com.hawksnest.ui.entity.EntityDetailScreen
+import com.hawksnest.ui.everyday.EverydayScreen
 import com.hawksnest.ui.history.HistoryScreen
 import com.hawksnest.ui.home.HomeScreen
 import com.hawksnest.ui.rooms.RoomsScreen
@@ -170,6 +171,7 @@ fun AppNavGraph(
                             }
                         },
                         onOpenSettings = { navController.navigate(Screen.Settings.route) },
+                        onOpenEveryday = { navController.navigate(Screen.Everyday.route) },
                     )
                 }
                 composable(Screen.Devices.route) {
@@ -185,6 +187,9 @@ fun AppNavGraph(
                     // Settings can be the only thing on the stack above Home (a widget sends the
                     // owner here to fix a token), so Back always has somewhere to go.
                     SettingsScreen(onBack = { if (!navController.popBackStack()) goHome() })
+                }
+                composable(Screen.Everyday.route) {
+                    EverydayScreen(onBack = { if (!navController.popBackStack()) goHome() })
                 }
                 composable(Screen.Automations.route) {
                     AutomationsScreen(

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -102,6 +103,7 @@ private val ARM_ICON: Map<String, ImageVector> = mapOf(
 fun HomeScreen(
     onOpenRooms: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    onOpenEveryday: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.uiState.collectAsState()
@@ -224,6 +226,13 @@ fun HomeScreen(
                 modifier = Modifier.weight(1f),
             )
             ConnectionPill(ui.status)
+            IconButton(onClick = onOpenEveryday) {
+                Icon(
+                    Icons.Filled.Movie,
+                    contentDescription = "One second a day",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             IconButton(onClick = onOpenSettings) {
                 Icon(
                     Icons.Filled.Settings,

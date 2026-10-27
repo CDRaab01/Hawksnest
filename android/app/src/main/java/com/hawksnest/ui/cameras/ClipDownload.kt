@@ -46,17 +46,22 @@ private val EXPORT_CLIENT =
  * very long export dies if the process does — bounded by the 10-minute cap, and the caller runs
  * this in `viewModelScope` so it survives leaving the screen.
  *
- * [url] must already be signed: the proxy 401s otherwise, and this deliberately sends no
- * `Authorization` header.
+ * [url] must already be signed (the proxy 401s otherwise), unless [authToken] is given for a
+ * location gated on the HA token instead, the everyday reel.
  */
 suspend fun saveClipExport(
     context: Context,
     url: String,
     fileName: String,
+    /** HA token for a proxy location that gates on it (the everyday reel); null for signed URLs. */
+    authToken: String? = null,
 ): ClipSaveResult =
     withContext(Dispatchers.IO) {
         runCatching {
-            EXPORT_CLIENT.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+            val request = Request.Builder().url(url).apply {
+                if (authToken != null) header("Authorization", "Bearer $authToken")
+            }.build()
+            EXPORT_CLIENT.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     // Frigate answers "no recordings for that range" as a 400 with a JSON body.
                     // Reading it is what turns a dead-end failure into a sentence — the Android

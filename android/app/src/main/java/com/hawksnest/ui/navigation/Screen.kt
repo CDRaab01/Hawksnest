@@ -17,6 +17,8 @@ sealed class Screen(val route: String) {
     data object History : Screen("history")
     data object Settings : Screen("settings")
     data object Automations : Screen("automations")
+    /** "One second a day" review (the `everyday` service), opened from Home's header. */
+    data object Everyday : Screen("everyday")
 
     data object AutomationEdit : Screen("automations/{id}") {
         /** Pass "new" to start a fresh automation, or an existing HA config id to edit. */

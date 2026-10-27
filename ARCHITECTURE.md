@@ -704,8 +704,13 @@ never overwrites on a rescan. Two things differ from `/ring-timeline/`. **The lo
 the HA-token `auth_request`**, because it is interior footage of the family and accepts writes.
 **Media is fetched with the token and played as a blob URL**, because `<video>`/`<img>` can't send
 `Authorization` and a token must never go in a URL. Clips are ~0.5 MB; the reel is fetched only
-on an explicit Download. There is no Android twin. This is a deliberate divergence: it is a
-nightly-review surface, not a control.
+on an explicit Download. **Android twin:** `core/logic/Everyday.kt` (types and helpers ported
+1:1, with `EverydayTest`), `core/net/EverydayClient.kt` and `ui/everyday/`, opened from the film
+icon in Home's header. Media there carries the token as an ExoPlayer/Coil request header instead
+of using a blob, and the reel streams to `Movies/Hawksnest` via `saveClipExport(authToken=)`.
+With no saved token, Android runs on `EverydayFixture`: sample days that play the bundled
+`camera_loop` clip, with picks held in memory and a "SAMPLE DATA" badge. Web has no demo
+equivalent; it asks you to connect.
 
 ## 2. Android app (`android/`, package `com.hawksnest`)
 
