@@ -200,7 +200,7 @@ export function EverydayScreen() {
       const url = await fetchMediaUrl(token, r.url);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `everyday-${r.year}.mp4`;
+      a.download = `everyday-${r.year}${r.kind === "edit" ? "-edit" : ""}.mp4`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e) {
@@ -316,9 +316,12 @@ export function EverydayScreen() {
         <div className="space-y-md">
           <SectionHeader label="Reels" channel="streak" />
           {reels.map((r) => (
-            <PanelCard key={r.year} className="flex items-center gap-md p-lg">
+            <PanelCard key={r.url} className="flex items-center gap-md p-lg">
               <span className="font-display text-title text-ink">{r.year}</span>
-              <span className="text-body text-ink-dim">{r.days} days</span>
+              <span className="text-body text-ink-dim">
+                {r.label ? `${r.label} · ` : ""}
+                {r.days} days
+              </span>
               <PulseButton
                 variant="tonal"
                 channel="streak"

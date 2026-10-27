@@ -54,7 +54,8 @@ data class EverydaySummary(
     val pick: EverydayCandidate?,
 )
 
-data class EverydayReel(val year: Int, val days: Int, val url: String)
+/** [label] is the service's "Edited" / "Every pick"; [edit] marks the watchable cut. */
+data class EverydayReel(val year: Int, val days: Int, val url: String, val label: String = "", val edit: Boolean = false)
 
 // ── parsing (lenient: a missing/odd field degrades, never throws) ───────────────────────────
 
@@ -113,6 +114,8 @@ fun parseEverydayReels(j: JsonObject): List<EverydayReel> =
             year = o.num("year")?.toInt() ?: return@mapNotNull null,
             days = o.num("days")?.toInt() ?: 0,
             url = o.str("url") ?: return@mapNotNull null,
+            label = o.str("label") ?: "",
+            edit = o.str("kind") == "edit",
         )
     } ?: emptyList()
 
@@ -224,5 +227,10 @@ object EverydayFixture {
     }
 
     fun reels(days: List<EverydayDay>): List<EverydayReel> =
-        days.groupBy { it.date.take(4).toInt() }.map { (y, d) -> EverydayReel(y, d.size, DEMO_CLIP_URI) }
+        days.groupBy { it.date.take(4).toInt() }.flatMap { (y, d) ->
+            listOf(
+                EverydayReel(y, d.size, DEMO_CLIP_URI, "Edited", edit = true),
+                EverydayReel(y, d.size, DEMO_CLIP_URI, "Every pick"),
+            )
+        }
 }

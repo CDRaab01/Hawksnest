@@ -77,9 +77,18 @@ class EverydayTest {
         assertEquals("a", day.pickCandidate()?.eventId)
 
         val reels = parseEverydayReels(
-            Json.parseToJsonElement("""{"reels":[{"year":2026,"days":300,"url":"media/reel/everyday-2026.mp4"}]}""") as JsonObject,
+            Json.parseToJsonElement(
+                """{"reels":[{"year":2026,"kind":"edit","label":"Edited","days":300,"url":"media/reel/everyday-2026-edit.mp4"},
+                   {"year":2026,"days":300,"url":"media/reel/everyday-2026.mp4"}]}""",
+            ) as JsonObject,
         )
-        assertEquals(listOf(EverydayReel(2026, 300, "media/reel/everyday-2026.mp4")), reels)
+        assertEquals(
+            listOf(
+                EverydayReel(2026, 300, "media/reel/everyday-2026-edit.mp4", "Edited", edit = true),
+                EverydayReel(2026, 300, "media/reel/everyday-2026.mp4"),
+            ),
+            reels,
+        )
     }
 
     @Test
@@ -100,6 +109,6 @@ class EverydayTest {
         }
         assertTrue(days.any { it.manual }, "shows the manual-pick state too")
         assertEquals(days.size, everydayStreak(EverydayFixture.summaries(days)))
-        assertEquals(listOf(2026), EverydayFixture.reels(days).map { it.year })
+        assertEquals(listOf(true, false), EverydayFixture.reels(days).map { it.edit })
     }
 }

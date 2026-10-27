@@ -169,7 +169,7 @@ fun EverydayContent(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("${r.year}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                         Text(
-                            "  ${r.days} days",
+                            "  " + (if (r.label.isNotBlank()) "${r.label} · " else "") + "${r.days} days",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),

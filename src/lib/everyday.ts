@@ -50,6 +50,9 @@ export interface EverydaySummary {
 
 export interface EverydayReel {
   year: number;
+  /** `edit` = the watchable cut (monthly anchor runs + crossfaded moments); `raw` = every pick. */
+  kind?: "edit" | "raw";
+  label?: string;
   days: number;
   url: string;
   updatedAt: number;

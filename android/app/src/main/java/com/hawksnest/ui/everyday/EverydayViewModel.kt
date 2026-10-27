@@ -150,7 +150,7 @@ class EverydayViewModel @Inject constructor(
             val result = com.hawksnest.ui.cameras.saveClipExport(
                 context.applicationContext,
                 client.mediaUrl(s.baseUrl, reel.url),
-                "everyday-${reel.year}.mp4",
+                "everyday-${reel.year}${if (reel.edit) "-edit" else ""}.mp4",
                 authToken = s.token,
             )
             val msg = when (result) {

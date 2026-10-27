@@ -59,7 +59,12 @@ beforeEach(() => {
           days: [{ date: "2026-10-26", status: "final", manual: current.manual, candidateCount: 2, pick: cand(current.pick, "x", 0) }],
         });
       if (url === "/everyday/api/days/2026-10-26") return json(current);
-      if (url === "/everyday/api/reel") return json({ reels: [{ year: 2026, days: 1, url: "media/reel/everyday-2026.mp4", updatedAt: 0 }] });
+      if (url === "/everyday/api/reel") return json({
+          reels: [
+            { year: 2026, kind: "edit", label: "Edited", days: 1, url: "media/reel/everyday-2026-edit.mp4", updatedAt: 0 },
+            { year: 2026, kind: "raw", label: "Every pick", days: 1, url: "media/reel/everyday-2026.mp4", updatedAt: 0 },
+          ],
+        });
       if (url.startsWith("/everyday/media/")) return new Response(new Blob(["x"]), { status: 200 });
       return new Response("", { status: 404 });
     }),
@@ -87,7 +92,8 @@ describe("EverydayScreen", () => {
     renderScreen();
     expect(await screen.findByText("Auto pick")).toBeInTheDocument();
     expect(screen.getByText("Two kids building a fort")).toBeInTheDocument();
-    expect(screen.getByText("2026")).toBeInTheDocument(); // reel row
+    expect(screen.getAllByText("2026")).toHaveLength(2); // edited + every-pick reel rows
+    expect(screen.getByText(/Edited · 1 days/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /Preview Kitchen/ }));
     await userEvent.click(await screen.findByRole("button", { name: "Use this one" }));

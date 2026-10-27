@@ -698,7 +698,9 @@ lives.
 `screens/EverydayScreen.tsx` + `lib/everyday.ts` are a review UI over the **`everyday` service**
 (sibling repo `hawksnest-automation`, nginx `/everyday/`). That service owns all of the logic: each
 night it scores the day's Frigate events, has the local LM Studio model rate a shortlist, cuts
-~1.5 s clips from the continuous recordings, auto-picks one, and appends it to a yearly reel.
+~2.5 s clips from the continuous recordings (cropped to fill 16:9 around the subject), auto-picks
+one, cuts a daily same-camera anchor clip, and builds two yearly reels: every pick, and an edited
+cut. The reel rows show the service's `label`.
 Hawksnest only lists the days, plays the candidates, and POSTs a manual pick, which the service
 never overwrites on a rescan. Two things differ from `/ring-timeline/`. **The location sits behind
 the HA-token `auth_request`**, because it is interior footage of the family and accepts writes.
