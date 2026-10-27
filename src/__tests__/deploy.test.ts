@@ -72,6 +72,18 @@ describe("nginx.conf — same-origin HA reverse proxy", () => {
     expect(nginx).toContain("ring-timeline.home-automation.svc.cluster.local:8080");
   });
 
+  it("proxies /everyday/ behind the HA-token auth_request, token stripped", () => {
+    // Interior-camera footage of the family (nursery included) and a write endpoint (the pick):
+    // unlike /ring-timeline/, an unauthenticated tailnet request must not get in.
+    const start = nginx.indexOf("location /everyday/");
+    expect(start).toBeGreaterThan(-1);
+    const block = nginx.slice(start, nginx.indexOf("}\n", nginx.indexOf("proxy_pass", start)) + 1);
+    expect(block).toMatch(/if \(\$http_authorization = ""\)/);
+    expect(block).toMatch(/auth_request\s+\/_hawksnest_ha_auth;/);
+    expect(block).toContain("everyday.home-automation.svc.cluster.local:8080");
+    expect(block).toMatch(/proxy_set_header\s+Authorization\s+"";/);
+  });
+
   it("proxies /go2rtc/ for signalling, and handles both WS and plain HTTP", () => {
     // The top live tier (go2rtc-direct WebRTC) and two-way Talk both negotiate
     // through here. Media rides :8555 straight to go2rtc and never touches nginx,

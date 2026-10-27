@@ -693,6 +693,27 @@ whichever expires first drives one shared refresh; the once-per-source error ref
 segment for the continuous track, since the user can sit on one segment longer than a signature
 lives.
 
+### One second a day (`/everyday`, web-only)
+
+`screens/EverydayScreen.tsx` + `lib/everyday.ts` are a review UI over the **`everyday` service**
+(sibling repo `hawksnest-automation`, nginx `/everyday/`). That service owns all of the logic: each
+night it scores the day's Frigate events, has the local LM Studio model rate a shortlist, cuts
+~2.5 s clips from the continuous recordings (cropped to fill 16:9 around the subject), auto-picks
+one, cuts a daily same-camera anchor clip, and builds two yearly reels: every pick, and an edited
+cut. The reel rows show the service's `label`.
+Hawksnest only lists the days, plays the candidates, and POSTs a manual pick, which the service
+never overwrites on a rescan. Two things differ from `/ring-timeline/`. **The location sits behind
+the HA-token `auth_request`**, because it is interior footage of the family and accepts writes.
+**Media is fetched with the token and played as a blob URL**, because `<video>`/`<img>` can't send
+`Authorization` and a token must never go in a URL. Clips are ~0.5 MB; the reel is fetched only
+on an explicit Download. **Android twin:** `core/logic/Everyday.kt` (types and helpers ported
+1:1, with `EverydayTest`), `core/net/EverydayClient.kt` and `ui/everyday/`, opened from the film
+icon in Home's header. Media there carries the token as an ExoPlayer/Coil request header instead
+of using a blob, and the reel streams to `Movies/Hawksnest` via `saveClipExport(authToken=)`.
+With no saved token, Android runs on `EverydayFixture`: sample days that play the bundled
+`camera_loop` clip, with picks held in memory and a "SAMPLE DATA" badge. Web has no demo
+equivalent; it asks you to connect.
+
 ## 2. Android app (`android/`, package `com.hawksnest`)
 
 Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Full guide:

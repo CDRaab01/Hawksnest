@@ -103,6 +103,10 @@ How each transport reaches HA through this one nginx origin:
 - **`/ring-timeline/`** — the sidecar `ring-timeline` service (sibling repo `hawksnest-automation`),
   which serves Ring's own `video_search` timeline: real event times and pre-signed mp4 URLs, which
   HA exposes no other way. Note it is **not** under `/api/`.
+- **`/everyday/`** — the sidecar `everyday` service (sibling repo `hawksnest-automation`): the
+  daily "one second a day" picker. **HA-token `auth_request`-gated** (interior footage, accepts
+  writes); `Authorization` is stripped before proxying. Its Service must exist before this pod
+  starts, since nginx resolves the upstream at boot, so deploy the automation repo first.
 - **`/go2rtc/`** — signalling for the dedicated go2rtc instance, used by the two-way Talk path.
   Media rides `:8555` and bypasses nginx.
 
