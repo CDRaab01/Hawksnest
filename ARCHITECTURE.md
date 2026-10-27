@@ -693,6 +693,20 @@ whichever expires first drives one shared refresh; the once-per-source error ref
 segment for the continuous track, since the user can sit on one segment longer than a signature
 lives.
 
+### One second a day (`/everyday`, web-only)
+
+`screens/EverydayScreen.tsx` + `lib/everyday.ts` are a review UI over the **`everyday` service**
+(sibling repo `hawksnest-automation`, nginx `/everyday/`). That service owns all of the logic: each
+night it scores the day's Frigate events, has the local LM Studio model rate a shortlist, cuts
+~1.5 s clips from the continuous recordings, auto-picks one, and appends it to a yearly reel.
+Hawksnest only lists the days, plays the candidates, and POSTs a manual pick, which the service
+never overwrites on a rescan. Two things differ from `/ring-timeline/`. **The location sits behind
+the HA-token `auth_request`**, because it is interior footage of the family and accepts writes.
+**Media is fetched with the token and played as a blob URL**, because `<video>`/`<img>` can't send
+`Authorization` and a token must never go in a URL. Clips are ~0.5 MB; the reel is fetched only
+on an explicit Download. There is no Android twin. This is a deliberate divergence: it is a
+nightly-review surface, not a control.
+
 ## 2. Android app (`android/`, package `com.hawksnest`)
 
 Kotlin/Compose, talks to HA directly over Tailscale with a long-lived token. Full guide:

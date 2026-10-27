@@ -10,6 +10,7 @@ import { DevicesScreen } from "./screens/DevicesScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
 import { AutomationsScreen } from "./screens/AutomationsScreen";
 import { AutomationEditScreen } from "./screens/AutomationEditScreen";
+import { EverydayScreen } from "./screens/EverydayScreen";
 import { TopNav } from "./components/TopNav";
 import { BottomBar } from "./components/BottomBar";
 import { SnapshotBucketProvider } from "./components/SnapshotBucket";
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="/automations" element={<AutomationsScreen />} />
             <Route path="/automations/:id" element={<AutomationEditScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />
+            <Route path="/everyday" element={<EverydayScreen />} />
           </Routes>
         </main>
         <BottomBar />

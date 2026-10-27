@@ -1,5 +1,5 @@
 import { NavLink, Link } from "react-router-dom";
-import { Settings as SettingsIcon, Shield } from "lucide-react";
+import { Film, Settings as SettingsIcon, Shield } from "lucide-react";
 import { ConnectionPill } from "./ConnectionPill";
 import { ArmedPill } from "./ArmedPill";
 
@@ -19,6 +19,18 @@ export function TopNav() {
         <div className="ml-auto flex shrink-0 items-center gap-sm">
           <ArmedPill />
           <ConnectionPill />
+          <NavLink
+            to="/everyday"
+            aria-label="One second a day"
+            className={({ isActive }) =>
+              [
+                "inline-flex h-9 w-9 items-center justify-center rounded-sm border border-hairline transition-colors duration-fast",
+                isActive ? "text-effort" : "text-ink-dim hover:text-ink",
+              ].join(" ")
+            }
+          >
+            <Film size={18} />
+          </NavLink>
           <NavLink
             to="/settings"
             aria-label="Settings"
