@@ -17,6 +17,9 @@ import com.hawksnest.core.logic.LogEvent
 import com.hawksnest.core.logic.normalizeLogbook
 import com.hawksnest.core.logic.normalizeFrigateEvents
 import com.hawksnest.core.logic.FootageSpan
+import com.hawksnest.core.logic.FootageCacheEntry
+import com.hawksnest.core.logic.applyFootageFetch
+import com.hawksnest.core.logic.planFootageFetch
 import com.hawksnest.core.logic.parseFrigateWsEvents
 import com.hawksnest.core.logic.parseFrigateWsRecordings
 import com.hawksnest.core.logic.recordingUrlAt as buildRecordingUrl
@@ -246,18 +249,32 @@ class HaSource(
      */
     override suspend fun fetchCameraFootage(camera: String, startMs: Long, endMs: Long): List<FootageSpan> {
         val c = conn ?: return emptyList()
-        return try {
+        // Topped up incrementally per camera (core/logic/FootageCache.kt): a full 3-day lane is
+        // ~725 KB and only its live-edge tail changes between opens.
+        val now = System.currentTimeMillis()
+        val cached = footageCache[camera]
+        val plan = planFootageFetch(cached, startMs, endMs, now)
+        val fresh = try {
             val frame = c.request("frigate/recordings/get") {
                 put("instance_id", frigateInstanceId(camera))
                 put("camera", camera)
-                put("after", startMs / 1000)
+                put("after", plan.fromMs / 1000)
                 put("before", endMs / 1000)
             }
             parseFrigateWsRecordings(frame["result"])
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (_: Exception) {
-            emptyList()
+            // A failed top-up still has the cache to show; a failed full fetch is [], as before.
+            return if (plan.topUp && cached != null) cached.spans.filter { it.endMs > startMs } else emptyList()
         }
+        val out = applyFootageFetch(cached, plan, fresh, startMs, endMs, now)
+        out.entry?.let { footageCache[camera] = it }
+        return out.spans
     }
+
+    /** Per-camera footage lane (see [fetchCameraFootage]); lives and dies with this source. */
+    private val footageCache = java.util.concurrent.ConcurrentHashMap<String, FootageCacheEntry>()
 
     /**
      * The Frigate `instance_id` the websocket query commands require — the same `client_id` the

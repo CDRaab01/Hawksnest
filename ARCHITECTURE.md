@@ -509,6 +509,25 @@ began and turns once on release (`pageHeadMs`), a playhead past its edge preview
 1 s/2 s); and Frigate media reads through an LRU on-disk cache keyed without `authSig`, playlists
 always bypassing it (`VodCache.kt`). Shorter Frigate HLS segments would cut the per-seek download
 further — that is Frigate-side config, not in this repo.
+
+**Camera efficiency pass (2026-10-30, follow-up).** Four more measured costs, each now bounded on
+both platforms unless noted:
+- *Tiles behind the player.* With the lightbox open, all 14 wall tiles (~700 KB) kept refetching on
+  the snapshot beat behind an opaque backdrop. The beat now pauses while the lightbox is open and
+  ticks once on close (web: `useSnapshotPause` / `SnapshotPauseContext`, a separate stable context
+  so a hold never re-renders bucket consumers; Android: `HomeViewModel.openLightbox` gates
+  HomeScreen's tick loop).
+- *The footage lane on every open.* `frigate/recordings/get` for a 3-day window is ~725 KB and was
+  re-run per open and per battery-camera wake. It is now topped up incrementally per camera
+  (`lib/footageCache.ts` ⇄ `core/logic/FootageCache.kt`, 1:1, cache held by the source): union of
+  the cached spans and the tail since the last fetch (2 min overlap), coalesced at the MEDIA
+  tolerance; a full refetch every 10 min because a union cannot see retention deletions; an empty
+  full result is never cached, since the seam turns failures into `[]`.
+- *hls.js look-ahead (web only).* Defaults let it pull ~1.4 MB segments back-to-back after a seek;
+  `lib/hlsConfig.ts` holds it to 30 s ahead (60 s ceiling — one Frigate segment must fit) with a
+  60 s back buffer. Android's equivalent bounds are in `VideoPlayer`'s load control.
+- *Page turns mid-drag (web).* The web player now holds the VOD page where a drag began and turns
+  it once on release (`dragStartHead`), the twin of Android's `pageHeadMs`.
 The **timeline shows only playable recordings**
 (Ring-style: every block is watchable) — the selector's ~5 on ring, clip-bearing events on
 Frigate/demo; no history-derived markers. Scrubbing is **live**: `Timeline24h` streams the time

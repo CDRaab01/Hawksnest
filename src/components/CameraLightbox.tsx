@@ -5,6 +5,7 @@ import type { LogicalCamera } from "../lib/cameraModel";
 import { useLogicalCameras } from "../store/entityStore";
 import { viewTransitionNameFor } from "../store/cameraOverlay";
 import { CameraPlayer } from "./camera/CameraPlayer";
+import { useSnapshotPause } from "./snapshotBucketContext";
 
 interface Props {
   camera: LogicalCamera;
@@ -22,6 +23,8 @@ export function CameraLightbox({ camera, onClose }: Props) {
   const cameras = useLogicalCameras();
   const [activeId, setActiveId] = useState(camera.id);
   const active = cameras.find((c) => c.id === activeId) ?? camera;
+  // The backdrop hides the wall: stop refreshing tiles nobody can see while the player is open.
+  useSnapshotPause(true);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

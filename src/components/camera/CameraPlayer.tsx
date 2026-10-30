@@ -233,6 +233,9 @@ export function CameraPlayer({
   const [paused, setPaused] = useState(false);
   // True while a timeline drag is in flight — clip switches debounce against it.
   const scrubbing = useRef(false);
+  // Where the playhead was when the current drag began; null when no drag is in flight. The VOD
+  // page holds there for the whole drag and turns once on release — see `pageHead` below.
+  const [dragStartHead, setDragStartHead] = useState<number | null>(null);
   // The clip currently loaded in the player and its real media duration, once
   // known — refines timeline containment for open-ended (`endMs: null`) clips.
   const [loadedClip, setLoadedClip] = useState<{ id: string; durationMs: number } | null>(
@@ -254,6 +257,7 @@ export function CameraPlayer({
     setLoadedClip(null);
     setRingClip({ status: "idle" });
     scrubbing.current = false;
+    setDragStartHead(null);
   }, [camera.id]);
 
   // Demo/Frigate events come from the source; ring events come off the selector.
@@ -406,6 +410,7 @@ export function CameraPlayer({
 
   function seek(ms: number) {
     scrubbing.current = false;
+    setDragStartHead(null);
     setPlayhead(Math.round(Math.min(window.end, Math.max(window.start, ms))));
     setPaused(false);
   }
@@ -413,11 +418,13 @@ export function CameraPlayer({
   /** Live scrub: the playhead follows the drag; commit semantics stay on release (seek/onLive). */
   function scrub(ms: number) {
     scrubbing.current = true;
+    if (dragStartHead === null) setDragStartHead(headTime);
     setPlayhead(Math.round(Math.min(window.end, Math.max(window.start, ms))));
   }
 
   function goLive() {
     scrubbing.current = false;
+    setDragStartHead(null);
     setPlayhead("live");
   }
 
@@ -521,16 +528,21 @@ export function CameraPlayer({
   // is mostly gap, and a scrub into it yields null — "No saved recording for this moment" —
   // instead of a Retry that can never succeed. An unresolved lane (`[]`) keeps the plain page:
   // unknown is not none.
+  //
+  // During a drag the page is HELD where the drag began and turns once, on release — not once per
+  // 2 h page the pointer passes over, each of which cost a sign round trip, a fresh hls.js and a
+  // cold manifest for a page nobody stopped on. Twin of Android's `pageHeadMs` (ScrubPlayback.kt).
+  const pageHead = dragStartHead ?? headTime;
   const vodPage = useMemo(
     () =>
       isLive || isRing
         ? null
         : vodRangeFor(
-            headTime,
+            pageHead,
             { startMs: window.start, endMs: window.end },
             isFrigate ? frigateFootage : [],
           ),
-    [isLive, isRing, isFrigate, headTime, window.start, window.end, frigateFootage],
+    [isLive, isRing, isFrigate, pageHead, window.start, window.end, frigateFootage],
   );
   // Frigate VOD must be SIGNED or every segment 401s and the video is silently black — see
   // `Source.signedRecordingUrlAt`. Signing is a websocket round trip, so it resolves in an effect
@@ -581,7 +593,12 @@ export function CameraPlayer({
       : // Offset within the PAGE, not the window — the VOD's zero is the page start. Using
         // window.start here would seek to a plausible but wrong moment, which is worse than an
         // obvious failure because it looks like the recording is simply wrong.
-        vodPositionSecondsInPage(headTime, vodPage?.startMs ?? window.start);
+        // While a drag is held on its starting page, a playhead past the page's end previews that
+        // edge (the release turns the page and seeks exactly).
+        vodPositionSecondsInPage(
+          vodPage ? Math.min(headTime, vodPage.endMs) : headTime,
+          vodPage?.startMs ?? window.start,
+        );
 
   // Learn the loaded ring clip's real duration from the media, refining the
   // timeline block width + containment span for its open-ended event.

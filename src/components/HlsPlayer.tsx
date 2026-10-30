@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useMediaAspect } from "../lib/mediaAspect";
+import { HLS_BUFFER_CONFIG } from "../lib/hlsConfig";
 
 /** play()/pause() throw "not implemented" in jsdom and can reject on autoplay
  *  policy in browsers — swallow both so the player never crashes its host. */
@@ -171,8 +172,9 @@ export function HlsPlayer({
           // drops the query string. Get either half wrong and you get a black video with no
           // error: the master loads and everything after it 401s.
           const authSig = new URL(src, globalThis.location.origin).searchParams.get("authSig");
-          const hls = new Hls(
-            authSig || authToken
+          const hls = new Hls({
+            ...HLS_BUFFER_CONFIG,
+            ...(authSig || authToken
               ? {
                   xhrSetup: (xhr: XMLHttpRequest, url: string) => {
                     if (authSig && !url.includes("authSig=")) {
@@ -184,8 +186,8 @@ export function HlsPlayer({
                     if (authToken) xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
                   },
                 }
-              : undefined,
-          );
+              : {}),
+          });
           hls.loadSource(src);
           hls.attachMedia(video);
           hls.on(Hls.Events.ERROR, (_e: unknown, data: { fatal?: boolean }) => {

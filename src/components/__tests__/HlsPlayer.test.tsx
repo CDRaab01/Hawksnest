@@ -178,3 +178,34 @@ describe("HlsPlayer engine choice", () => {
     spy.mockRestore();
   });
 });
+
+describe("HlsPlayer buffer bounds", () => {
+  it("bounds hls.js's look-ahead and back buffer, alongside the auth hook", async () => {
+    const configs: unknown[] = [];
+    vi.doMock("hls.js", () => ({
+      default: class {
+        static isSupported() {
+          return true;
+        }
+        static Events = { ERROR: "hlsError" };
+        constructor(cfg: unknown) {
+          configs.push(cfg);
+        }
+        loadSource = vi.fn();
+        attachMedia = vi.fn();
+        on = vi.fn();
+        destroy = vi.fn();
+      },
+    }));
+    const { HlsPlayer: Player } = await import("../HlsPlayer");
+    const { HLS_BUFFER_CONFIG } = await import("../../lib/hlsConfig");
+    render(<Player src="http://x/vod/master.m3u8?authSig=abc" authToken="t" />);
+    await vi.waitFor(() => expect(configs).toHaveLength(1));
+    const cfg = configs[0] as Record<string, unknown>;
+    expect(cfg).toMatchObject(HLS_BUFFER_CONFIG);
+    expect(typeof cfg.xhrSetup).toBe("function");
+    // One Frigate segment is ~60 s; the ceiling must hold at least one or playback starves.
+    expect(HLS_BUFFER_CONFIG.maxMaxBufferLength).toBeGreaterThanOrEqual(60);
+    vi.doUnmock("hls.js");
+  });
+});

@@ -139,6 +139,9 @@ class HomeViewModel @Inject constructor(
 
     fun dismissAlert() = pushNav.dismissAlert()
 
+    /** The open lightbox, if any. Home pauses its tile snapshot beat while it covers the wall. */
+    val openLightbox: StateFlow<com.hawksnest.ui.cameras.CameraSession.Open?> = cameraSession.open
+
     /** Keep the open lightbox's switcher list fresh as the camera list recomposes. */
     fun updateLightboxCameras(cameras: List<CameraUi>) = cameraSession.updateCameras(cameras)
 

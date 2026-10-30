@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { SnapshotBucketProvider } from "../SnapshotBucket";
-import { useSnapshotBucket } from "../snapshotBucketContext";
+import { useSnapshotBucket, useSnapshotPause } from "../snapshotBucketContext";
 
 /** Renders both buckets so a test can assert what each camera kind would fetch. */
 function Probe() {
@@ -100,6 +100,65 @@ describe("SnapshotBucketProvider", () => {
     });
     // one beat + one open for Frigate, one beat for Ring
     expect(read("frigate")).toBe(102);
+    expect(read("ring")).toBe(101);
+  });
+});
+
+/** Stands in for the camera lightbox: holds the beat while mounted. */
+function Cover({ active = true }: { active?: boolean }) {
+  useSnapshotPause(active);
+  return null;
+}
+
+describe("SnapshotBucketProvider pause (camera lightbox)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    setVisibility(false);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does not tick while a cover holds the beat, then catches up once on release", () => {
+    const { rerender } = render(
+      <SnapshotBucketProvider seed={100} intervalMs={10_000}>
+        <Probe />
+        <Cover />
+      </SnapshotBucketProvider>,
+    );
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(read("ring")).toBe(100);
+
+    rerender(
+      <SnapshotBucketProvider seed={100} intervalMs={10_000}>
+        <Probe />
+      </SnapshotBucketProvider>,
+    );
+    // One catch-up tick, not six — the hidden beats are not replayed.
+    expect(read("ring")).toBe(101);
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(read("ring")).toBe(102);
+  });
+
+  it("stays paused until the LAST of nested holds releases", () => {
+    const tree = (a: boolean, b: boolean) => (
+      <SnapshotBucketProvider seed={100} intervalMs={10_000}>
+        <Probe />
+        <Cover active={a} />
+        <Cover active={b} />
+      </SnapshotBucketProvider>
+    );
+    const { rerender } = render(tree(true, true));
+    rerender(tree(false, true));
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(read("ring")).toBe(100);
+    rerender(tree(false, false));
     expect(read("ring")).toBe(101);
   });
 });

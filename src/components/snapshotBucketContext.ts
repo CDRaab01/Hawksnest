@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect } from "react";
 
 /**
  * Snapshot cache-buster "buckets" — counters appended to a camera's snapshot URL
@@ -57,4 +57,28 @@ export function useSnapshotBuckets(): SnapshotBuckets {
 export function useSnapshotBucket(isFrigate: boolean): number {
   const { shared, onOpen } = useSnapshotBuckets();
   return isFrigate ? onOpen : shared;
+}
+
+/**
+ * Pauses the shared beat while something covers the camera tiles — the open-camera lightbox.
+ * Measured 2026-10-30: with the player open, all 14 tiles (~700 KB) still refetched on every
+ * beat, behind an opaque backdrop, competing with the very video the user opened. Tiles nobody
+ * can see don't need fresh frames; one catch-up tick on release brings them current.
+ *
+ * Kept in its OWN context (a stable object) so registering a pause never re-renders consumers
+ * of the bucket counters, which change every beat.
+ */
+export interface SnapshotPauseController {
+  /** Hold the beat; returns the release. Holds nest — the beat resumes when the last releases. */
+  hold: () => () => void;
+}
+
+export const SnapshotPauseContext = createContext<SnapshotPauseController>({
+  hold: () => () => {},
+});
+
+/** Pause snapshot refreshes for as long as `active` is true and the caller is mounted. */
+export function useSnapshotPause(active: boolean): void {
+  const { hold } = useContext(SnapshotPauseContext);
+  useEffect(() => (active ? hold() : undefined), [active, hold]);
 }
