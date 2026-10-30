@@ -1,6 +1,7 @@
 package com.hawksnest.ui.cameras
 
 import android.net.Uri
+import android.os.SystemClock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -21,11 +22,13 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.RawResourceDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.hawksnest.R
 import com.hawksnest.core.logic.DEMO_CLIP_URI
+import kotlinx.coroutines.delay
 
 /**
  * ExoPlayer-backed `<video>` for camera footage — the live HLS feed (the `media3-exoplayer-hls`
@@ -44,6 +47,12 @@ fun VideoPlayer(
     live: Boolean = false,
     /** Scrub position (ms into the media). Seeks the prepared player — no re-prepare/reload. */
     seekToMs: Long? = null,
+    /**
+     * True while a timeline drag is in flight. Drag-driven seeks are spaced
+     * [SCRUB_SEEK_INTERVAL_MS] apart so each can land some media before the next cancels it; the
+     * release (this flipping back to false) always seeks immediately. See ScrubPlayback.kt.
+     */
+    scrubbing: Boolean = false,
     /** Reports the media duration (ms) once known — and again when it grows (an HLS event
      *  playlist's duration extends as segments append). */
     onDurationMs: ((Long) -> Unit)? = null,
@@ -91,7 +100,7 @@ fun VideoPlayer(
     //
     // Keyed on both so switching camera, page or session rebuilds the player with the right creds.
     val authSig = remember(url) { Uri.parse(url).getQueryParameter(AUTH_SIG_PARAM) }
-    val player = remember(authSig, authToken) {
+    val player = remember(authSig, authToken, liveStream) {
         val builder = ExoPlayer.Builder(context)
         if (authSig != null || authToken != null) {
             val http = DefaultHttpDataSource.Factory().apply {
@@ -100,8 +109,31 @@ fun VideoPlayer(
                 }
             }
             val factory: DataSource.Factory =
-                if (authSig != null) AuthSigDataSourceFactory(http, authSig) else http
+                if (authSig != null) {
+                    // Frigate VOD: media reads through the on-disk cache, so scrubbing back over
+                    // footage already fetched never re-downloads it (VodCache.kt).
+                    VodCache.factory(context, AuthSigDataSourceFactory(http, authSig))
+                } else {
+                    http
+                }
             builder.setMediaSourceFactory(DefaultMediaSourceFactory(factory))
+        }
+        if (!liveStream) {
+            // Recorded media: start on a short buffer (stock is 1 s, 2 s after a seek-induced
+            // stall — each scrub release paid it), and KEEP the last minute behind the playhead.
+            // Stock back-buffer is zero, so scrubbing backwards even a second re-downloaded the
+            // whole ~60 s / ~1.4 MB Frigate segment it had just played.
+            builder.setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        VOD_MIN_BUFFER_MS,
+                        VOD_MAX_BUFFER_MS,
+                        VOD_START_BUFFER_MS,
+                        VOD_REBUFFER_MS,
+                    )
+                    .setBackBuffer(VOD_BACK_BUFFER_MS, true)
+                    .build(),
+            )
         }
         builder.build().apply { volume = if (muted) 0f else 1f }
     }
@@ -168,9 +200,19 @@ fun VideoPlayer(
         player.playWhenReady = !paused
     }
 
-    LaunchedEffect(uri, seekToMs) {
+    // Uptime of the last seek, for spacing drag-driven seeks (scrubSeekDelayMs). Per player: a
+    // fresh page's first seek never waits on the old page's clock.
+    // A plain holder, not Compose state: it is bookkeeping, and a state write per seek would
+    // recompose the host on every drag step for nothing.
+    val seekClock = remember(player) { SeekClock() }
+    LaunchedEffect(uri, seekToMs, scrubbing) {
         // Scrubbing only applies to VOD; a live stream has no meaningful seek target.
         if (!liveStream && seekToMs != null) {
+            // A newer position relaunches this effect and cancels the wait, so the trailing seek
+            // is always the latest one — throttled, never dropped.
+            val wait = scrubSeekDelayMs(SystemClock.uptimeMillis(), seekClock.lastAtMs, scrubbing)
+            if (wait > 0) delay(wait)
+            seekClock.lastAtMs = SystemClock.uptimeMillis()
             // Clamp into the loaded media (duration is UNSET until prepared) and guard the call:
             // an out-of-range/ill-timed seek must never throw out of this effect and kill the app.
             val dur = player.duration
@@ -209,6 +251,18 @@ fun VideoPlayer(
         update = { view -> if (view.player !== player) view.player = player },
     )
 }
+
+/** Uptime of the last seek this player made (see scrubSeekDelayMs). */
+private class SeekClock {
+    var lastAtMs: Long? = null
+}
+
+/** Recorded-media buffering (see the load control above). min >= both play thresholds. */
+private const val VOD_START_BUFFER_MS = 500
+private const val VOD_REBUFFER_MS = 1_000
+private const val VOD_MIN_BUFFER_MS = 15_000
+private const val VOD_MAX_BUFFER_MS = 50_000
+private const val VOD_BACK_BUFFER_MS = 60_000
 
 /** Query parameter frigate-hass-integration requires on every VOD segment request. */
 private const val AUTH_SIG_PARAM = "authSig"

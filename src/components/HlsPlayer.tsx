@@ -22,11 +22,15 @@ function safePause(video: HTMLVideoElement): void {
  * A dependency-light `<video>` player for camera footage — the live HLS feed,
  * recorded VOD playlists, and (in demo) the bundled `camera-loop.mp4`.
  *
- * Plain `.mp4` and native-HLS browsers (Safari/iOS) play directly off
- * `video.src`. For `.m3u8` where the browser can't play HLS natively (Chrome/
- * Firefox), we lazy-load `hls.js` **only if it's installed** — it isn't needed
- * for demo (mp4) and gets added when Frigate/go2rtc land. If it's absent we call
- * `onError` so the parent's transport ladder falls back to MJPEG/snapshot.
+ * Plain `.mp4` plays directly off `video.src`. Every `.m3u8` goes through a lazy-loaded
+ * `hls.js` whenever the browser supports it (MSE), and native HLS is only the fallback for a
+ * browser without MSE (older iOS). hls.js FIRST, not native first: the browser's own HLS stack
+ * has no request hook, so it cannot re-attach a Frigate VOD's `authSig`/Bearer to derived
+ * requests, and the nested `index-*.m3u8` 401s. That was "Safari only" until Chrome shipped
+ * native HLS — `canPlayType("application/vnd.apple.mpegurl")` answers "maybe" on Chrome 155 —
+ * which silently moved desktop Chrome onto the native path and broke every recorded scrub
+ * ("Couldn't load this recording", measured 2026-10-30). If hls.js can't load and there is no
+ * native HLS we call `onError` so the parent's transport ladder falls back to MJPEG/snapshot.
  */
 export function HlsPlayer({
   src,
@@ -138,14 +142,21 @@ export function HlsPlayer({
     let destroy: (() => void) | undefined;
     let cancelled = false;
 
-    if (isHls && !nativeHls) {
-      // Non-native HLS: try hls.js if present; otherwise let the parent fall back.
+    // Native HLS only when hls.js is unavailable — see the component doc for why the order matters.
+    const playNatively = () => {
+      if (cancelled) return;
+      video.src = src;
+      safePlay(video);
+    };
+
+    if (isHls) {
       void import(/* @vite-ignore */ "hls.js")
         .then((mod) => {
           if (cancelled) return;
           const Hls = mod.default;
           if (!Hls?.isSupported?.()) {
-            onErrorRef.current?.();
+            if (nativeHls) playNatively();
+            else onErrorRef.current?.();
             return;
           }
           // Frigate VOD needs BOTH credentials on derived requests, for different reasons:
@@ -183,8 +194,10 @@ export function HlsPlayer({
           destroy = () => hls.destroy();
         })
         .catch(() => {
-          // hls.js not installed yet (pre-Frigate) — fall back gracefully.
-          if (!cancelled) onErrorRef.current?.();
+          // hls.js failed to load — native HLS if the browser has it, else let the parent fall back.
+          if (cancelled) return;
+          if (nativeHls) playNatively();
+          else onErrorRef.current?.();
         });
     } else {
       video.src = src;

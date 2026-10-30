@@ -110,3 +110,71 @@ describe("HlsPlayer source stability", () => {
     vi.doUnmock("hls.js");
   });
 });
+
+/**
+ * hls.js wins over native HLS whenever MSE is available. Chrome 155 answers "maybe" to
+ * `canPlayType("application/vnd.apple.mpegurl")`; preferring native there sent Frigate VOD down a
+ * stack with no request hook, the nested `index-*.m3u8` went out without credentials and 401'd,
+ * and every recorded scrub on desktop Chrome showed "Couldn't load this recording".
+ */
+describe("HlsPlayer engine choice", () => {
+  const mockHls = (supported: boolean, constructed: () => void) =>
+    vi.doMock("hls.js", () => ({
+      default: class {
+        static isSupported() {
+          return supported;
+        }
+        static Events = { ERROR: "hlsError" };
+        constructor() {
+          constructed();
+        }
+        loadSource = vi.fn();
+        attachMedia = vi.fn();
+        on = vi.fn();
+        destroy = vi.fn();
+      },
+    }));
+
+  it("uses hls.js even when the browser claims native HLS", async () => {
+    const spy = vi
+      .spyOn(HTMLMediaElement.prototype, "canPlayType")
+      .mockImplementation((t: string) => (/mpegurl/i.test(t) ? "maybe" : ""));
+    const constructed = vi.fn();
+    mockHls(true, constructed);
+    const { HlsPlayer: Player } = await import("../HlsPlayer");
+    const { container } = render(<Player src="http://x/vod/master.m3u8?authSig=abc" authToken="t" />);
+    await vi.waitFor(() => expect(constructed).toHaveBeenCalledTimes(1));
+    // The native path would have put the URL straight on the element.
+    expect(container.querySelector("video")!.getAttribute("src")).toBeNull();
+    vi.doUnmock("hls.js");
+    spy.mockRestore();
+  });
+
+  it("falls back to native HLS when hls.js is unsupported (no MSE)", async () => {
+    const spy = vi
+      .spyOn(HTMLMediaElement.prototype, "canPlayType")
+      .mockImplementation((t: string) => (/mpegurl/i.test(t) ? "maybe" : ""));
+    const constructed = vi.fn();
+    const onError = vi.fn();
+    mockHls(false, constructed);
+    const { HlsPlayer: Player } = await import("../HlsPlayer");
+    const { container } = render(<Player src="http://x/live/master.m3u8" onError={onError} />);
+    const video = container.querySelector("video")!;
+    await vi.waitFor(() => expect(video.getAttribute("src")).toBe("http://x/live/master.m3u8"));
+    expect(constructed).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    vi.doUnmock("hls.js");
+    spy.mockRestore();
+  });
+
+  it("reports an error when neither hls.js nor native HLS can play", async () => {
+    const spy = vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onError = vi.fn();
+    mockHls(false, vi.fn());
+    const { HlsPlayer: Player } = await import("../HlsPlayer");
+    render(<Player src="http://x/live/master.m3u8" onError={onError} />);
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    vi.doUnmock("hls.js");
+    spy.mockRestore();
+  });
+});

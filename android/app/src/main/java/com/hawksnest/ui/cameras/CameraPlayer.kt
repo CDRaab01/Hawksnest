@@ -280,6 +280,9 @@ fun CameraPlayer(
     var paused by remember(cam.id) { mutableStateOf(false) }
     // True while a timeline drag is in flight — clip switches debounce against it.
     var scrubbing by remember(cam.id) { mutableStateOf(false) }
+    // Where the playhead was when the current drag began. The VOD page holds there for the whole
+    // drag and turns once on release (pageHeadMs) — see ScrubPlayback.kt.
+    var dragStartHead by remember(cam.id) { mutableStateOf<Long?>(null) }
     // The clip loaded in the player and its real media duration (clipId → durationMs), once known —
     // refines timeline containment + chip width for open-ended (`endMs = null`) ring clips.
     var loadedClip by remember(cam.id) { mutableStateOf<Pair<String, Long>?>(null) }
@@ -608,11 +611,16 @@ fun CameraPlayer(
     // Reolink behind a Home Hub) is mostly gap, and a scrub into it yields null — "No saved
     // recording for this moment" — instead of a dead player. An unresolved lane keeps the plain
     // page: unknown is not none. Mirrors the web CameraPlayer.
-    val vodPage = remember(isLive, isRing, isFrigate, headTime, startMs, endMs, frigateFootage) {
+    //
+    // During a drag the page is held where the drag began (pageHeadMs): it turns once, on release,
+    // not once per 2 h the finger passes over — each turn is a sign round trip, a new ExoPlayer and
+    // a cold manifest for a page nobody stopped on.
+    val pageHead = pageHeadMs(headTime, scrubbing, dragStartHead)
+    val vodPage = remember(isLive, isRing, isFrigate, pageHead, startMs, endMs, frigateFootage) {
         if (isLive || isRing) {
             null
         } else {
-            vodRangeFor(headTime, TimeRange(startMs, endMs), if (isFrigate) frigateFootage else emptyList())
+            vodRangeFor(pageHead, TimeRange(startMs, endMs), if (isFrigate) frigateFootage else emptyList())
         }
     }
     // Frigate VOD must also be SIGNED or every segment 401s and the video is silently black — see
@@ -644,7 +652,9 @@ fun CameraPlayer(
         // Offset within the PAGE, not the window — the VOD's zero is the page start. Using
         // startMs here would seek to a plausible but wrong moment, which is worse than an obvious
         // failure because it looks like the recording itself is wrong.
-        else -> vodPositionMsInPage(headTime, vodPage?.startMs ?: startMs)
+        // While a drag is held on its starting page, a playhead past the page's edge previews
+        // that edge (seekOffsetInPage clamps); the release turns the page and seeks exactly.
+        else -> vodPage?.let { seekOffsetInPage(headTime, it) } ?: vodPositionMsInPage(headTime, startMs)
     }
 
     // Give the timeline the loaded clip's real span so chip width agrees with containment.
@@ -812,6 +822,7 @@ fun CameraPlayer(
                     paused = paused,
                     muted = muted,
                     seekToMs = seekToMs,
+                    scrubbing = scrubbing,
                     // Recordings report their shape too: the stage fits and zooms by it, and a
                     // camera that has not streamed live this session would otherwise be laid out
                     // as 16:9 (a panorama's double-tap then filled only half the stage).
@@ -1018,6 +1029,7 @@ fun CameraPlayer(
                 onSeek = ::seek,
                 footage = footageLane,
                 onScrub = { ms ->
+                    if (!scrubbing) dragStartHead = headTime
                     scrubbing = true
                     playhead = ms.coerceIn(startMs, endMs)
                 },

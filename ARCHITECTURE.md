@@ -488,8 +488,27 @@ URIs *relative* to the manifest and drop the query string, `VideoPlayer.kt` wrap
 `DataSource.Factory` to re-attach `authSig` to every request. One signature covers the whole
 window (the integration checks it as a path prefix), but it is scoped to that `start/end`, so a
 new scrub window re-signs. **Web closes the same gap in `HlsPlayer`** — hls.js `xhrSetup`
-re-attaches `authSig` (plus a Bearer for the nested `index-*.m3u8`); the caveat that remains is
-native HLS (Safari/iOS), which has no such hook and still 401s on segments.
+re-attaches `authSig` (plus a Bearer for the nested `index-*.m3u8`). **hls.js is therefore
+preferred over native HLS wherever MSE exists (2026-10-30)** — native has no request hook. The
+old order (native first) was "Safari only" until Chrome shipped native HLS: Chrome 155 answers
+`canPlayType("application/vnd.apple.mpegurl")` with "maybe", so desktop Chrome silently moved onto
+the native path, the nested index 401'd, and every recorded scrub showed "Couldn't load this
+recording". Native remains only the fallback for a browser without MSE (older iOS), which still
+has the 401 caveat.
+
+**Android scrub cost (2026-10-30).** Measured against the real VOD: every camera's HLS segment is
+~60 s / ~1.4 MB and the playlist declares no independent segments, so ExoPlayer cannot snap a
+seek to a keyframe — a seek costs the segment prefix up to the target. The timeline streamed
+`onScrub` on every pointer event, each became an exact `seekTo`, and each cancelled the load the
+previous one started, so nothing landed until the finger lifted; crossing a page boundary mid-drag
+also re-signed and built a new ExoPlayer per page crossed. Now (`ui/cameras/ScrubPlayback.kt`,
+Android-only — it is ExoPlayer's seek/buffer model, hls.js has its own): drag seeks are spaced
+150 ms apart (leading + trailing, the release always seeks at once); the page holds where the drag
+began and turns once on release (`pageHeadMs`), a playhead past its edge previewing the edge
+(`seekOffsetInPage`); recorded players keep a 60 s back buffer and start on 0.5 s (stock: zero and
+1 s/2 s); and Frigate media reads through an LRU on-disk cache keyed without `authSig`, playlists
+always bypassing it (`VodCache.kt`). Shorter Frigate HLS segments would cut the per-seek download
+further — that is Frigate-side config, not in this repo.
 The **timeline shows only playable recordings**
 (Ring-style: every block is watchable) — the selector's ~5 on ring, clip-bearing events on
 Frigate/demo; no history-derived markers. Scrubbing is **live**: `Timeline24h` streams the time
