@@ -25,7 +25,8 @@ import {
 } from "../lib/cameraEvents";
 import { clipRangeSeconds } from "../lib/clipExport";
 import { dedupeRingMqtt } from "../lib/dedupe";
-import { parseFrigateWsRecordings } from "../lib/ringFootage";
+import { parseFrigateWsRecordings, type FootageSpan } from "../lib/ringFootage";
+import { applyFootageFetch, planFootageFetch, type FootageCacheEntry } from "../lib/footageCache";
 import {
   buildAreaRegistry,
   buildDeviceIndex,
@@ -362,6 +363,9 @@ export function createHaSource(
   // (see the identity note there). Deliberately not `store().entities`: that map has already had
   // the shadowed ring twins removed, so feeding it back would rebuild those every push.
   let lastRecord: Record<string, HassEntity> = {};
+  // Per-camera footage lane, topped up incrementally (lib/footageCache.ts). Lives and dies with
+  // this source, so a credential change never serves another HA's lane.
+  const footageCache = new Map<string, FootageCacheEntry>();
 
   const store = () => useEntityStore.getState();
 
@@ -517,20 +521,30 @@ export function createHaSource(
     async fetchCameraFootage(camera, startMs, endMs) {
       // `frigate/recordings/get` — websocket-only, like events (see fetchFrigateEvents). One
       // entry per ~10s recording segment; parseFrigateWsRecordings coalesces to drawable spans.
+      // Topped up incrementally per camera (lib/footageCache.ts): a full 3-day lane is ~725 KB,
+      // and only its live-edge tail changes between opens.
       const socket = conn;
       if (!socket) return [];
+      const now = Date.now();
+      const cached = footageCache.get(camera);
+      const plan = planFootageFetch(cached, startMs, endMs, now);
+      let fresh: FootageSpan[];
       try {
         const result = await socket.sendMessagePromise<unknown>({
           type: "frigate/recordings/get",
           instance_id: frigateInstanceId(camera),
           camera,
-          after: Math.floor(startMs / 1000),
+          after: Math.floor(plan.fromMs / 1000),
           before: Math.floor(endMs / 1000),
         });
-        return parseFrigateWsRecordings(result);
+        fresh = parseFrigateWsRecordings(result);
       } catch {
-        return [];
+        // A failed top-up still has the cache to show; a failed full fetch is [], as before.
+        return plan.topUp && cached ? cached.spans.filter((sp) => sp.endMs > startMs) : [];
       }
+      const out = applyFootageFetch(cached, plan, fresh, startMs, endMs, now);
+      if (out.entry) footageCache.set(camera, out.entry);
+      return out.spans;
     },
     recordingUrlAt(camera, startMs, endMs) {
       return buildRecordingUrl(camera, startMs, endMs, withBase(FRIGATE_BASE, creds.url));

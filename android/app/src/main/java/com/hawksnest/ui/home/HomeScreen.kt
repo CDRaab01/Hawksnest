@@ -139,8 +139,22 @@ fun HomeScreen(
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    // Ticking stops while backgrounded — no point spending radio on tiles nobody sees.
-    LaunchedEffect(resumed) {
+    // Ticking stops while backgrounded — no point spending radio on tiles nobody sees. Likewise
+    // while the camera lightbox covers the wall: measured 2026-10-30 on web, every tile kept
+    // refetching behind the open player (~700 KB per beat for 14 cameras), competing with the
+    // video the user actually opened. Closing it ticks once so the wall is current, not one
+    // viewing-length stale.
+    val lightboxOpen = viewModel.openLightbox.collectAsState().value != null
+    var pausedForLightbox by remember { mutableStateOf(false) }
+    LaunchedEffect(resumed, lightboxOpen) {
+        if (lightboxOpen) {
+            pausedForLightbox = true
+            return@LaunchedEffect
+        }
+        if (pausedForLightbox) {
+            pausedForLightbox = false
+            ticks += 1
+        }
         if (!resumed) return@LaunchedEffect
         while (true) {
             delay(10_000)

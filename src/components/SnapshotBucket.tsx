@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   SnapshotBucketContext,
+  SnapshotPauseContext,
   type SnapshotBuckets,
+  type SnapshotPauseController,
 } from "./snapshotBucketContext";
 
 interface ProviderProps {
@@ -20,6 +22,10 @@ interface ProviderProps {
  * Returning to the tab bumps `onOpen` only. Ring stays on the shared beat: its proxy
  * is metered and its battery cameras are pinned to a 300s snapshot interval, so an
  * extra fetch on open buys the same image twice.
+ *
+ * The beat also stops while anything holds it (`useSnapshotPause` — the camera lightbox),
+ * and ticks once on the last release so the uncovered tiles are current rather than one
+ * pause-length stale.
  *
  * Both counters are SEEDED FROM THE CLOCK rather than starting at 0. Starting at 0
  * meant every cold load requested `..._=0` — byte-identical to the previous session's
@@ -40,9 +46,34 @@ export function SnapshotBucketProvider({
   );
   const [ticks, setTicks] = useState(0);
   const [opens, setOpens] = useState(0);
+  const [holds, setHolds] = useState(0);
+  const paused = holds > 0;
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wasPaused = useRef(false);
+
+  const pause = useMemo<SnapshotPauseController>(
+    () => ({
+      hold: () => {
+        let released = false;
+        setHolds((h) => h + 1);
+        return () => {
+          if (released) return;
+          released = true;
+          setHolds((h) => h - 1);
+        };
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
+    // Catch-up tick when the last hold releases, so uncovered tiles aren't pause-length stale.
+    if (wasPaused.current && !paused) setTicks((t) => t + 1);
+    wasPaused.current = paused;
+  }, [paused]);
+
+  useEffect(() => {
+    if (paused) return;
     const start = () => {
       if (timer.current !== null) return;
       timer.current = setInterval(() => setTicks((t) => t + 1), intervalMs);
@@ -68,7 +99,7 @@ export function SnapshotBucketProvider({
       document.removeEventListener("visibilitychange", onVisibility);
       stop();
     };
-  }, [intervalMs]);
+  }, [intervalMs, paused]);
 
   const value = useMemo<SnapshotBuckets>(
     () => ({
@@ -79,8 +110,10 @@ export function SnapshotBucketProvider({
   );
 
   return (
-    <SnapshotBucketContext.Provider value={value}>
-      {children}
-    </SnapshotBucketContext.Provider>
+    <SnapshotPauseContext.Provider value={pause}>
+      <SnapshotBucketContext.Provider value={value}>
+        {children}
+      </SnapshotBucketContext.Provider>
+    </SnapshotPauseContext.Provider>
   );
 }
