@@ -157,6 +157,9 @@ dependencies {
     // Android-only by necessity: browsers cannot speak RTSP, so web's ceiling stays WebRTC.
     implementation(libs.androidx.media3.exoplayer.rtsp)
     implementation(libs.androidx.media3.ui)
+    // Recorded-VOD disk cache (ui/cameras/VodCache.kt): CacheDataSource + StandaloneDatabaseProvider.
+    implementation(libs.androidx.media3.datasource)
+    implementation(libs.androidx.media3.database)
 
     // WebRTC (go2rtc/ring-mqtt low-latency live) — a maintained packaging of Google's libwebrtc that
     // exposes the standard `org.webrtc.*` API. Negotiated over HA's `camera/webrtc/offer`.
